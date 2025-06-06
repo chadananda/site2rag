@@ -1,5 +1,58 @@
 #!/usr/bin/env node
 
+import { ConfigManager } from '../src/config_manager.js';
+import { SiteProcessor } from '../src/site_processor.js';
+import { DefaultCrawlState } from '../src/crawl_state.js';
+import { CrawlDB } from '../src/db.js';
+import fs from 'fs';
+import path from 'path';
+
+// Basic CLI arg parsing
+const args = process.argv.slice(2);
+const hasInit = args.includes('--init');
+const domainArg = args.find(arg => !arg.startsWith('--'));
+const configPath = 'crawl.json';
+
+const configMgr = new ConfigManager();
+const created = configMgr.initConfigFile(configPath);
+
+if (hasInit) {
+  if (created) {
+    console.log('Created crawl.json with default configuration. Edit this file before running site2rag.');
+  } else {
+    console.log('crawl.json already exists.');
+  }
+  process.exit(0);
+}
+
+// Always load config from file (now guaranteed to exist)
+configMgr.loadFromFile(configPath);
+// Optionally merge CLI options here (not shown for brevity)
+configMgr.validate();
+
+if (!domainArg) {
+  console.error('Usage: npx site2rag <domain> [options]');
+  process.exit(1);
+}
+
+// Example: run the crawler
+const crawlState = new DefaultCrawlState(new CrawlDB('site2rag.sqlite'));
+const processor = new SiteProcessor(domainArg, {
+  crawlState,
+  outputDir: configMgr.config.output,
+  limit: configMgr.config.maxPages,
+  concurrency: configMgr.config.concurrency,
+  politeDelay: configMgr.config.politeDelay
+});
+
+processor.process().then(() => {
+  console.log('Crawl complete.');
+  process.exit(0);
+}).catch(e => {
+  console.error('Crawl failed:', e);
+  process.exit(1);
+});
+
 // site2rag CLI entry point
 // This file implements the main CLI logic for the site2rag tool.
 // For now, we use 'commander' for argument parsing. Add more commands as needed.

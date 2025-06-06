@@ -177,13 +177,11 @@ npx site2rag python.org/dev/peps
 npx site2rag docs.example.com --setup-advanced
 # → Prompts for crawl patterns, AI settings, processing options
 
-# AI-enhanced processing (requires local Ollama or API key)
-npx site2rag docs.example.com --ai-enhanced
-# → Intelligent content filtering + context injection
+# Use a custom config file
+npx site2rag docs.example.com --config ./my-crawl.json
 
-# Custom patterns  
-npx site2rag docs.example.com \
-  --include "*/api/*,*/guides/*" \
+# Override config with CLI options
+npx site2rag docs.example.com --output ./output --max-depth 3
   --exclude "*/blog/*" \
   --max-depth 5
 ```

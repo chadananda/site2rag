@@ -6,6 +6,17 @@ import robotsParser from 'robots-parser';
 import TurndownService from 'turndown';
 import fs from 'fs';
 
+// Simple glob matcher for URL paths (supports * and **)
+function matchGlob(pattern, path) {
+  // Special case: '/**' matches everything including '/'
+  if (pattern === '/**') return true;
+  // Escape regex special chars except *
+  let regex = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  regex = regex.replace(/\*\*/g, '.*'); // ** => .*
+  regex = regex.replace(/\*/g, '[^/]*'); // * => any except /
+  return new RegExp('^' + regex + '$').test(path);
+}
+
 function safeFilename(url) {
   try {
     const { pathname } = new URL(url);
@@ -56,6 +67,8 @@ export class SiteProcessor {
     this.outputDir = options.outputDir || './output';
     this.turndownService = new TurndownService();
     if (!fs.existsSync(this.outputDir)) fs.mkdirSync(this.outputDir, { recursive: true });
+    // For pattern-based crawling
+    this.crawlPatterns = (options.config && options.config.crawlPatterns) || options.crawlPatterns || ["/*"];
   }
 
   async fetchRobotsTxt() {
@@ -86,6 +99,13 @@ export class SiteProcessor {
     console.log(`[CRAWL] Enter: ${url} (depth ${depth}) visited=${this.visited.size} found=${this.found.length}`);
     if (this.visited.has(url) || this.found.length >= this.maxPages || depth > this.maxDepth) {
       console.log(`[CRAWL] Skip: ${url} (already visited or limit/depth reached)`);
+      return;
+    }
+    // Only crawl URLs matching a crawl pattern
+    const urlObj = new URL(url);
+    const pathOnly = urlObj.pathname;
+    if (!this.crawlPatterns.some(pattern => matchGlob(pattern, pathOnly))) {
+      console.log(`[CRAWL] Skip: ${url} (does not match crawlPatterns)`);
       return;
     }
     if (!(await this.canCrawl(url))) return;
@@ -229,3 +249,5 @@ if (process.env.NODE_ENV !== 'test' && process.argv[1] && process.argv[1].endsWi
     console.log('Found URLs:', found);
   })();
 }
+
+export { matchGlob };
