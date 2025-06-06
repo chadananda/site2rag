@@ -4,7 +4,7 @@
   "description": "CLI tool to convert websites into RAG-ready local markdown knowledge bases with AI-powered content improvement.",
   "main": "index.js",
   "bin": {
-    "site2rag": "index.js"
+    "site2rag": "bin/site2rag.js"
   },
   "repository": {
     "type": "git",
@@ -14,12 +14,17 @@
   "license": "MIT",
   "scripts": {
     "start": "node index.js",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:all": "vitest run",
+    "db-test": "vitest run tests/db.test.js"
   },
   "dependencies": {
-    "better-sqlite3": "^8.4.0",
+    "better-sqlite3": "^11.10.0",
     "cheerio": "^1.0.0-rc.12",
-    "p-limit": "^4.0.0",
+    "commander": "^14.0.0",
+    "node-fetch": "^3.3.2",
+    "p-limit": "^6.2.0",
+    "robots-parser": "^3.0.1",
     "turndown": "^7.1.2"
   },
   "type": "module",
