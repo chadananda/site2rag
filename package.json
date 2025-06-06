@@ -13,18 +13,22 @@
   "author": "chadananda",
   "license": "MIT",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "vitest run"
   },
   "dependencies": {
-    "cheerio": "^1.0.0-rc.12",
-    "turndown": "^7.1.2",
     "better-sqlite3": "^8.4.0",
-    "p-limit": "^4.0.0"
+    "cheerio": "^1.0.0-rc.12",
+    "p-limit": "^4.0.0",
+    "turndown": "^7.1.2"
   },
   "type": "module",
   "keywords": [],
   "bugs": {
     "url": "https://github.com/chadananda/site2rag/issues"
   },
-  "homepage": "https://github.com/chadananda/site2rag#readme"
+  "homepage": "https://github.com/chadananda/site2rag#readme",
+  "devDependencies": {
+    "vitest": "^3.2.2"
+  }
 }
