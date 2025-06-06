@@ -1,0 +1,30 @@
+{
+  "name": "site2rag",
+  "version": "0.1.0",
+  "description": "CLI tool to convert websites into RAG-ready local markdown knowledge bases with AI-powered content improvement.",
+  "main": "index.js",
+  "bin": {
+    "site2rag": "index.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chadananda/site2rag.git"
+  },
+  "author": "chadananda",
+  "license": "MIT",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0-rc.12",
+    "turndown": "^7.1.2",
+    "better-sqlite3": "^8.4.0",
+    "p-limit": "^4.0.0"
+  },
+  "type": "module",
+  "keywords": [],
+  "bugs": {
+    "url": "https://github.com/chadananda/site2rag/issues"
+  },
+  "homepage": "https://github.com/chadananda/site2rag#readme"
+}
