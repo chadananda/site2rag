@@ -215,7 +215,7 @@ export class CrawlService {
       
       // Convert to markdown and generate frontmatter
       const markdown = this.markdownService.toMarkdown(main);
-      const frontmatter = this.markdownService.addFrontmatter({
+      const markdownWithFrontmatter = this.markdownService.addFrontmatter(markdown, {
         title,
         url: normalizedUrl,
         crawled_at: new Date().toISOString(),
@@ -236,7 +236,7 @@ export class CrawlService {
         filePath = await this.fileService.saveMarkdown(
           hostname,
           filename + '.md', 
-          frontmatter + markdown
+          markdownWithFrontmatter
         );
         console.log(`- Saved to: ${filePath}`);
       } catch (err) {
