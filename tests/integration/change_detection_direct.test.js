@@ -6,7 +6,7 @@ import Database from 'better-sqlite3';
 import { DefaultCrawlState } from '../../src/crawl_state.js';
 import { CrawlService } from '../../src/services/crawl_service.js';
 
-describe('Change Detection Integration', () => {
+describe('Change Detection Integration (Direct DB)', () => {
   const TEST_URLS = ['https://example.com/a', 'https://example.com/b'];
   // Use a dedicated test directory to avoid conflicts
   const TEST_DIR = path.join(process.cwd(), 'tests', 'tmp_change_detection');

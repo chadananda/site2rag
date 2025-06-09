@@ -2,7 +2,7 @@
 /**
  * @interface CrawlState
  * getPage(url: string): PageRecord | undefined
- * upsertPage(page: PageRecord): void
+ * upsertPage(url: string, data: object): void
  */
 
 // DefaultCrawlState wraps CrawlDB to provide the interface
@@ -13,8 +13,14 @@ export class DefaultCrawlState {
   getPage(url) {
     return this.db.getPage(url);
   }
-  upsertPage(page) {
-    return this.db.upsertPage(page);
+  upsertPage(url, data) {
+    // If the first argument is an object with a url property, assume it's a page object
+    if (typeof url === 'object' && url !== null && 'url' in url) {
+      return this.db.upsertPage(url);
+    }
+    
+    // Otherwise, combine url and data into a single page object
+    return this.db.upsertPage({ url, ...data });
   }
 }
 

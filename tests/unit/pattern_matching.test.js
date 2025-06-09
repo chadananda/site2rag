@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { matchGlob } from '../../src/site_processor.js';
+import { matchGlob } from '../../src/site_processor_utils.js';
 
 const urls = [
   'https://oceanoflights.org/',

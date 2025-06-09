@@ -25,9 +25,6 @@ describe('Project Structure', () => {
     expect(fs.existsSync(path.join(root, 'README.md'))).toBe(true)
   })
 
-  it('should have a .crawlrc.json file', () => {
-    expect(fs.existsSync(path.join(root, '.crawlrc.json'))).toBe(true)
-  })
 
   it('should have required dependencies installed', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf-8'))

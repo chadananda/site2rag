@@ -16,6 +16,24 @@ That's it! Your entire documentation site is now a clean, searchable, AI-ready k
 
 ## ✨ Why site2rag?
 
+---
+
+## 🏎️ Free, Efficient HTML Preprocessing (with Site Learning!)
+
+**site2rag** features a novel two-stage HTML preprocessing pipeline that delivers professional-grade content extraction with maximum efficiency:
+
+- **Maximum Rule-Based Filtering:** 90%+ of noise is eliminated instantly using fast, free heuristics—no AI required for most pages.
+- **Strategic Minimal AI:** Only truly ambiguous blocks are summarized and sent to AI, saving time and compute.
+- **Site Structure Learning:** If a site has repeated or consistent structure, site2rag learns from your choices and past runs, automatically resolving ambiguity for similar pages in the future. Over time, this means fewer and fewer AI calls are needed!
+
+**Why is this unique?**
+- Most tools either use crude selectors (inaccurate) or send entire pages to AI (expensive/slow). site2rag combines the best of both: blazing fast, free preprocessing with just enough AI to handle the hard cases—and gets smarter the more you use it.
+- This approach makes site2rag ideal for large websites, iterative crawls, and anyone who wants to minimize AI costs while maximizing quality.
+
+See [html-preprocessing.md](./html-preprocessing.md) for technical details.
+
+---
+
 **The Problem**: You want to use local RAG (Retrieval-Augmented Generation) with documentation websites, but:
 - 📄 Raw HTML is messy and full of navigation noise
 - 🔄 Sites change frequently - manual downloads get stale

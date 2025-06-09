@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { CrawlDB } from '../src/db.js';
 
-const TEST_DIR = './tests/tmpdb';
+const TEST_DIR = path.join(process.cwd(), 'tests', 'tmpdb');
 const DB_PATH = path.join(TEST_DIR, 'test.db');
 
 beforeEach(() => {
@@ -23,7 +23,9 @@ describe('CrawlDB', () => {
       last_modified: 'yesterday',
       content_hash: 'hash',
       last_crawled: 'now',
-      status: 1
+      status: 1,
+      title: 'Test Title',
+      file_path: '/tmp/test.md'
     });
     const row = db.getPage('https://oceanoflights.org');
     expect(row).toBeDefined();

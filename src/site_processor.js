@@ -1,253 +1,241 @@
-import fetch from 'node-fetch';
-import { load } from 'cheerio';
-import pLimit from 'p-limit';
 import { URL } from 'url';
-import robotsParser from 'robots-parser';
-import TurndownService from 'turndown';
+import { CrawlLimitReached } from './errors.js';
+// Service imports
+import { UrlService } from './services/url_service.js';
+import { FetchService } from './services/fetch_service.js';
+import { ContentService } from './services/content_service.js';
+import { MarkdownService } from './services/markdown_service.js';
+import { FileService } from './services/file_service.js';
+import { CrawlStateService } from './services/crawl_state_service.js';
+import { CrawlService } from './services/crawl_service.js';
 import fs from 'fs';
-
-// Simple glob matcher for URL paths (supports * and **)
-function matchGlob(pattern, path) {
-  // Special case: '/**' matches everything including '/'
-  if (pattern === '/**') return true;
-  // Escape regex special chars except *
-  let regex = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
-  regex = regex.replace(/\*\*/g, '.*'); // ** => .*
-  regex = regex.replace(/\*/g, '[^/]*'); // * => any except /
-  return new RegExp('^' + regex + '$').test(path);
-}
-
-function safeFilename(url) {
-  try {
-    const { pathname } = new URL(url);
-    let file = pathname.replace(/\/+$/, '') || 'index';
-    file = file.replace(/[^a-zA-Z0-9-_\.]+/g, '_');
-    if (!file.endsWith('.md')) file += '.md';
-    return file;
-  } catch {
-    return 'page.md';
-  }
-}
-
-function normalizeUrl(url) {
-  try {
-    const u = new URL(url);
-    // Remove duplicate slashes, normalize trailing slash
-    let pathname = u.pathname.replace(/\/+/g, '/');
-    if (pathname !== '/' && pathname.endsWith('/')) pathname = pathname.slice(0, -1);
-    u.pathname = pathname;
-    u.hash = '';
-    u.search = '';
-    return u.href;
-  } catch {
-    return url;
-  }
-}
-
-class CrawlLimitReached extends Error {
-  constructor() {
-    super('Crawl limit reached');
-    this.name = 'CrawlLimitReached';
-  }
-}
-
+import path from 'path';
+/**
+ * Main site processor that coordinates the crawling and processing pipeline
+ */
 export class SiteProcessor {
+  /**
+   * Creates a new SiteProcessor instance
+   * @param {string} startUrl - URL to start crawling from
+   * @param {Object} options - Configuration options
+   * @param {number} options.limit - Maximum pages to crawl
+   * @param {number} options.maxDepth - Maximum crawl depth
+   * @param {number} options.politeWaitMs - Time to wait between requests in ms
+   * @param {string} options.outputDir - Output directory for markdown files
+   * @param {Object} options.aiConfig - AI service configuration
+   */
   constructor(startUrl, options = {}) {
-    this.startUrl = /^https?:/.test(startUrl) ? startUrl : `https://${startUrl}`;
-    this.limit = pLimit(Number(options.concurrency) || 4);
-    this.maxPages = Number(options.limit) || 100;
-    this.maxDepth = Number(options.maxDepth) || 3;
-    this.visited = new Set();
-    this.found = [];
-    this.robots = null;
-    this.domain = new URL(this.startUrl).origin;
-    this.politeDelay = 1000; // ms between requests
-    this.crawlState = options.crawlState || null; // Abstracted crawl state
-    this.activeControllers = new Set(); // Track AbortControllers
-    this.outputDir = options.outputDir || './output';
-    this.turndownService = new TurndownService();
-    if (!fs.existsSync(this.outputDir)) fs.mkdirSync(this.outputDir, { recursive: true });
-    // For pattern-based crawling
-    this.crawlPatterns = (options.config && options.config.crawlPatterns) || options.crawlPatterns || ["/*"];
-  }
-
-  async fetchRobotsTxt() {
+    let hostname, domain;
     try {
-      const robotsUrl = new URL('/robots.txt', this.domain).href;
-      const res = await fetch(robotsUrl);
-      if (!res.ok) return null;
-      const txt = await res.text();
-      this.robots = robotsParser(robotsUrl, txt);
-    } catch (e) {
-      this.robots = null;
-    }
-  }
-
-  async canCrawl(url) {
-    if (!this.robots) return true;
-    return this.robots.isAllowed(url, '*');
-  }
-
-  async crawl(url, depth = 0) {
-    if (!this.crawlState) throw new Error('SiteProcessor requires a crawlState instance for re-crawl detection and aborts.');
-    if (this.found.length >= this.maxPages) {
-      console.log(`[CRAWL] Throwing CrawlLimitReached at ${url}`);
-      throw new CrawlLimitReached();
-    }
-    url = normalizeUrl(url);
-    console.log(`[CRAWL] Enter: ${url} (depth ${depth}) visited=${this.visited.size} found=${this.found.length}`);
-    console.log(`[CRAWL] Enter: ${url} (depth ${depth}) visited=${this.visited.size} found=${this.found.length}`);
-    if (this.visited.has(url) || this.found.length >= this.maxPages || depth > this.maxDepth) {
-      console.log(`[CRAWL] Skip: ${url} (already visited or limit/depth reached)`);
-      return;
-    }
-    // Only crawl URLs matching a crawl pattern
-    const urlObj = new URL(url);
-    const pathOnly = urlObj.pathname;
-    if (!this.crawlPatterns.some(pattern => matchGlob(pattern, pathOnly))) {
-      console.log(`[CRAWL] Skip: ${url} (does not match crawlPatterns)`);
-      return;
-    }
-    if (!(await this.canCrawl(url))) return;
-    if (this.found.length >= this.maxPages) {
-      console.log(`[CRAWL] Max pages reached (${this.maxPages}), stopping crawl.`);
-      // Abort all active fetches
-      for (const ctrl of this.activeControllers) ctrl.abort();
-      this.activeControllers.clear();
-      return;
-    }
-    try {
-      // Check DB for previous crawl
-      const prev = this.crawlState.getPage(url);
-      const headers = {};
-      if (prev) {
-        if (prev.etag) headers['If-None-Match'] = prev.etag;
-        if (prev.last_modified) headers['If-Modified-Since'] = prev.last_modified;
-      }
-      // AbortController for this fetch
-      const controller = new AbortController();
-      this.activeControllers.add(controller);
-      console.log(`[CRAWL][DEBUG] About to fetch and write Markdown for: ${url}`);
-      let res;
-      try {
-        res = await fetch(url, { redirect: 'follow', headers, signal: controller.signal });
-      } finally {
-        this.activeControllers.delete(controller);
-      }
-      if (res.status === 304) {
-        // Not modified: update last_crawled, skip parsing
-        console.log(`[CRAWL] Not modified: ${url}`);
-        this.crawlState.upsertPage({
-          url,
-          etag: prev ? prev.etag : null,
-          last_modified: prev ? prev.last_modified : null,
-          content_hash: prev ? prev.content_hash : null,
-          last_crawled: new Date().toISOString(),
-          status: 1
-        });
-        return;
-      }
-      if (!res.ok) {
-        console.log(`[CRAWL] Fetch failed: ${url} (${res.status})`);
-        return;
-      }
-      const html = await res.text();
-      // Mark as visited/found only after successful fetch
-      this.visited.add(url);
-      this.found.push(url);
-      // Always convert HTML to Markdown and write to file for every fetched page
-      try {
-        const md = this.turndownService.turndown(html);
-        const filePath = this.outputDir + '/' + safeFilename(url);
-        fs.mkdirSync(require('path').dirname(filePath), { recursive: true });
-        fs.writeFileSync(filePath, md);
-        console.log(`[CRAWL] Markdown written: ${filePath}`);
-      } catch (e) {
-        console.error(`[CRAWL] Markdown conversion/writing failed for ${url}:`, e);
-      }
-      // (No early return here; Markdown is always written if fetch succeeds)
-      if (depth < this.maxDepth) {
-        console.log(`[CRAWL] Parsing links for: ${url}`);
-        const $ = load(html);
-        let links = Array.from(new Set(
-          $('a[href]')
-            .map((_, el) => $(el).attr('href'))
-            .get()
-            .filter(href => href && !href.startsWith('javascript:'))
-            .map(href => {
-              try {
-                return normalizeUrl(new URL(href, url).href);
-              } catch {
-                return null;
-              }
-            })
-            .filter(href => href && href.startsWith(this.domain) && !this.visited.has(href))
-        ));
-        // Only crawl up to remaining allowed pages
-        const remaining = this.maxPages - this.found.length;
-        if (links.length > remaining) links = links.slice(0, remaining);
-        console.log(`[CRAWL] Discovered ${links.length} links on: ${url} (crawling up to ${remaining})`);
-        if (this.found.length >= this.maxPages || links.length === 0) {
-          console.log(`[CRAWL] Early return at ${url} (limit hit or no links)`);
-          return;
-        }
-        try {
-          await Promise.all(
-            links.map(link =>
-              this.found.length < this.maxPages
-                ? this.limit(() => this.crawl(link, depth + 1))
-                : Promise.resolve()
-            )
-          );
-        } catch (err) {
-          if (err instanceof CrawlLimitReached) {
-            console.log(`[CRAWL] Caught CrawlLimitReached in children at ${url}`);
-            throw err;
-          } else {
-            throw err;
-          }
-        }
-      }
-    } catch (e) {
-      if (e instanceof CrawlLimitReached) {
-        console.log(`[CRAWL] Caught CrawlLimitReached at ${url}`);
-        throw e;
-      }
-      // Could add retry/backoff here
-      console.log(`[CRAWL] Error in fetch for ${url}:`, e);
-    }
-    // Only delay after a real fetch (not early returns)
-    console.log(`[CRAWL] Done: ${url} (depth ${depth}), delaying`);
-    await new Promise(r => setTimeout(r, this.politeDelay));
-    return;
-  }
-
-  async process() {
-    this.visited = new Set();
-    this.found = [];
-    await this.fetchRobotsTxt();
-    try {
-      await this.crawl(this.startUrl, 0);
+      // Try to parse the URL (will throw if invalid)
+      const url = new URL(startUrl);
+      hostname = url.hostname;
+      domain = url.origin;
     } catch (err) {
-      if (err instanceof CrawlLimitReached) {
-        console.log('[PROCESS] CrawlLimitReached: finishing crawl');
-      } else {
+      // Handle case where startUrl isn't a valid URL (e.g., a file path)
+      hostname = startUrl.split('/').pop() || 'output';
+      domain = '';
+      console.warn(`Warning: '${startUrl}' is not a valid URL. Using '${hostname}' as output directory name.`);
+    }
+    // Create a unified options object with all configuration values
+    this.options = {
+      startUrl,
+      domain,
+      maxPages: options.limit !== undefined ? options.limit : -1,
+      maxDepth: options.maxDepth !== undefined ? options.maxDepth : -1,
+      politeWaitMs: options.politeWaitMs || 1000,
+      outputDir: options.outputDir || options.output || `${process.cwd()}/${hostname}`,
+      aiConfig: options.aiConfig || {}
+    };
+    // Initialize services as instance properties
+    const { outputDir, politeWaitMs, aiConfig } = this.options;
+    this.fileService = new FileService({ outputDir });
+    this.urlService = new UrlService();
+    this.fetchService = new FetchService({ politeWaitMs });
+    this.contentService = new ContentService({ aiConfig });
+    this.markdownService = new MarkdownService();
+    this.crawlStateService = options.crawlState || new CrawlStateService({ outputDir, fileService: this.fileService });
+    // Copy configuration options to instance properties for backward compatibility
+    Object.assign(this, this.options);
+    // Proxy methods for backward compatibility
+    /**
+     * Proxy method to FetchService.fetchRobotsTxt for backward compatibility
+     * @param {string} domain - Domain to fetch robots.txt from
+     * @returns {Promise<boolean>} - Whether robots.txt was successfully fetched
+     */
+    this.fetchRobotsTxt = async (domain = this.options.domain) => {
+      return await this.fetchService.fetchRobotsTxt(domain);
+    };
+    /**
+     * Proxy method to FetchService.canCrawl for backward compatibility
+     * @param {string} url - URL to check
+     * @returns {boolean} - Whether the URL can be crawled
+     */
+    this.canCrawl = (url) => {
+      return this.fetchService.canCrawl(url);
+    };
+    // Define getter for robots property
+    Object.defineProperty(this, 'robots', {
+      get: () => this.fetchService.robots
+    });
+    // Create the main crawl service that coordinates everything
+    this.crawlService = new CrawlService({
+      ...this.options,
+      fileService: this.fileService,
+      urlService: this.urlService,
+      fetchService: this.fetchService,
+      contentService: this.contentService,
+      markdownService: this.markdownService,
+      crawlStateService: this.crawlStateService
+    });
+    // State tracking for this instance
+    this.visited = new Set();
+    this.found = [];
+    this.linkMap = {};
+  }
+  /**
+   * Process the site by crawling it and running post-processing
+   * @returns {Promise<string[]>} - Array of crawled URLs
+   */
+  async process() {
+    console.log(`SiteProcessor.process: Starting with domain=${this.options.domain}, outputDir=${this.options.outputDir}`);
+    
+    // Ensure output directory exists
+    if (!fs.existsSync(this.options.outputDir)) {
+      console.log(`Creating output directory: ${this.options.outputDir}`);
+      fs.mkdirSync(this.options.outputDir, { recursive: true });
+    }
+    
+    // Create .site2rag directory inside output directory
+    const site2ragDir = path.join(this.options.outputDir, '.site2rag');
+    if (!fs.existsSync(site2ragDir)) {
+      console.log(`Creating .site2rag directory: ${site2ragDir}`);
+      fs.mkdirSync(site2ragDir, { recursive: true });
+    }
+    
+    this.visited = new Set();
+    this.found = [];
+    try {
+      console.log('Processing sitemaps...');
+      await this.crawlService.processSitemaps(this.options.domain);
+      console.log('Starting site crawl...');
+      this.found = await this.crawlService.crawlSite(this.options.startUrl);
+      console.log(`Crawl completed with ${this.found.length} URLs found`);
+      if (this.found.length === 1 && this.options.maxDepth === 0) {
+        console.log('Single page crawl completed, skipping post-processing');
+        return this.found;
+      }
+      console.log('Running post-crawl pipeline...');
+      await this.runPostCrawlPipeline();
+      console.log('Post-crawl pipeline completed');
+    } catch (err) {
+      if (!(err instanceof CrawlLimitReached)) {
+        console.error('Error during crawl:', err);
         throw err;
+      } else {
+        console.log('Crawl limit reached, stopping crawl');
       }
     }
     return this.found;
   }
-}
+  /**
+   * Runs the post-crawl pipeline for context enrichment and PDF conversion
+   * @returns {Promise<void>}
+   * @private
+   */
+  async runPostCrawlPipeline() {
+    try {
+      // Validate domain before using it
+      let hostname = '';
+      if (this.options.domain) {
+        try {
+          const url = new URL(this.options.domain);
+          hostname = url.hostname;
+        } catch (urlError) {
+          console.warn(`Invalid domain URL: ${this.options.domain}. Using fallback hostname.`);
+          // Use the domain string as hostname if it's not a valid URL
+          hostname = this.options.domain.replace(/[^a-zA-Z0-9.-]/g, '');
+        }
+      } else {
+        console.warn('No domain provided for post-crawl pipeline. Using default hostname.');
+        hostname = 'unknown-domain';
+      }
+      
+      // Save final crawl state if the method exists
+      if (this.crawlStateService && typeof this.crawlStateService.saveState === 'function') {
+        await this.crawlStateService.saveState(hostname);
+      }
 
-// For quick manual test
+      // Run context enrichment
+      try {
+        const { runContextEnrichment } = await import('./context.js');
+        const { getDB } = await import('./db.js');
+        
+        // Create proper database path in .site2rag directory - use normalize instead of join to avoid absolute paths
+        const dbPath = path.normalize(`${this.options.outputDir}/.site2rag/crawl.db`);
+        console.log(`Using database path for context enrichment: ${dbPath}`);
+        
+        const dbInstance = getDB(dbPath);
+        if (!dbInstance) throw new Error('SiteProcessor: database instance required for context enrichment');
+        await runContextEnrichment(dbInstance, this.options.aiConfig);
+      } catch (contextErr) {
+        console.error('Context enrichment error:', contextErr.message);
+      }
+
+      // PDF conversion (if enabled)
+      if (this.options.aiConfig && this.options.aiConfig.pdfApiEnabled) {
+        try {
+          // await runPdfConversionTask(dbInstance, this.options.aiConfig); // Implement as needed
+        } catch (pdfErr) {
+          console.error('PDF conversion error:', pdfErr.message);
+        }
+      }
+
+      // Run context enrichment again for new MDs from PDFs
+      try {
+        const { runContextEnrichment } = await import('./context.js');
+        const { getDB } = await import('./db.js');
+        
+        // Create proper database path in .site2rag directory - use normalize instead of join to avoid absolute paths
+        const dbPath = path.normalize(`${this.options.outputDir}/.site2rag/crawl.db`);
+        console.log(`Using database path for secondary context enrichment: ${dbPath}`);
+        
+        const dbInstance = getDB(dbPath);
+        await runContextEnrichment(dbInstance, this.options.aiConfig);
+      } catch (contextErr) {
+        console.error('Secondary context enrichment error:', contextErr.message);
+      }
+    } catch (err) {
+      throw err;
+    }
+  }
+}
+// Command-line interface for quick testing
 if (process.env.NODE_ENV !== 'test' && process.argv[1] && process.argv[1].endsWith('site_processor.js')) {
-  const url = process.argv[2] || 'https://oceanoflights.org';
-  const limit = process.argv[3] || 5;
+  // Handle --help flag
+  if (!process.argv[2] || process.argv[2] === '--help' || process.argv[2] === '-h') {
+    console.log('Usage: node src/site_processor.js <url> [limit]');
+    console.log('Example: node src/site_processor.js https://example.com 10');
+    process.exit(0);
+  }
+  const url = process.argv[2];
+  const limit = parseInt(process.argv[3] || '5', 10);
   (async () => {
-    const sp = new SiteProcessor(url, { limit });
-    const found = await sp.process();
-    console.log('Found URLs:', found);
+    try {
+      // Validate URL before proceeding
+      try {
+        new URL(url); // This will throw if URL is invalid
+      } catch (e) {
+        console.error(`Error: '${url}' is not a valid URL. Please provide a URL with protocol (e.g., https://example.com)`);
+        process.exit(1);
+      }
+      console.log(`Starting crawl of ${url} with limit ${limit}...`);
+      const sp = new SiteProcessor(url, { limit });
+      const found = await sp.process();
+      console.log(`Crawled ${found.length} pages:`, found);
+    } catch (err) {
+      console.error('Error during crawl:', err);
+      process.exit(1);
+    }
   })();
 }
-
-export { matchGlob };

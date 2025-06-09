@@ -2,7 +2,7 @@
 
 ## Overview
 
-A Node.js CLI tool designed for `npx` execution that converts entire websites into maintained, RAG-ready local knowledge bases with intelligent change detection and asset management. Optimized for local RAG workflows and research applications.
+A CLI tool designed for `npx` execution that converts entire websites into maintained, RAG-ready local knowledge bases with intelligent change detection and asset management. Optimized for local RAG workflows and research applications.
 
 ## Core Value Proposition
 
@@ -21,7 +21,7 @@ A Node.js CLI tool designed for `npx` execution that converts entire websites in
 
 **As a researcher, I want to:**
 - Download an entire documentation site for offline analysis
-- Update only changed content on subsequent crawls
+- Quickly update only changed content on subsequent crawls
 - Have clean markdown with proper citations for each page
 - Access all site assets (images, documents) locally
 
@@ -40,7 +40,7 @@ A Node.js CLI tool designed for `npx` execution that converts entire websites in
 ## Core Features
 
 ### 1. Intelligent Site Crawling
-- **Recursive discovery** starting from seed URL
+- **Recursive discovery** starting from URL
 - **Respect robots.txt** and rate limiting
 - **Smart boundary detection** (stay within domain/path)
 - **Duplicate URL handling** (normalize URLs, handle redirects)
@@ -277,14 +277,14 @@ npx site2rag --clean [--output ./dir]
 
 ## Configuration System
 
-### Config File (.crawlrc.json)
+### Config File (<site-project>/.site2rag/crawl.json)
 ```json
 {
   "default": {
     "concurrency": 2,
     "delay": 500,
     "max_depth": 3,
-    "user_agent": "CrawlCLI/1.0 (+https://github.com/company/crawl-cli)"
+    "user_agent": "site2rag/1.0 (+https://github.com/company/site2rag)"
   },
   "filters": {
     "content_selectors": ["main", "article", ".content", "#content"],
@@ -367,3 +367,4 @@ npx site2rag --clean [--output ./dir]
 - **SEO metrics**: Extract meta descriptions, keywords, structure
 
 This design gives users the flexibility to optimize for their specific use case - file system for RAG workflows, database for programmatic access - while maintaining the same simple CLI interface and efficient re-crawling behavior.
+

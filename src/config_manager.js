@@ -69,7 +69,16 @@ export class ConfigManager {
    */
   initConfigFile(configPath = 'crawl.json') {
     if (!fs.existsSync(configPath)) {
+      // Ensure the directory exists
+      const dirPath = path.dirname(configPath);
+      if (!fs.existsSync(dirPath)) {
+        fs.mkdirSync(dirPath, { recursive: true });
+        console.log(`Created directory: ${dirPath}`);
+      }
+      
+      // Write the config file
       fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
+      console.log(`Created config file: ${configPath}`);
       return true;
     }
     return false;
