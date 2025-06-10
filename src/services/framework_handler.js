@@ -4,6 +4,7 @@
  */
 
 import { generateFullSelectorPath, analyzeSelectorPath, isLikelyFrameworkWrapper } from './selector_utils.js';
+import logger from './logger_service.js';
 
 /**
  * Identifies and handles framework-specific wrappers in the DOM
@@ -16,7 +17,7 @@ export function handleFrameworkWrappers($, body, options = {}) {
   const debug = options.debug || false;
   const removedBlocks = options.removedBlocks || null;
   
-  console.log('[FRAMEWORK] Analyzing DOM for framework-specific wrappers');
+  logger.info('[FRAMEWORK] Analyzing DOM for framework-specific wrappers');
   
   // Track decisions if we're in debug mode
   const trackDecision = (selector, decision, reason) => {
@@ -129,7 +130,7 @@ export function handleFrameworkWrappers($, body, options = {}) {
     const $wrapper = $(selector);
     if ($wrapper.length > 0) {
       frameworkWrapper = $wrapper;
-      console.log(`[FRAMEWORK] Found framework wrapper: ${selector}`);
+      logger.info(`[FRAMEWORK] Found framework wrapper: ${selector}`);
       trackDecision(selector, 'identify', 'Framework wrapper element');
       break;
     }
@@ -143,7 +144,7 @@ export function handleFrameworkWrappers($, body, options = {}) {
   // Log what we found
   Object.entries(semanticSections).forEach(([type, element]) => {
     if (element) {
-      console.log(`[FRAMEWORK] Found ${type} element: ${element.prop('tagName')}`);
+      logger.info(`[FRAMEWORK] Found ${type} element: ${element.prop('tagName')}`);
     }
   });
   
@@ -161,7 +162,7 @@ export function extractMainContent($, body, options = {}) {
   const debug = options.debug || false;
   const removedBlocks = options.removedBlocks || null;
   
-  console.log('[FRAMEWORK] Starting content extraction with tree-walking approach');
+  logger.info('[FRAMEWORK] Starting content extraction with tree-walking approach');
   
   // Track decisions if we're in debug mode
   const trackDecision = (selector, decision, reason) => {
@@ -178,7 +179,7 @@ export function extractMainContent($, body, options = {}) {
   
   // If we found content through semantic elements, use it
   if (mainContent && mainContent.length > 0) {
-    console.log('[FRAMEWORK] Found content through semantic elements');
+    logger.info('[FRAMEWORK] Found content through semantic elements');
     const selectorPath = generateFullSelectorPath($, mainContent);
     trackDecision(selectorPath, 'keep', 'Semantic content element');
     
@@ -198,7 +199,7 @@ export function extractMainContent($, body, options = {}) {
   }
   
   // If no semantic content was found, try our tree-walking approach
-  console.log('[FRAMEWORK] No semantic content found, trying tree-walking approach');
+  logger.info('[FRAMEWORK] No semantic content found, trying tree-walking approach');
   
   // Store content candidates with their scores
   const contentCandidates = [];
@@ -222,7 +223,7 @@ export function extractMainContent($, body, options = {}) {
     const frameworkAnalysis = isLikelyFrameworkWrapper(selectorPath);
     if (frameworkAnalysis.isFramework) {
       // Log the framework detection
-      console.log(`[FRAMEWORK] Detected framework wrapper: ${selectorPath} (score: ${frameworkAnalysis.score})`);
+      logger.info(`[FRAMEWORK] Detected framework wrapper: ${selectorPath} (score: ${frameworkAnalysis.score})`);
       if (debug) {
         trackDecision(selectorPath, 'framework', `Framework wrapper detected: ${frameworkAnalysis.detectedPatterns.join(', ')}`);
       }
@@ -301,16 +302,16 @@ export function extractMainContent($, body, options = {}) {
   
   // Log top candidates for debugging
   if (contentCandidates.length > 0) {
-    console.log('[FRAMEWORK] Top content candidates:');
+    logger.info('[FRAMEWORK] Top content candidates:');
     contentCandidates.slice(0, 3).forEach((candidate, i) => {
-      console.log(`[FRAMEWORK] Candidate ${i+1}: Score ${candidate.score.toFixed(1)}, Text length: ${candidate.textLength}, Path: ${candidate.selectorPath}`);
+      logger.info(`[FRAMEWORK] Candidate ${i+1}: Score ${candidate.score.toFixed(1)}, Text length: ${candidate.textLength}, Path: ${candidate.selectorPath}`);
     });
   }
   
   // Use the highest scoring candidate
   if (contentCandidates.length > 0) {
     const bestCandidate = contentCandidates[0];
-    console.log(`[FRAMEWORK] Selected best candidate: ${bestCandidate.selectorPath}`);
+    logger.info(`[FRAMEWORK] Selected best candidate: ${bestCandidate.selectorPath}`);
     
     // Track this decision
     trackDecision(bestCandidate.selectorPath, 'keep', `Best content candidate (score: ${bestCandidate.score.toFixed(1)})`);
@@ -331,6 +332,6 @@ export function extractMainContent($, body, options = {}) {
   }
   
   // If we couldn't find any content, return null
-  console.log('[FRAMEWORK] No suitable content candidates found');
+  logger.info('[FRAMEWORK] No suitable content candidates found');
   return null;
 }

@@ -340,7 +340,7 @@ export function extractMainContent($, body, options = {}) {
   const removedBlocks = options.removedBlocks;
   const trackSelectorDecision = options.trackSelectorDecision || (() => {});
   
-  console.log('[CONTENT] Starting content extraction with top-down hierarchical approach');
+  logger.info('[CONTENT] Starting content extraction with top-down hierarchical approach');
   
   // Helper function to track decisions
   const trackDecision = (element, decision, reason) => {
@@ -418,21 +418,21 @@ export function extractMainContent($, body, options = {}) {
   // These are high-confidence markers that don't require further analysis
   const semanticMain = $('main');
   if (semanticMain.length > 0) {
-    console.log('[CONTENT] Found semantic <main> element');
+    logger.info('[CONTENT] Found semantic <main> element');
     trackDecision(semanticMain, 'keep', 'Semantic main element');
     return semanticMain;
   }
   
   const article = $('article').first();
   if (article.length > 0) {
-    console.log('[CONTENT] Found semantic <article> element');
+    logger.info('[CONTENT] Found semantic <article> element');
     trackDecision(article, 'keep', 'Semantic article element');
     return article;
   }
   
   const roleMain = $('[role="main"]').first();
   if (roleMain.length > 0) {
-    console.log('[CONTENT] Found element with role="main"');
+    logger.info('[CONTENT] Found element with role="main"');
     trackDecision(roleMain, 'keep', 'Element with role="main"');
     return roleMain;
   }
@@ -451,7 +451,7 @@ export function extractMainContent($, body, options = {}) {
     
     // Check if this element is definitively content or non-content
     if (isLikelyContent(element)) {
-      console.log('[CONTENT] Found likely content container at depth ' + depth);
+      logger.info('[CONTENT] Found likely content container at depth ' + depth);
       trackDecision(element, 'keep', 'Likely content container');
       return $el;
     }
@@ -470,7 +470,7 @@ export function extractMainContent($, body, options = {}) {
       if (['script', 'style', 'noscript', 'iframe', 'svg'].includes(tagName)) {
         // For SVGs, log that we're skipping them as non-content
         if (tagName === 'svg' && debug) {
-          console.log('[CONTENT] Skipping SVG element as non-content');
+          logger.info('[CONTENT] Skipping SVG element as non-content');
           trackDecision($(child), 'skip', 'SVG element (assumed non-content)');
         }
         return;
@@ -504,12 +504,27 @@ export function extractMainContent($, body, options = {}) {
   // Start the top-down traversal from the body
   const contentContainer = findContentContainer(body[0]);
   if (contentContainer) {
-    console.log('[CONTENT] Found content container through top-down traversal');
+    logger.info('[CONTENT] Found content container through top-down traversal');
     return contentContainer;
   }
   
-  // 3. Fallback: If no clear content container is found, use the body
-  console.log('[CONTENT] Falling back to body element');
+  // 3. Fallback: If no clear content container is found, try common content selectors
+  const commonContentSelectors = [
+    '.content', '#content', '.main', '#main', '.post', '.entry', '.article',
+    '[class*="content"]', '[class*="main"]', '[id*="content"]', '[id*="main"]'
+  ];
+  
+  for (const selector of commonContentSelectors) {
+    const element = $(selector).first();
+    if (element.length > 0 && element.text().trim().length > 100) {
+      logger.info(`[CONTENT] Found content using selector: ${selector}`);
+      trackDecision(element, 'keep', `Fallback to common selector: ${selector}`);
+      return element;
+    }
+  }
+  
+  // 4. Last resort: If still no content found, use the body
+  logger.info('[CONTENT] Falling back to body element');
   trackDecision(body, 'keep', 'Fallback to body');
   return body;
 }

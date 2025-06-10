@@ -34,7 +34,7 @@ export async function callAI(prompt, schema, aiConfig) {
           // Optionally log retry info
           await delay(500); // Wait a bit longer before retry
         } else {
-          console.error('AI response validation failed after 3 attempts:', e);
+          logger.error('AI response validation failed after 3 attempts:', e);
         }
       }
     }

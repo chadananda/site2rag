@@ -8,6 +8,7 @@ import { MarkdownService } from './services/markdown_service.js';
 import { FileService } from './services/file_service.js';
 import { CrawlStateService } from './services/crawl_state_service.js';
 import { CrawlService } from './services/crawl_service.js';
+import logger from './services/logger_service.js';
 import fs from 'fs';
 import path from 'path';
 /**
@@ -35,7 +36,7 @@ export class SiteProcessor {
       // Handle case where startUrl isn't a valid URL (e.g., a file path)
       hostname = startUrl.split('/').pop() || 'output';
       domain = '';
-      console.warn(`Warning: '${startUrl}' is not a valid URL. Using '${hostname}' as output directory name.`);
+      logger.warn(`'${startUrl}' is not a valid URL. Using '${hostname}' as output directory name.`);
     }
     // Create a unified options object with all configuration values
     this.options = {
@@ -46,8 +47,26 @@ export class SiteProcessor {
       politeWaitMs: options.politeWaitMs || 1000,
       outputDir: options.outputDir || options.output || `${process.cwd()}/${hostname}`,
       aiConfig: options.aiConfig || {},
-      debug: options.debug || false
+      debug: options.debug || false,
+      // Explicitly set sameDomain to true by default unless explicitly disabled
+      sameDomain: options.sameDomain !== false
     };
+    
+    // Configure logger based on debug option
+    logger.configure({ debug: this.options.debug });
+    
+    // Log important configuration details
+    logger.info(`Max depth: ${this.options.maxDepth}`, true);
+    logger.info(`Limit: ${this.options.maxPages} pages`, true);
+    logger.info(`Crawling: ${this.options.domain}`, true);
+    logger.info(`Output dir: ${this.options.outputDir}`, true);
+    
+    // Log domain filtering status
+    if (this.options.sameDomain) {
+      logger.domainFilter(`Domain filtering enabled, restricting to: ${hostname}`);
+    } else {
+      logger.domainFilter(`Domain filtering explicitly disabled, will crawl external domains`);
+    }
     // Initialize services as instance properties
     const { outputDir, politeWaitMs, aiConfig, debug } = this.options;
     this.fileService = new FileService({ outputDir });
@@ -100,42 +119,42 @@ export class SiteProcessor {
    * @returns {Promise<string[]>} - Array of crawled URLs
    */
   async process() {
-    console.log(`SiteProcessor.process: Starting with domain=${this.options.domain}, outputDir=${this.options.outputDir}`);
+    logger.info(`SiteProcessor.process: Starting with domain=${this.options.domain}, outputDir=${this.options.outputDir}`, true);
     
     // Ensure output directory exists
     if (!fs.existsSync(this.options.outputDir)) {
-      console.log(`Creating output directory: ${this.options.outputDir}`);
+      logger.info(`Creating output directory: ${this.options.outputDir}`);
       fs.mkdirSync(this.options.outputDir, { recursive: true });
     }
     
     // Create .site2rag directory inside output directory
     const site2ragDir = path.join(this.options.outputDir, '.site2rag');
     if (!fs.existsSync(site2ragDir)) {
-      console.log(`Creating .site2rag directory: ${site2ragDir}`);
+      logger.info(`Creating .site2rag directory: ${site2ragDir}`);
       fs.mkdirSync(site2ragDir, { recursive: true });
     }
     
     this.visited = new Set();
     this.found = [];
     try {
-      console.log('Processing sitemaps...');
+      logger.info(`Processing sitemaps...`, true);
       await this.crawlService.processSitemaps(this.options.domain);
-      console.log('Starting site crawl...');
+      logger.info(`Starting site crawl...`, true);
       this.found = await this.crawlService.crawlSite(this.options.startUrl);
-      console.log(`Crawl completed with ${this.found.length} URLs found`);
+      logger.info(`Crawl complete. Processed ${this.crawlService.foundUrls.length} URLs.`, true);
       if (this.found.length === 1 && this.options.maxDepth === 0) {
-        console.log('Single page crawl completed, skipping post-processing');
+        logger.info('Single page crawl completed, skipping post-processing');
         return this.found;
       }
-      console.log('Running post-crawl pipeline...');
+      logger.info('Running post-crawl pipeline...');
       await this.runPostCrawlPipeline();
-      console.log('Post-crawl pipeline completed');
+      logger.info('Post-crawl pipeline completed');
     } catch (err) {
       if (!(err instanceof CrawlLimitReached)) {
-        console.error('Error during crawl:', err);
+        logger.error('Error during crawl:', err);
         throw err;
       } else {
-        console.log('Crawl limit reached, stopping crawl');
+        logger.info('Crawl limit reached, stopping crawl');
       }
     }
     return this.found;
@@ -154,12 +173,12 @@ export class SiteProcessor {
           const url = new URL(this.options.domain);
           hostname = url.hostname;
         } catch (urlError) {
-          console.warn(`Invalid domain URL: ${this.options.domain}. Using fallback hostname.`);
+          logger.warn(`Invalid domain URL: ${this.options.domain}. Using fallback hostname.`);
           // Use the domain string as hostname if it's not a valid URL
           hostname = this.options.domain.replace(/[^a-zA-Z0-9.-]/g, '');
         }
       } else {
-        console.warn('No domain provided for post-crawl pipeline. Using default hostname.');
+        logger.warn('No domain provided for post-crawl pipeline. Using default hostname.');
         hostname = 'unknown-domain';
       }
       
@@ -175,13 +194,13 @@ export class SiteProcessor {
         
         // Create proper database path in .site2rag directory - use normalize instead of join to avoid absolute paths
         const dbPath = path.normalize(`${this.options.outputDir}/.site2rag/crawl.db`);
-        console.log(`Using database path for context enrichment: ${dbPath}`);
+        logger.info(`Using database path for context enrichment: ${dbPath}`);
         
         const dbInstance = getDB(dbPath);
         if (!dbInstance) throw new Error('SiteProcessor: database instance required for context enrichment');
         await runContextEnrichment(dbInstance, this.options.aiConfig);
       } catch (contextErr) {
-        console.error('Context enrichment error:', contextErr.message);
+        logger.error(`Context enrichment error: ${contextErr.message}`);
       }
 
       // PDF conversion (if enabled)
@@ -189,7 +208,7 @@ export class SiteProcessor {
         try {
           // await runPdfConversionTask(dbInstance, this.options.aiConfig); // Implement as needed
         } catch (pdfErr) {
-          console.error('PDF conversion error:', pdfErr.message);
+          logger.error(`PDF conversion error: ${pdfErr.message}`);
         }
       }
 
@@ -200,12 +219,12 @@ export class SiteProcessor {
         
         // Create proper database path in .site2rag directory - use normalize instead of join to avoid absolute paths
         const dbPath = path.normalize(`${this.options.outputDir}/.site2rag/crawl.db`);
-        console.log(`Using database path for secondary context enrichment: ${dbPath}`);
+        logger.info(`Using database path for secondary context enrichment: ${dbPath}`);
         
         const dbInstance = getDB(dbPath);
         await runContextEnrichment(dbInstance, this.options.aiConfig);
       } catch (contextErr) {
-        console.error('Secondary context enrichment error:', contextErr.message);
+        logger.error(`Secondary context enrichment error: ${contextErr.message}`);
       }
     } catch (err) {
       throw err;
@@ -216,8 +235,8 @@ export class SiteProcessor {
 if (process.env.NODE_ENV !== 'test' && process.argv[1] && process.argv[1].endsWith('site_processor.js')) {
   // Handle --help flag
   if (!process.argv[2] || process.argv[2] === '--help' || process.argv[2] === '-h') {
-    console.log('Usage: node src/site_processor.js <url> [limit]');
-    console.log('Example: node src/site_processor.js https://example.com 10');
+    logger.info('Usage: node src/site_processor.js <url> [limit]');
+    logger.info('Example: node src/site_processor.js https://example.com 10');
     process.exit(0);
   }
   const url = process.argv[2];
@@ -228,15 +247,15 @@ if (process.env.NODE_ENV !== 'test' && process.argv[1] && process.argv[1].endsWi
       try {
         new URL(url); // This will throw if URL is invalid
       } catch (e) {
-        console.error(`Error: '${url}' is not a valid URL. Please provide a URL with protocol (e.g., https://example.com)`);
+        logger.error(`'${url}' is not a valid URL. Please provide a URL with protocol (e.g., https://example.com)`);
         process.exit(1);
       }
-      console.log(`Starting crawl of ${url} with limit ${limit}...`);
+      logger.info(`Starting crawl of ${url} with limit ${limit}...`, true);
       const sp = new SiteProcessor(url, { limit });
       const found = await sp.process();
-      console.log(`Crawled ${found.length} pages:`, found);
+      logger.info(`Crawled ${found.length} pages: ${found.join(', ')}`, true);
     } catch (err) {
-      console.error('Error during crawl:', err);
+      logger.error(`Error during crawl: ${err.message}`);
       process.exit(1);
     }
   })();

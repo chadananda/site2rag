@@ -3,6 +3,8 @@ import fs from 'fs';
 import { URL } from 'url';
 import { CrawlLimitReached } from '../errors.js';
 
+import logger from './logger_service.js';
+
 export class CrawlService {
   /**
    * Creates a new CrawlService instance
@@ -20,24 +22,33 @@ export class CrawlService {
    * @param {boolean} options.debug - Whether to enable debug mode
    */
   constructor(options = {}) {
+    this.options = options;
     this.domain = options.domain;
     this.startUrl = options.startUrl || this.domain;
     this.maxPages = options.maxPages || 100;
-    this.maxDepth = options.maxDepth || 3;
+    this.maxDepth = options.maxDepth || -1;
     this.urlService = options.urlService;
     this.fetchService = options.fetchService;
     this.fileService = options.fileService;
     this.contentService = options.contentService;
     this.markdownService = options.markdownService;
     this.crawlStateService = options.crawlStateService;
-    this.visited = new Set();
-    this.found = [];
-    this.linkMap = {};
-    this.activeCrawls = 0;
-    this.maxConcurrency = options.maxConcurrency || 5;
-    this.debug = options.debug === true; // Ensure it's a boolean
     
-    console.log(`[CRAWL] Debug mode is ${this.debug ? 'enabled' : 'disabled'}`);
+    // Efficient URL tracking to minimize redundant processing
+    this.visitedUrls = new Set(); // URLs already processed in this session
+    this.queuedUrls = new Set(); // URLs in the queue to be processed
+    this.foundUrls = []; // URLs successfully processed
+    this.contentHashes = new Map(); // In-memory cache of URL content hashes for this session
+    this.linkMap = {}; // Map of source URLs to their outbound links
+    
+    this.activeCrawls = 0;
+    this.maxConcurrency = options.maxConcurrency || 5; // Default is already 5, keeping it here for clarity
+    this.debug = options.debug === true; // Ensure it's a boolean
+    this.totalUrlsMapped = 0; // Counter for total URLs mapped
+    
+    // Configure logger based on debug option
+    logger.configure({ debug: this.debug });
+    logger.crawl(`Debug mode is ${this.debug ? 'enabled' : 'disabled'}`);
   }
 
   /**
@@ -53,11 +64,11 @@ export class CrawlService {
         hostname = url.hostname;
       } else {
         hostname = 'unknown';
-        console.warn('Warning: No domain provided for CrawlService.initialize');
+        logger.warn('No domain provided for CrawlService.initialize');
       }
     } catch (err) {
       hostname = this.domain?.split('/')?.pop() || 'unknown';
-      console.warn(`Warning: '${this.domain}' is not a valid URL in CrawlService.initialize. Using '${hostname}' as hostname.`);
+      logger.warn(`'${this.domain}' is not a valid URL in CrawlService.initialize. Using '${hostname}' as hostname.`);
     }
     
     // Initialize crawl state service if it has an initialize method
@@ -70,7 +81,7 @@ export class CrawlService {
       try {
         await this.fetchService.fetchRobotsTxt(this.domain);
       } catch (err) {
-        console.warn(`Warning: Could not fetch robots.txt for '${this.domain}': ${err.message}`);
+        logger.warn(`Could not fetch robots.txt for '${this.domain}': ${err.message}`);
       }
     }
   }
@@ -83,28 +94,116 @@ export class CrawlService {
   async crawlSite(startUrl = null) {
     // Use provided startUrl or default to this.startUrl
     const url = startUrl || this.startUrl;
-    console.log(`CrawlService.crawlSite: Starting crawl from ${url}`);
-    console.log(`Max pages: ${this.maxPages}, Max depth: ${this.maxDepth}`);
+    logger.info(`Starting crawl from ${url}`, true);
+    logger.info(`Max pages: ${this.maxPages}, Max depth: ${this.maxDepth}`, true);
+    
+    // Extract and store base domain from the starting URL for domain filtering
+    try {
+      const startUrlObj = new URL(url);
+      this.baseDomain = startUrlObj.hostname;
+      logger.domainFilter(`Base domain for crawl: ${this.baseDomain}`);
+    } catch (err) {
+      logger.warn(`Error extracting base domain from ${url}: ${err.message}`);
+    }
+    
+    // Ensure sameDomain option is set to true by default unless explicitly disabled
+    if (this.options.sameDomain !== false) {
+      if (this.options.sameDomain) {
+        logger.domainFilter(`Domain filtering enabled, restricting to: ${this.baseDomain}`);
+      } else {
+        logger.domainFilter(`Domain filtering disabled, will crawl external domains`);
+      }
+    }
     
     try {
-      console.log('Initializing crawl...');
+      logger.info('Initializing crawl...');
       await this.initialize();
-      console.log('Starting recursive crawl...');
+      
+      // Pre-load content hashes from previous session if crawlStateService is available
+      // This allows for more efficient skipping of unchanged content
+      if (this.crawlStateService && typeof this.crawlStateService.getAllPages === 'function') {
+        logger.info('[CACHE] Loading content hashes from previous session...');
+        const previousPages = await this.crawlStateService.getAllPages();
+        if (previousPages && previousPages.length > 0) {
+          logger.info(`[CACHE] Loaded ${previousPages.length} pages from previous session`);
+          
+          // Populate in-memory content hash cache
+          let hashCount = 0;
+          for (const page of previousPages) {
+            if (page.url && page.content_hash) {
+              this.contentHashes.set(page.url, page.content_hash);
+              hashCount++;
+            }
+          }
+          
+          logger.info(`[CACHE] Preloaded ${hashCount} content hashes into memory cache`);
+        }
+      }
+      
+      logger.info('Starting recursive crawl...');
       await this.crawl(url, 0);
-      console.log(`Crawl completed with ${this.found.length} URLs found`);
-      return this.found;
+      logger.info(`Crawl completed with ${this.foundUrls.length} URLs found`);
+      return this.foundUrls;
     } catch (err) {
       if (err instanceof CrawlLimitReached) {
-        console.log(`Crawl limit reached after ${this.found.length} URLs`);
+        logger.info(`Crawl limit reached after ${this.foundUrls.length} URLs`);
         // This is an expected condition, not an error
-        return this.found;
+        return this.foundUrls;
       }
-      console.error('Error during crawl:', err);
+      logger.error('Error during crawl:', err);
       throw err;
     } finally {
       // Abort any pending requests
       this.fetchService.abortAll();
     }
+  }
+
+  /**
+   * Adds a URL to the crawl queue if it's not already visited or queued
+   * @param {string} url - URL to add to the queue
+   * @param {number} depth - Current crawl depth
+   */
+  async queueUrl(url, depth) {
+    if (this.foundUrls.length >= this.options.maxPages) return;
+    if (this.maxDepth > 0 && depth > this.maxDepth) return;
+    let normalizedUrl = url;
+    if (this.urlService && this.urlService.normalizeUrl) {
+      normalizedUrl = this.urlService.normalizeUrl(url);
+    }
+    
+    // Skip if this URL has already been visited or queued
+    if (this.visitedUrls.has(normalizedUrl) || this.queuedUrls.has(normalizedUrl)) {
+      return;
+    }
+    
+    // Early domain check - before any processing
+    try {
+      const urlObj = new URL(normalizedUrl);
+      const urlHostname = urlObj.hostname;
+      
+      // Get the base domain from the starting URL if not already set
+      if (!this.baseDomain && this.startUrl) {
+        const startUrlObj = new URL(this.startUrl);
+        this.baseDomain = startUrlObj.hostname;
+        logger.domainFilter(`Setting base domain at queue time: ${this.baseDomain}`);
+      }
+      
+      // Strict domain filtering - only allow URLs from the same domain
+      if (depth > 0 && this.options.sameDomain && this.baseDomain && urlHostname !== this.baseDomain) {
+        logger.domainFilter(`Rejecting external URL at queue: ${normalizedUrl} (${urlHostname} ≠ ${this.baseDomain})`);
+        return;
+      }
+    } catch (err) {
+      logger.warn(`[DOMAIN_FILTER] Error checking domain for ${normalizedUrl}: ${err.message}`);
+      // Skip URLs that cause errors in domain checking
+      return;
+    }
+    
+    // Add to queue
+    this.queuedUrls.add(normalizedUrl);
+    
+    // Recursively crawl this URL
+    await this.crawl(normalizedUrl, depth + 1);
   }
 
   /**
@@ -114,37 +213,289 @@ export class CrawlService {
    */
   async crawl(url, depth = 0) {
     // Normalize URL
-    const normalizedUrl = this.urlService.normalizeUrl(url);
+    let normalizedUrl = url;
+    if (this.urlService && this.urlService.normalizeUrl) {
+      normalizedUrl = this.urlService.normalizeUrl(url);
+    }
     
-    // Skip if we've already visited this URL in the current session
-    if (this.visited.has(normalizedUrl)) {
-      console.log(`[CRAWL] Skipping already visited URL: ${normalizedUrl}`);
+    // Skip if this URL has already been visited - no need to log for in-memory checks
+    if (this.visitedUrls.has(normalizedUrl)) {
       return;
     }
     
-    // Mark as visited in the current session to prevent duplicate processing
-    this.visited.add(normalizedUrl);
+    // Strict domain filtering at the beginning of crawl
+    if (depth > 0 && this.options.sameDomain === true) {
+      try {
+        const urlObj = new URL(normalizedUrl);
+        const urlHostname = urlObj.hostname;
+        
+        // Ensure we have the base domain
+        if (!this.baseDomain && this.startUrl) {
+          const startUrlObj = new URL(this.startUrl);
+          this.baseDomain = startUrlObj.hostname;
+          logger.domainFilter(`Setting base domain: ${this.baseDomain}`);
+        }
+        
+        if (this.baseDomain && urlHostname !== this.baseDomain) {
+          logger.domainFilter(`Skipping external URL: ${normalizedUrl} (domain: ${urlHostname}, not in base domain: ${this.baseDomain})`);
+          return;
+        }
+      } catch (err) {
+        logger.warn(`Error checking domain for ${normalizedUrl}: ${err.message}`);
+        return;
+      }
+    }
+    
+    // Domain filtering is now handled at the beginning of the crawl method
+    
+    // Skip if this URL is already in the queue - no need to log for in-memory checks
+    if (this.queuedUrls.has(normalizedUrl)) {
+      return;
+    }
+    
+    // Mark as queued immediately to prevent duplicate processing
+    this.queuedUrls.add(normalizedUrl);
+    
+    // Check if this URL is a resource link (contains resource parameter)
+    try {
+      const resourceUrlObj = new URL(normalizedUrl);
+      const resourceParam = resourceUrlObj.searchParams.get('resource');
+      
+      if (resourceParam && resourceParam.match(/\.(pdf|docx?|xlsx?|pptx?|rtf|zip|rar|7z|tar|gz)$/i)) {
+        logger.info(`[BINARY_TRACKING] Detected resource URL: ${normalizedUrl} with resource: ${resourceParam}`);
+        
+        // Add to database for tracking
+        if (this.crawlStateService && typeof this.crawlStateService.queueUrl === 'function') {
+          await this.crawlStateService.queueUrl(normalizedUrl, { resourceType: 'binary', resourceParam });
+          logger.info(`[BINARY_TRACKING] Added binary resource to queue: ${resourceParam}`);
+        }
+        
+        // First try to build a direct URL to the resource based on the base URL and resource parameter
+        const resourceUrlObj = new URL(normalizedUrl);
+        const baseUrl = `${resourceUrlObj.protocol}//${resourceUrlObj.host}`;
+        
+        // Try multiple possible resource URL patterns
+        const possibleResourceUrls = [
+          // Direct download from the resource parameter using /file/ path
+          `${baseUrl}/file/${resourceParam}`,
+          // Try with /wp-content/uploads/ path
+          `${baseUrl}/wp-content/uploads/${resourceParam}`,
+          // Try direct resource parameter as path
+          `${baseUrl}/${resourceParam}`,
+          // Try the original URL as fallback
+          normalizedUrl
+        ];
+        
+        let resourceUrl = null;
+        let resourceResponse = null;
+        let contentType = null;
+        
+        // Try each possible URL until we get a successful response
+        for (const url of possibleResourceUrls) {
+          try {
+            logger.info(`[CRAWL] Attempting to download from: ${url}`);
+            const response = await fetch(url, { timeout: this.options.timeout });
+            
+            if (response.ok) {
+              contentType = response.headers.get('content-type') || '';
+              
+              // Verify it's actually a binary file by content type
+              if (this.isBinaryFile(contentType)) {
+                resourceUrl = url;
+                resourceResponse = response;
+                logger.info(`[CRAWL] Successfully downloaded binary file from: ${url} (${contentType})`);
+                break;
+              } else {
+                logger.info(`[CRAWL] URL ${url} returned non-binary content type: ${contentType}`);
+              }
+            } else {
+              logger.warn(`[CRAWL] Failed to download from ${url}: HTTP ${response.status}`);
+            }
+          } catch (err) {
+            logger.warn(`[CRAWL] Failed to download from ${url}: ${err.message}`);
+          }
+        }
+        
+        // If all attempts failed, skip this resource
+        if (!resourceResponse) {
+          logger.error(`[CRAWL] Failed to download resource: ${resourceParam} from any URL`);
+          return;
+        }
+        
+        try {
+          // We already have the resourceResponse from our earlier attempts
+          logger.info(`[CRAWL] Processing binary resource: ${resourceParam} from ${resourceUrl}`);
+          
+          const contentType = resourceResponse.headers.get('content-type') || '';
+          
+          let contentChanged = true;
+          
+          // First check in-memory cache for faster lookups
+          if (this.isBinaryFile(contentType, normalizedUrl)) {
+            // Clone the response to avoid consuming it
+            const responseClone = resourceResponse.clone();
+            
+            try {
+              // Get binary data
+              const buffer = await responseClone.arrayBuffer();
+              
+              // Calculate binary hash
+              const binaryHash = this.calculateBinaryHash(buffer);
+              
+              // Check in-memory cache first (fastest)
+              if (this.contentHashes.has(normalizedUrl)) {
+                const cachedHash = this.contentHashes.get(normalizedUrl);
+                if (cachedHash === binaryHash) {
+                  if (this.debug) {
+                    logger.info(`[CACHE] Binary file unchanged (in-memory): ${normalizedUrl}`);
+                  }
+                  contentChanged = false;
+                }
+              } else if (this.crawlStateService && typeof this.crawlStateService.getPageHash === 'function') {
+                // Check database cache
+                const previousHash = await this.crawlStateService.getPageHash(normalizedUrl);
+                if (previousHash && previousHash === binaryHash) {
+                  if (this.debug) {
+                    logger.info(`[CACHE] Binary file unchanged (database): ${normalizedUrl}`);
+                  }
+                  contentChanged = false;
+                }
+              }
+              
+              // Update caches regardless
+              this.contentHashes.set(normalizedUrl, binaryHash);
+              if (this.crawlStateService && typeof this.crawlStateService.savePageHash === 'function') {
+                await this.crawlStateService.savePageHash(normalizedUrl, binaryHash);
+              }
+            } catch (err) {
+              logger.warn(`[BINARY] Error checking binary hash: ${err.message}`);
+              // Continue with contentChanged = true if there was an error
+            }
+          } else {
+            // For non-binary files, use text-based content hash
+            if (this.crawlStateService && typeof this.crawlStateService.getPageHash === 'function' && 
+                typeof this.crawlStateService.savePageHash === 'function') {
+              
+              const responseClone = resourceResponse.clone();
+              const content = await responseClone.text();
+              const contentHash = this.calculateContentHash(content);
+              
+              // Check in-memory cache first
+              if (this.contentHashes.has(normalizedUrl)) {
+                const cachedHash = this.contentHashes.get(normalizedUrl);
+                if (cachedHash === contentHash) {
+                  contentChanged = false;
+                  logger.cache(`Content unchanged (in-memory): ${normalizedUrl}`);
+                }
+              } else {
+                // Check database cache
+                const previousHash = await this.crawlStateService.getPageHash(normalizedUrl);
+                if (previousHash && previousHash === contentHash) {
+                  contentChanged = false;
+                  logger.cache(`Content unchanged for ${normalizedUrl}, using cached version`);
+                } else if (previousHash) {
+                  logger.cache(`Content changed for ${normalizedUrl}, processing new version`);
+                }
+              }
+              
+              // Update caches
+              this.contentHashes.set(normalizedUrl, contentHash);
+              await this.crawlStateService.savePageHash(normalizedUrl, contentHash);
+            }
+          }
+          
+          if (this.isBinaryFile(contentType, normalizedUrl)) {
+            if (contentChanged) {
+              await this.handleBinaryFile(normalizedUrl, resourceResponse, contentType, resourceParam);
+            }
+            return;
+          }
+        } catch (err) {
+          logger.error(`Error downloading resource: ${resourceParam}, ${err.message}`);
+        }
+      }
+    } catch (err) {
+      logger.warn(`Error parsing URL: ${normalizedUrl}, ${err.message}`);
+    }
+    
+    // Move from queued to visited
+    this.queuedUrls.delete(normalizedUrl);
+    this.visitedUrls.add(normalizedUrl);
     
     // Extract hostname from the URL for domain checking
-    let urlObj;
+    let domainUrlObj;
+    let shouldFetch = true;
+    
     try {
-      urlObj = new URL(normalizedUrl);
+      domainUrlObj = new URL(normalizedUrl);
       
       // Skip URLs that are not from the same domain as the starting domain
       // Only apply this check to links beyond the start URL (depth > 0)
-      if (depth > 0) {
-        const urlHostname = urlObj.hostname;
-        const domainObj = new URL(this.startUrl);
-        const baseDomain = domainObj.hostname;
+      if (depth > 0 && this.options && this.options.sameDomain === true) {
+        // Simple domain check if urlService is not available
+        const hostname = domainUrlObj.hostname;
         
-        if (!this.urlService.isSameDomain(normalizedUrl, baseDomain)) {
-          console.log(`[CRAWL] Skipping external URL: ${normalizedUrl} (not in domain ${baseDomain})`);
-          return;
+        try {
+          const domainObj = new URL(this.startUrl || '');
+          const baseDomain = domainObj.hostname;
+          
+          // Use urlService if available, otherwise do a simple hostname comparison
+          let sameDomain = false;
+          if (this.urlService && typeof this.urlService.isSameDomain === 'function') {
+            sameDomain = this.urlService.isSameDomain(normalizedUrl, baseDomain);
+          } else {
+            // Simple hostname comparison as fallback
+            sameDomain = hostname === baseDomain;
+          }
+          
+          if (!sameDomain) {
+            if (this.debug) {
+              logger.log('DEBUG', `Skipping external URL: ${normalizedUrl} (not in domain ${baseDomain})`);
+            }
+            shouldFetch = false;
+          }
+        } catch (domainErr) {
+          logger.warn(`Error checking domain for ${normalizedUrl}: ${domainErr.message}`);
+          // Continue processing if we can't check the domain
         }
       }
+      
+      // Check if we have content hash from previous session
+      // Only do this check if we're going to fetch the URL
+      if (shouldFetch && this.crawlStateService && typeof this.crawlStateService.getPageHash === 'function') {
+        const previousHash = await this.crawlStateService.getPageHash(normalizedUrl);
+        if (previousHash) {
+          // We'll check for content changes after fetching
+          if (this.debug) {
+            logger.log('DEBUG', `Found previous hash for ${normalizedUrl}`);
+          }
+        }
+      }
+      
+      if (!shouldFetch) {
+        return;
+      }
     } catch (e) {
-      console.error(`Error parsing URL ${normalizedUrl}: ${e.message}`);
+      logger.error(`Error parsing URL ${normalizedUrl}: ${e.message}`);
       return;
+    }
+    
+    // Track active crawls for concurrency control
+    this.activeCrawls++;
+    if (this.debug) {
+      logger.log('DEBUG', `Crawling URL: ${url} (depth=${depth})`);
+    }
+    // Ensure URL is a string, not an object
+    const urlString = typeof normalizedUrl === 'object' ? normalizedUrl.href : normalizedUrl;
+    
+    // Mark URL as visited
+    this.visitedUrls.add(normalizedUrl);
+    this.queuedUrls.delete(normalizedUrl); // Remove from queue if it was there
+    this.foundUrls.push(normalizedUrl);
+    logger.crawl(`Added URL to found list: ${normalizedUrl} (${this.foundUrls.length}/${this.maxPages})`);
+    this.totalUrlsMapped++;
+    if (this.totalUrlsMapped % 100 === 0) {
+      logger.crawl(`Total URLs mapped so far: ${this.totalUrlsMapped}`);
     }
     
     // Get existing page data from database
@@ -152,19 +503,15 @@ export class CrawlService {
     
     // Skip if we're beyond the max depth (but allow if maxDepth is -1, which means no limit)
     if (this.maxDepth >= 0 && depth > this.maxDepth) {
-      console.log(`Skipping URL due to depth: ${normalizedUrl} (depth=${depth}, maxDepth=${this.maxDepth})`);
+      logger.crawl(`Skipping URL due to depth: ${normalizedUrl} (depth=${depth}, maxDepth=${this.maxDepth})`);
       return;
     }
     
-    console.log(`Crawling URL: ${normalizedUrl} (depth=${depth})`);
-    
-    // Ensure URL is a string, not an object
-    const urlString = typeof normalizedUrl === 'object' ? normalizedUrl.href : normalizedUrl;
-    
-    // Add URL to found list if not already there
-    if (!this.found.includes(urlString)) {
-      this.found.push(urlString);
-      console.log(`[CRAWL] Added URL to found list: ${urlString} (${this.found.length}/${this.maxPages})`);
+    // Check if we've reached the maximum number of pages
+    if (this.foundUrls.length >= this.maxPages) {
+      this.activeCrawls--;
+      logger.crawl(`Reached max pages limit: ${this.foundUrls.length}/${this.maxPages}`, true);
+      throw new CrawlLimitReached('Crawl limit reached');
     }
     
     try {
@@ -173,17 +520,17 @@ export class CrawlService {
       
       // Add conditional headers if we have page data
       if (pageData) {
-        console.log(`[CACHE] Found previous data for ${urlString}`);
+        logger.cache(`Found previous data for ${urlString}`);
         
         // Add ETag for conditional request
         if (pageData.etag) {
-          console.log(`[CACHE] Using ETag: ${pageData.etag}`);
+          logger.cache(`Using ETag: ${pageData.etag}`);
           headers['If-None-Match'] = pageData.etag;
         }
         
         // Add Last-Modified for conditional request
         if (pageData.last_modified) {
-          console.log(`[CACHE] Using Last-Modified: ${pageData.last_modified}`);
+          logger.cache(`Using Last-Modified: ${pageData.last_modified}`);
           headers['If-Modified-Since'] = pageData.last_modified;
         }
       } else {
@@ -200,13 +547,16 @@ export class CrawlService {
       }
       
       // Fetch the URL with conditional headers
-      console.log(`FetchService.fetchUrl: Fetching ${normalizedUrl}`);
-      console.log(`Fetch headers:`, headers);
+      logger.crawl(`FetchService.fetchUrl: Fetching ${normalizedUrl}`);
+      // Only log fetch headers in debug mode
+      if (this.debug) {
+        logger.crawl(`Fetch headers: ${JSON.stringify(headers)}`);
+      }
       const response = await this.fetchService.fetchUrl(normalizedUrl, headers);
       
       // Handle 304 Not Modified
       if (response.status === 304) {
-        console.log(`[CACHE] Not modified: ${normalizedUrl}`);
+        logger.cache(`Not modified: ${normalizedUrl}`);
         // Update last_crawled timestamp but keep all other data the same
         this.crawlStateService.upsertPage(urlString, {
           last_crawled: new Date().toISOString()
@@ -216,7 +566,7 @@ export class CrawlService {
       
       // Skip non-OK responses
       if (!response.ok) {
-        console.error(`Error fetching ${normalizedUrl}: ${response.status} ${response.statusText}`);
+        logger.error(`Error fetching ${normalizedUrl}: ${response.status} ${response.statusText}`);
         // Update status in page data
         this.crawlStateService.upsertPage(urlString, {
           status: response.status,
@@ -225,21 +575,31 @@ export class CrawlService {
         return;
       }
       
-      // Check content type to handle binary files (PDF, DOCX, etc.)
-      const contentType = response.headers.get('content-type') || '';
-      console.log(`Content-Type for ${normalizedUrl}: ${contentType}`);
-      
-      // Handle binary files (PDF, DOCX, etc.)
-      if (this.isBinaryFile(contentType)) {
-        await this.handleBinaryFile(normalizedUrl, response, contentType);
-        return;
-      }
-      
+      // Get HTML content from response
       const html = await response.text();
       
       // Calculate content hash for change detection
       const contentHash = this.calculateContentHash(html);
-      console.log(`[CACHE] Content hash for ${normalizedUrl}: ${contentHash}`);
+      
+      if (this.debug) {
+        logger.log('DEBUG', `Content hash for ${normalizedUrl}: ${contentHash}`);
+      }
+      
+      // First check in-memory cache for faster lookups
+      if (this.contentHashes.has(normalizedUrl)) {
+        const cachedHash = this.contentHashes.get(normalizedUrl);
+        if (cachedHash === contentHash) {
+          logger.cache(`Content unchanged (in-memory cache): ${normalizedUrl}`);
+          // Update last_crawled timestamp but keep all other data the same
+          this.crawlStateService.upsertPage(urlString, {
+            last_crawled: new Date().toISOString()
+          });
+          return;
+        }
+      }
+      
+      // Update in-memory cache with new hash
+      this.contentHashes.set(normalizedUrl, contentHash);
       
       // Check if content has changed using ETag, Last-Modified, and content hash
       if (pageData) {
@@ -248,25 +608,31 @@ export class CrawlService {
         // Check ETag if available
         const etag = response.headers.get('etag');
         if (etag && pageData.etag && pageData.etag === etag) {
-          console.log(`[CACHE] ETag match for ${urlString}: ${etag}`);
+          if (this.debug) {
+            logger.log('DEBUG', `ETag match for ${urlString}: ${etag}`);
+          }
           contentUnchanged = true;
         }
         
         // Check Last-Modified if available
         const lastModified = response.headers.get('last-modified');
         if (!contentUnchanged && lastModified && pageData.last_modified && pageData.last_modified === lastModified) {
-          console.log(`[CACHE] Last-Modified match for ${urlString}: ${lastModified}`);
+          if (this.debug) {
+            logger.log('DEBUG', `Last-Modified match for ${urlString}: ${lastModified}`);
+          }
           contentUnchanged = true;
         }
         
         // Check content hash as a fallback
         if (!contentUnchanged && contentHash && pageData.content_hash && pageData.content_hash === contentHash) {
-          console.log(`[CACHE] Content hash match for ${urlString}: ${contentHash}`);
+          if (this.debug) {
+            logger.log('DEBUG', `Content hash match for ${urlString}: ${contentHash}`);
+          }
           contentUnchanged = true;
         }
         
         if (contentUnchanged) {
-          console.log(`[CACHE] Content unchanged for ${normalizedUrl}, skipping processing`);
+          logger.cache(`Content unchanged for ${normalizedUrl}, skipping processing`);
           // Update last_crawled timestamp but keep all other data the same
           this.crawlStateService.upsertPage(urlString, {
             last_crawled: new Date().toISOString(),
@@ -274,12 +640,52 @@ export class CrawlService {
           });
           return;
         } else {
-          console.log(`[CACHE] Content changed for ${urlString}`);
+          logger.cache(`Content changed for ${urlString}`);
         }
       }
       
       // Process HTML content
-      const { $, main, links, removedBlocks } = await this.contentService.processHtml(html, normalizedUrl);
+      const { $, main, links: allLinks, removedBlocks } = await this.contentService.processHtml(html, normalizedUrl);
+      
+      // Filter out external URLs early to avoid processing them later
+      let links = allLinks;
+      if (this.options && this.options.sameDomain === true && this.startUrl) {
+        try {
+          // Extract base domain from the starting URL
+          const startUrlObj = new URL(this.startUrl);
+          const baseDomain = startUrlObj.hostname;
+          
+          // Filter links to only include those from the same domain
+          const internalLinks = allLinks.filter(link => {
+            try {
+              const linkObj = new URL(link);
+              const linkHostname = linkObj.hostname;
+              
+              // Strict domain checking - exact hostname match
+              const sameDomain = linkHostname === baseDomain;
+              
+              if (!sameDomain && this.debug) {
+                logger.log('DEBUG', `Filtered external URL: ${link} (domain: ${linkHostname})`);
+              }
+              
+              return sameDomain;
+            } catch (e) {
+              // If there's an error checking the domain, skip this link
+              logger.error(`Error checking domain for link ${link}: ${e.message}`);
+              return false;
+            }
+          });
+          
+          if (this.debug && internalLinks.length < allLinks.length) {
+            logger.log('DEBUG', `Filtered out ${allLinks.length - internalLinks.length} external URLs from ${normalizedUrl}`);
+          }
+          
+          links = internalLinks;
+        } catch (e) {
+          logger.warn(`Error filtering external URLs: ${e.message}`);
+          // Continue with all links if there was an error
+        }
+      }
       
       // Extract metadata from HTML
       const { title, meta } = this.contentService.extractMetadata($);
@@ -327,9 +733,9 @@ export class CrawlService {
       
       // Write markdown file
       const { hostname } = new URL(normalizedUrl);
-      console.log(`Saving markdown for ${normalizedUrl}`);
-      console.log(`- Hostname: ${hostname}`);
-      console.log(`- Filename: ${filename}.md`);
+      logger.crawl(`Saving markdown for ${normalizedUrl}`);
+      logger.crawl(`- Hostname: ${hostname}`);
+      logger.crawl(`- Filename: ${filename}.md`);
       
       let filePath = null;
       try {
@@ -338,32 +744,37 @@ export class CrawlService {
           filename + '.md', 
           markdownWithFrontmatter
         );
-        console.log(`- Saved to: ${filePath}`);
+        logger.crawl(`- Saved to: ${filePath}`, true);
         
         // Save debug markdown if debug mode is enabled and we have removedBlocks
-        console.log(`[DEBUG FLAG] Debug mode is ${this.debug ? 'enabled' : 'disabled'}`);
-        console.log(`[DEBUG FLAG] removedBlocks is ${removedBlocks ? 'available' : 'not available'}`);
+        logger.log('DEBUG', `Debug mode is ${this.debug ? 'enabled' : 'disabled'}`);
+        logger.log('DEBUG', `removedBlocks is ${removedBlocks ? 'available' : 'not available'}`);
         
         if (this.debug && removedBlocks) {
           try {
-            // Generate debug markdown content using our enhanced method
-            const debugMarkdown = this.contentService.generateDebugMarkdown($, main, removedBlocks, normalizedUrl);
-            console.log(`[DEBUG FLAG] Generated debug markdown: ${debugMarkdown ? 'yes' : 'no'}`);
-            
-            if (debugMarkdown) {
-              // Get the base output directory
-              const outputBaseDir = this.fileService.outputDir;
+            // Check if main is a valid object before generating debug markdown
+            if (main && typeof main === 'object') {
+              // Generate debug markdown content using our enhanced method
+              const debugMarkdown = this.contentService.generateDebugMarkdown($, main, removedBlocks, normalizedUrl);
+              logger.log('DEBUG', `Generated debug markdown: ${debugMarkdown ? 'yes' : 'no'}`);
               
-              // Save debug markdown
-              await this.contentService.saveDebugInfo(normalizedUrl, debugMarkdown, filename);
+              if (debugMarkdown) {
+                // Get the base output directory
+                const outputBaseDir = this.fileService.outputDir;
+                
+                // Save debug markdown
+                await this.contentService.saveDebugInfo(normalizedUrl, debugMarkdown, filename);
+              }
+            } else {
+              logger.log('DEBUG', `Skipping debug markdown generation: main content is ${main ? 'invalid' : 'null'}`);
             }
           } catch (err) {
-            console.error(`Error generating debug markdown for ${normalizedUrl}:`, err);
+            logger.error('[DEBUG] Error saving debug information:', err.message);
           }
         }
       } catch (err) {
-        console.error(`Error saving markdown file: ${err.message}`);
-        console.error(err.stack);
+        logger.error(`Error saving markdown file: ${err.message}`);
+        logger.error(err.stack);
       }
       
       // Update page data with response headers and content hash
@@ -390,6 +801,12 @@ export class CrawlService {
       try {
         this.linkMap[normalizedUrl] = links;
         
+        // Update total URLs mapped counter
+        if (links && links.length) {
+          this.totalUrlsMapped += links.length;
+          logger.crawl(`Total URLs mapped so far: ${this.totalUrlsMapped}`);
+        }
+        
         // Only call saveLinks if it exists
         if (typeof this.crawlStateService.saveLinks === 'function') {
           this.crawlStateService.saveLinks(normalizedUrl, links);
@@ -397,26 +814,22 @@ export class CrawlService {
         
         links_to_crawl = links;
       } catch (err) {
-        console.error(`Error saving links: ${err.message}`);
+        logger.error(`Error saving links: ${err.message}`);
         // Continue with empty links if there was an error
-      }
-      
-      // Check if we've reached the page limit before processing more links
-      if (this.found.length >= this.maxPages) {
-        console.log(`[CRAWL] Reached max pages limit: ${this.found.length}/${this.maxPages}`);
-        throw new CrawlLimitReached();
       }
       
       // Process links recursively
       for (const link of links_to_crawl) {
         // Skip if we've reached the page limit
-        if (this.found.length >= this.maxPages) {
-          console.log(`[CRAWL] Reached max pages limit during link processing: ${this.found.length}/${this.maxPages}`);
+        if (this.foundUrls.length >= this.maxPages) {
+          logger.crawl(`Reached max pages limit during link processing: ${this.foundUrls.length}/${this.maxPages}`);
+          throw new CrawlLimitReached('Crawl limit reached');
+          logger.info(`[CRAWL] Reached max pages limit during link processing: ${this.foundUrls.length}/${this.maxPages}`);
           throw new CrawlLimitReached();
         }
         
-        // Skip if we've already visited this URL
-        if (this.visited.has(link)) {
+        // Skip if we've already visited or queued this URL - no logging needed for in-memory checks
+        if (this.visitedUrls.has(link) || this.queuedUrls.has(link)) {
           continue;
         }
         
@@ -431,39 +844,9 @@ export class CrawlService {
         // Re-throw to stop the crawl
         throw err;
       }
-      console.error(`Error crawling ${normalizedUrl}: ${err.message}`);
-      console.error(err.stack);
+      logger.error(`Error crawling ${normalizedUrl}: ${err.message}`);
     }
   }
-
-  /**
-   * Checks if a content type represents a binary file
-   * @param {string} contentType - Content type to check
-   * @returns {boolean} - Whether the content type represents a binary file
-   * @private
-   */
-  isBinaryFile(contentType) {
-    const binaryTypes = [
-      'application/pdf',
-      'application/msword',
-      'application/vnd.openxmlformats-officedocument',
-      'application/zip',
-      'application/x-zip-compressed',
-      'application/octet-stream',
-      'image/',
-      'audio/',
-      'video/',
-    ];
-    
-    return binaryTypes.some(type => contentType.includes(type));
-  }
-
-  /**
-   * Calculates a hash of the content for change detection
-   * @param {string} content - Content to hash
-   * @returns {string} - Hash of the content
-   * @private
-   */
   calculateContentHash(content) {
     // Simple hash function for strings
     // This is a basic implementation - for production, consider using crypto.createHash
@@ -478,29 +861,243 @@ export class CrawlService {
     
     return hash.toString(16);
   }
+  
+  /**
+   * Calculate hash for binary content
+   * @param {ArrayBuffer} buffer - Binary content to hash
+   * @returns {string} - Content hash
+   */
+  calculateBinaryHash(buffer) {
+    // Create a view of the buffer as 8-bit integers
+    const view = new Uint8Array(buffer);
+    let hash = 0;
+    
+    // Only hash a sample of the buffer for efficiency if it's large
+    // For files > 1MB, we'll sample at regular intervals
+    const length = view.length;
+    const sampleSize = length > 1024 * 1024 ? 1024 : length;
+    const step = Math.max(1, Math.floor(length / sampleSize));
+    
+    for (let i = 0; i < length; i += step) {
+      const byte = view[i];
+      hash = ((hash << 5) - hash) + byte;
+      hash = hash & hash; // Convert to 32bit integer
+    }
+    
+    return hash.toString(16);
+  }
+  
+  /**
+   * Checks if a content type represents a binary file
+   * @param {string} contentType - Content type to check
+   * @returns {boolean} - Whether the content type represents a binary file
+   * @private
+   */
+  isBinaryFile(contentType) {
+    if (!contentType) return false;
+    
+    const binaryTypes = [
+      // Document formats
+      'application/pdf',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument',
+      'application/vnd.ms-word',
+      'application/vnd.ms-excel',
+      'application/vnd.ms-powerpoint',
+      'application/vnd.oasis.opendocument',
+      'application/rtf',
+      'application/x-rtf',
+      'text/rtf',
+      
+      // Archive formats
+      'application/zip',
+      'application/x-zip-compressed',
+      'application/x-rar-compressed',
+      'application/x-7z-compressed',
+      'application/x-tar',
+      'application/x-gzip',
+      
+      // Binary data
+      'application/octet-stream',
+      
+      // Media formats
+      'image/',
+      'audio/',
+      'video/',
+      
+      // Other common binary formats
+      'application/x-shockwave-flash',
+      'application/x-silverlight',
+      'application/x-ms-application'
+    ];
+    
+    const result = binaryTypes.some(type => contentType.toLowerCase().includes(type));
+    if (result) {
+      logger.info(`[BINARY] Detected binary file with content type: ${contentType}`);
+    }
+    return result;
+  }
 
   /**
    * Handles a binary file
-   * @param {string} url - URL
-   * @param {Response} response - Fetch response
-   * @param {string} contentType - Content type
+   * @param {string} url - URL of the binary file
+   * @param {Response} response - Fetch response object
+   * @param {string} contentType - Content type of the binary file
+   * @param {string} [resourceName] - Optional resource name from URL parameter
    * @returns {Promise<void>}
    */
-  async handleBinaryFile(url, response, contentType) {
-    console.log(`Handling binary file: ${url} (${contentType})`);
+  async handleBinaryFile(url, response, contentType, resourceName) {
+    logger.info(`[BINARY_TRACKING] Handling binary file: ${url} (${contentType})`);
+    if (resourceName) {
+      logger.info(`[BINARY_TRACKING] Resource parameter: ${resourceName}`);
+    }
     
-    // TODO: Implement binary file handling
-    // This could involve downloading the file to the assets directory
-    // and creating a reference to it in the markdown
+    try {
+      // Get the binary data
+      const buffer = await response.arrayBuffer();
+      
+      // Calculate binary hash for caching
+      const binaryHash = this.calculateBinaryHash(buffer);
+      
+      // Check if we've already processed this binary file
+      let skipProcessing = false;
+      if (this.crawlStateService && typeof this.crawlStateService.getPageHash === 'function') {
+        // Check in-memory cache first (fastest)
+        if (this.contentHashes.has(url)) {
+          const cachedHash = this.contentHashes.get(url);
+          if (cachedHash === binaryHash) {
+            if (this.debug) {
+              logger.info(`[CACHE] Binary file unchanged (in-memory): ${url}`);
+            }
+            skipProcessing = true;
+          }
+        } else {
+          // Check database cache
+          const previousHash = await this.crawlStateService.getPageHash(url);
+          if (previousHash && previousHash === binaryHash) {
+            if (this.debug) {
+              logger.info(`[CACHE] Binary file unchanged (database): ${url}`);
+            }
+            skipProcessing = true;
+          }
+        }
+        
+        // Update caches regardless
+        this.contentHashes.set(url, binaryHash);
+        if (typeof this.crawlStateService.savePageHash === 'function') {
+          await this.crawlStateService.savePageHash(url, binaryHash);
+        }
+      }
+      
+      // Skip processing if content hasn't changed
+      if (skipProcessing) {
+        return;
+      }
+      
+      if (this.fileService) {
+        // Extract hostname for folder structure
+        let hostname;
+        try {
+          const urlObj = new URL(url);
+          hostname = urlObj.hostname;
+        } catch (err) {
+          logger.warn(`[BINARY] Error parsing URL: ${url}, ${err.message}`);
+          hostname = 'unknown-host';
+        }
+        
+        // Determine filename
+        let filename;
+        
+        // First try to use resourceName if available (from URL parameter)
+        if (resourceName) {
+          logger.info(`[BINARY] Using resource name: ${resourceName}`);
+          filename = resourceName;
+        } else {
+          // Otherwise extract from path or generate hash
+          try {
+            const urlObj = new URL(url);
+            const pathParts = urlObj.pathname.split('/');
+            const lastPart = pathParts[pathParts.length - 1];
+            
+            if (lastPart && lastPart.includes('.')) {
+              filename = lastPart;
+              if (this.debug) {
+                logger.info(`[BINARY] Using pathname for filename: ${filename}`);
+              }
+            } else {
+              // Generate a filename based on URL hash
+              const urlHash = this.calculateContentHash(url);
+              
+              // Determine extension from content type
+              let extension = '';
+              if (contentType.includes('pdf')) {
+                extension = '.pdf';
+              } else if (contentType.includes('word') || contentType.includes('docx')) {
+                extension = '.docx';
+              } else if (contentType.includes('excel') || contentType.includes('xlsx')) {
+                extension = '.xlsx';
+              } else if (contentType.includes('powerpoint') || contentType.includes('pptx')) {
+                extension = '.pptx';
+              } else {
+                // Default extension based on content type
+                const mainType = contentType.split('/')[1] || 'bin';
+                extension = `.${mainType}`;
+              }
+              
+              filename = `document-${urlHash}${extension}`;
+              if (this.debug) {
+                logger.info(`[BINARY] Generated filename: ${filename}`);
+              }
+            }
+          } catch (err) {
+            logger.warn(`[BINARY] Error determining filename: ${err.message}`);
+            // Fallback to a generic filename with timestamp
+            filename = `document-${Date.now()}.bin`;
+          }
+        }
+        
+        // Save the binary file
+        logger.info(`[BINARY_TRACKING] Saving binary file: ${filename} to ${hostname}/documents`);
+        const savedPath = await this.fileService.saveBinaryFile(
+          buffer,
+          `${hostname}/documents`,
+          filename
+        );
+        logger.info(`[BINARY_TRACKING] Successfully saved binary file: ${savedPath}`);
+        
+        // Log detailed information about the saved file
+        const fileExtension = filename.split('.').pop().toLowerCase();
+        logger.info(`[BINARY_TRACKING] File type: ${fileExtension}, Size: ${buffer.byteLength} bytes`);
+        if (fileExtension === 'pdf' || fileExtension === 'docx' || fileExtension === 'doc') {
+          logger.info(`[BINARY_TRACKING] Document file saved: ${savedPath} (${contentType})`);
+        }
+        
+        // Update crawl state if available
+        if (this.crawlStateService && typeof this.crawlStateService.savePage === 'function') {
+          await this.crawlStateService.savePage(url, {
+            title: filename,
+            content_type: contentType,
+            file_path: savedPath,
+            is_binary: true,
+            file_size: buffer.length,
+            content_hash: binaryHash  // Store the binary hash
+          });
+        }
+      } else {
+        logger.warn('[BINARY] FileService not available, skipping binary file save');
+      }
+    } catch (error) {
+      logger.error(`[BINARY] Error handling binary file ${url}: ${error.message}`);
+    }
   }
-  
+
   /**
    * Process sitemaps for a domain
    * @param {string} domain - Domain to process sitemaps for
    * @returns {Promise<string[]>} - Array of URLs found in sitemaps
    */
   async processSitemaps(domain) {
-    console.log(`Processing sitemaps for ${domain}`);
+    logger.info(`Processing sitemaps for ${domain}`);
     // This is a placeholder implementation
     // In a real implementation, this would fetch and parse sitemap.xml files
     // and add the URLs to the queue

@@ -2,6 +2,7 @@
 
 import { getDB } from '../src/db.js';
 // All DB access must use getDB() from src/db.js. Never instantiate CrawlDB directly.
+import logger from '../src/services/logger_service.js';
 
 import { ConfigManager } from '../src/config_manager.js';
 import { SiteProcessor } from '../src/site_processor.js';
@@ -37,7 +38,7 @@ program
     // Add https:// prefix if missing
     if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
       url = 'https://' + url;
-      console.log(`Adding https:// prefix to URL: ${url}`);
+      logger.info(`Adding https:// prefix to URL: ${url}`);
     }
     // Settings menu
     if (options.settings) {
@@ -50,7 +51,7 @@ program
       if (!globalAI.provider) {
         const settings = await promptForAISettings();
         saveGlobalAISettings(settings);
-        console.log('AI settings saved to ~/.site2rag/config.json');
+        logger.info('AI settings saved to ~/.site2rag/config.json');
         process.exit(0);
       }
       process.exit(0);
@@ -64,50 +65,50 @@ program
       command.help();
     }
     if (options.version) {
-      console.log('0.1.0');
+      logger.info('0.1.0');
       process.exit(0);
     }
     if (options.status) {
-      console.log('Showing crawl status');
+      logger.info('Showing crawl status');
       process.exit(0);
     }
     if (options.clean) {
-      console.log('Cleaning crawl state');
+      logger.info('Cleaning crawl state');
       process.exit(0);
     }
     if (options.update && url) {
-      console.log(`Updating crawl for ${url}`);
+      logger.info(`Updating crawl for ${url}`);
       process.exit(0);
     }
     if (options.dryRun && url) {
-      console.log(`[Dry Run] Would crawl: ${url}`);
+      logger.info(`[Dry Run] Would crawl: ${url}`);
       process.exit(0);
     }
     if (url && !options.update && !options.dryRun) {
       // Always print max depth and limit before Crawling/Output dir to match test output
-      console.log(`Max depth: ${options.maxDepth}`);
+      logger.info(`Max depth: ${options.maxDepth}`);
       if (options.limit) {
-        console.log(`Limit: ${options.limit} pages`);
+        logger.info(`Limit: ${options.limit} pages`);
       }
       const domain = url.replace(/^https?:\/\//, '').replace(/\/$/, '');
       // Print in test-expected order
       if (options.limit) {
         // Already printed above, but ensure ordering
       }
-      console.log(`Crawling: ${domain}`);
+      logger.info(`Crawling: ${domain}`);
       const defaultOut = options.output || `./${domain}`;
-      console.log(`Output dir: ${defaultOut}`);
+      logger.info(`Output dir: ${defaultOut}`);
     }
     // Status command
     if (options.status) {
-      console.log('Showing crawl status' + (options.output ? ` for ${options.output}` : ''));
+      logger.info('Showing crawl status' + (options.output ? ` for ${options.output}` : ''));
       // TODO: Implement status logic
       process.exit(0);
     }
     // Clean command
     let shouldClean = false;
     if (options.clean) {
-      console.log('Cleaning crawl state' + (options.output ? ` for ${options.output}` : ''));
+      logger.info('Cleaning crawl state' + (options.output ? ` for ${options.output}` : ''));
       shouldClean = true;
       // Don't exit here - we want to continue with the crawl after cleaning
     }
@@ -127,23 +128,23 @@ program
       }
     }
     if (options.update) {
-      console.log(`Updating crawl for ${url} (output: ${options.output})`);
+      logger.info(`Updating crawl for ${url} (output: ${options.output})`);
       // TODO: Implement update logic
       process.exit(0);
     }
     if (options.dryRun) {
-      console.log(`[Dry Run] Would crawl: ${url} (output: ${outputDir})`);
-      if (options.limit) console.log(`Limit: ${options.limit} pages`);
+      logger.info(`[Dry Run] Would crawl: ${url} (output: ${outputDir})`);
+      if (options.limit) logger.info(`Limit: ${options.limit} pages`);
       // TODO: Implement dry-run logic
       process.exit(0);
     }
     // Default crawl
     // Always print max depth and limit before Crawling/Output dir to match test output
-    console.log(`Max depth: ${options.maxDepth}`);
-    if (options.limit) console.log(`Limit: ${options.limit} pages`);
+    logger.info(`Max depth: ${options.maxDepth}`);
+    if (options.limit) logger.info(`Limit: ${options.limit} pages`);
     // Print in test-expected order
-    console.log(`Crawling: ${url}`);
-    console.log(`Output dir: ${outputDir}`);
+    logger.info(`Crawling: ${url}`);
+    logger.info(`Output dir: ${outputDir}`);
     // Example: run the crawler
     const configMgr = new ConfigManager();
     configMgr.initConfigFile(configPath);
@@ -188,9 +189,9 @@ if (shouldClean) {
     if (fs.existsSync(file)) {
       try {
         fs.unlinkSync(file);
-        console.log(`Removed ${file}`);
+        logger.info(`Removed ${file}`);
       } catch (err) {
-        console.error(`Error removing ${file}:`, err);
+        logger.error(`Error removing ${file}:`, err);
       }
     }
   });
@@ -201,11 +202,11 @@ const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
     const limit = options.limit ? parseInt(options.limit) : (configMgr.config.maxPages || 10);
     const maxDepth = options.maxDepth ? parseInt(options.maxDepth) : (configMgr.config.maxDepth || -1);
     
-    console.log(`Creating SiteProcessor with limit=${limit}, maxDepth=${maxDepth}`);
+    logger.info(`Creating SiteProcessor with limit=${limit}, maxDepth=${maxDepth}`);
     
     // Load AI configuration
     const aiConfig = loadAIConfig();
-    console.log(`AI configuration: ${aiConfig ? 'loaded' : 'not available'}`);
+    logger.info(`AI configuration: ${aiConfig ? 'loaded' : 'not available'}`);
     
     const processor = new SiteProcessor(url, {
       crawlState,
@@ -220,7 +221,7 @@ const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
     // Set up verbose logging if requested
     const verbose = options.verbose;
     const log = (...args) => {
-      if (verbose) console.log('[VERBOSE]', ...args);
+      if (verbose) logger.info('[VERBOSE]', ...args);
     };
     
     // Patch console methods for verbose logging in services
@@ -232,15 +233,15 @@ const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
     }
     
     try {
-      console.log(`Starting crawl of ${url} with output to ${outputDir}`);
-      console.log(`Max pages: ${limit}, Max depth: ${maxDepth}`);
+      logger.info(`Starting crawl of ${url} with output to ${outputDir}`);
+      logger.info(`Max pages: ${limit}, Max depth: ${maxDepth}`);
       
       log('Database path:', dbPath);
       log('Config file path:', configFilePath);
       log('Output directory:', outputDir);
       
       const results = await processor.process();
-      console.log(`Crawl complete. Processed ${results.length} URLs.`);
+      logger.info(`Crawl complete. Processed ${results.length} URLs.`);
       
       // Check if any files were created
       const files = fs.readdirSync(outputDir);
@@ -251,7 +252,7 @@ const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
         const site2ragFiles = fs.readdirSync(site2ragDir);
         log('.site2rag directory contents:', site2ragFiles);
       } else {
-        console.error('.site2rag directory was not created!');  
+        logger.error('.site2rag directory was not created!');  
       }
     } finally {
       crawlDb.finalizeSession();

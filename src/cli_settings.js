@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import prompts from 'prompts';
 import { aiServiceAvailable } from './ai_assist.js';
+import logger from './services/logger_service.js';
 
 const GLOBAL_CONFIG_PATH = path.join(process.env.HOME || process.env.USERPROFILE, '.site2rag', 'config.json');
 
@@ -62,8 +63,8 @@ export function loadGlobalAISettings() {
 
 export async function settingsMenu() {
   const current = loadGlobalAISettings();
-  console.log('Current AI settings:', current);
+  logger.info('Current AI settings:', current);
   const updated = await promptForAISettings();
   saveGlobalAISettings(updated);
-  console.log('Settings updated!');
+  logger.info('Settings updated!');
 }

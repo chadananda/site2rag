@@ -1,6 +1,7 @@
 import { FileService } from './file_service.js';
 import path from 'path';
 import { URL } from 'url';
+import logger from './logger_service.js';
 
 /**
  * Service for managing crawl state, including visited pages, ETags, and links
@@ -152,25 +153,25 @@ export class CrawlStateService {
     // Check ETag if available
     const etag = response.headers.get('etag');
     if (etag && pageData.etag && pageData.etag === etag) {
-      console.log(`[CACHE] ETag match for ${url}: ${etag}`);
+      logger.info(`[CACHE] ETag match for ${url}: ${etag}`);
       return false;
     }
     
     // Check Last-Modified if available
     const lastModified = response.headers.get('last-modified');
     if (lastModified && pageData.last_modified && pageData.last_modified === lastModified) {
-      console.log(`[CACHE] Last-Modified match for ${url}: ${lastModified}`);
+      logger.info(`[CACHE] Last-Modified match for ${url}: ${lastModified}`);
       return false;
     }
     
     // Check content hash as a fallback
     if (contentHash && pageData.content_hash && pageData.content_hash === contentHash) {
-      console.log(`[CACHE] Content hash match for ${url}: ${contentHash}`);
+      logger.info(`[CACHE] Content hash match for ${url}: ${contentHash}`);
       return false;
     }
     
     // If we got here, the content has changed
-    console.log(`[CACHE] Content changed for ${url}`);
+    logger.info(`[CACHE] Content changed for ${url}`);
     return true;
   }
 

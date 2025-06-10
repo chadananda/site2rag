@@ -180,7 +180,7 @@ export async function runContextEnrichment(dbOrPath, aiConfig) {
     await fs.promises.writeFile(doc.file_path, finalMarkdown, 'utf8');
     db.db.prepare('UPDATE pages SET content_status = "contexted" WHERE url = ?').run(doc.url);
   // } catch (err) {
-  //   console.error(`[runContextEnrichment] Failed processing doc with url=${doc.url}:`, err);
+  //   logger.error(`[runContextEnrichment] Failed processing doc with url=${doc.url}:`, err);
   }
   if (shouldClose) db.close();
 }

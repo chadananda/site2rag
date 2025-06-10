@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import logger from './services/logger_service.js';
 
 const DEFAULT_CONFIG = {
   output: './output',
@@ -73,12 +74,12 @@ export class ConfigManager {
       const dirPath = path.dirname(configPath);
       if (!fs.existsSync(dirPath)) {
         fs.mkdirSync(dirPath, { recursive: true });
-        console.log(`Created directory: ${dirPath}`);
+        logger.info(`Created directory: ${dirPath}`);
       }
       
       // Write the config file
       fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
-      console.log(`Created config file: ${configPath}`);
+      logger.info(`Created config file: ${configPath}`);
       return true;
     }
     return false;

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import Database from 'better-sqlite3';
 import path from 'path';
+import logger from './services/logger_service.js';
 
 /**
  * Database utility functions for Site2RAG
@@ -37,7 +38,7 @@ export function checkDbIntegrity(dbPath) {
     db.close();
     return res === 'ok';
   } catch (e) {
-    console.warn(`[DB] Error checking integrity of ${dbPath}:`, e);
+    logger.warn(`[DB] Error checking integrity of ${dbPath}:`, e);
     return false;
   }
 }
@@ -88,7 +89,7 @@ export function getDB(dbPath, opts = {}) {
   // Ensure parent directory exists
   const dbDir = path.dirname(dbPath);
   if (!fs.existsSync(dbDir)) {
-    console.log(`Creating database directory: ${dbDir}`);
+    logger.info(`Creating database directory: ${dbDir}`);
     fs.mkdirSync(dbDir, { recursive: true });
   }
   
@@ -97,7 +98,7 @@ export function getDB(dbPath, opts = {}) {
   const normalizedDir = path.normalize(dbDir);
   const paths = getDbPaths(normalizedDir);
   
-  console.log(`Database paths:\n- Main: ${paths.main}\n- Session: ${paths.session}\n- Previous: ${paths.prev}`);
+  logger.info(`Database paths:\n- Main: ${paths.main}\n- Session: ${paths.session}\n- Previous: ${paths.prev}`);
   
   // Check if main DB is valid and copy to session DB if it is
   const mainValid = checkDbIntegrity(paths.main);
@@ -118,7 +119,7 @@ export function getDB(dbPath, opts = {}) {
       const res = dbInstance.pragma('integrity_check', { simple: true });
       
       if (res !== 'ok') {
-        console.error('[DB] Corruption detected in session DB - attempting recovery...');
+        logger.error('[DB] Corruption detected in session DB - attempting recovery...');
         dbInstance.close();
         
         // Try to recover from previous DB
@@ -128,13 +129,13 @@ export function getDB(dbPath, opts = {}) {
         
         // If recovery failed, create new DB
         try { fs.unlinkSync(paths.session); } catch {}
-        console.warn('[DB] Created new session DB after corruption.');
+        logger.warn('[DB] Created new session DB after corruption.');
         continue;
       }
       
       dbReady = true;
     } catch (err) {
-      console.error('[DB] Error opening session DB:', err);
+      logger.error('[DB] Error opening session DB:', err);
       
       // Try to recover from previous DB
       if (recoverFromPrevDb(paths.prev, paths.session)) {
@@ -143,7 +144,7 @@ export function getDB(dbPath, opts = {}) {
       
       // If recovery failed, create new DB
       try { fs.unlinkSync(paths.session); } catch {}
-      console.warn('[DB] Created new session DB after error.');
+      logger.warn('[DB] Created new session DB after error.');
     }
   }
   
@@ -169,14 +170,14 @@ export function recoverFromPrevDb(prevPath, sessionPath) {
       
       if (prevRes === 'ok') {
         fs.copyFileSync(prevPath, sessionPath);
-        console.warn('[DB] Restored session DB from previous DB.');
+        logger.warn('[DB] Restored session DB from previous DB.');
         return true;
       } else {
-        console.error('[DB] Previous DB is also corrupt. Deleting it.');
+        logger.error('[DB] Previous DB is also corrupt. Deleting it.');
         try { fs.unlinkSync(prevPath); } catch {}
       }
     } catch (e) {
-      console.error('[DB] Error reading previous DB:', e);
+      logger.error('[DB] Error reading previous DB:', e);
       try { fs.unlinkSync(prevPath); } catch {}
     }
   }
@@ -212,7 +213,7 @@ export class CrawlDB {
       fs.copyFileSync(this.paths.main, this.paths.backup);
       return true;
     } catch (e) {
-      console.error('[CrawlDB] Failed to create backup:', e);
+      logger.error('[CrawlDB] Failed to create backup:', e);
       return false;
     }
   }
@@ -230,18 +231,18 @@ export class CrawlDB {
       
       if (res === 'ok') {
         fs.copyFileSync(this.paths.backup, this.paths.main);
-        console.warn('[CrawlDB] Restored DB from backup.');
+        logger.warn('[CrawlDB] Restored DB from backup.');
         return true;
       } else {
-        console.error('[CrawlDB] Backup is also corrupt. Deleting both DB and backup.');
+        logger.error('[CrawlDB] Backup is also corrupt. Deleting both DB and backup.');
       }
     } catch (e) {
-      console.error('[CrawlDB] Error reading backup:', e);
+      logger.error('[CrawlDB] Error reading backup:', e);
     }
     
     try { fs.unlinkSync(this.paths.backup); } catch {}
     try { fs.unlinkSync(this.paths.main); } catch {}
-    console.warn('[CrawlDB] Created new DB after corruption.');
+    logger.warn('[CrawlDB] Created new DB after corruption.');
     return false;
   }
   
@@ -256,7 +257,7 @@ export class CrawlDB {
     
     // Debug: Log upsert for test traceability
     if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
-      console.log('[DB][upsertPage] Upserting page:', JSON.stringify(page));
+      logger.info('[DB][upsertPage] Upserting page:', JSON.stringify(page));
     }
     
     const stmt = this.db.prepare(`
@@ -277,7 +278,7 @@ export class CrawlDB {
     // Debug: Confirm page is now in DB
     if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
       const check = this.getPage(page.url);
-      console.log('[DB][upsertPage] DB now has:', JSON.stringify(check));
+      logger.info('[DB][upsertPage] DB now has:', JSON.stringify(check));
     }
   }
   
@@ -321,20 +322,20 @@ export class CrawlDB {
     try {
       this.close();
     } catch (e) {
-      console.warn('[CrawlDB] Error closing database:', e);
+      logger.warn('[CrawlDB] Error closing database:', e);
       // Continue anyway
     }
     
-    console.log('[CrawlDB] Finalizing session...');
-    console.log(`- Current DB: ${this.paths.main}`);
-    console.log(`- Session DB: ${this.paths.session}`);
-    console.log(`- Previous DB: ${this.paths.prev}`);
+    logger.info('[CrawlDB] Finalizing session...');
+    logger.info(`- Current DB: ${this.paths.main}`);
+    logger.info(`- Session DB: ${this.paths.session}`);
+    logger.info(`- Previous DB: ${this.paths.prev}`);
     
     // Check if the session DB exists and is valid
     let sessionValid = checkDbIntegrity(this.paths.session);
     
     if (!sessionValid) {
-      console.error('[CrawlDB] Session DB is invalid, cannot finalize');
+      logger.error('[CrawlDB] Session DB is invalid, cannot finalize');
       return false;
     }
     
@@ -351,18 +352,18 @@ export class CrawlDB {
         if (fs.existsSync(this.paths.prev)) {
           try {
             fs.unlinkSync(this.paths.prev);
-            console.log(`[CrawlDB] Removed old backup: ${this.paths.prev}`);
+            logger.info(`[CrawlDB] Removed old backup: ${this.paths.prev}`);
           } catch (e) {
-            console.error(`[CrawlDB] Error removing old backup: ${e.message}`);
+            logger.error(`[CrawlDB] Error removing old backup: ${e.message}`);
             // Continue anyway
           }
         }
         
         // Now rename current to prev (atomic operation)
         fs.renameSync(this.paths.main, this.paths.prev);
-        console.log(`[CrawlDB] Backed up current DB to: ${this.paths.prev}`);
+        logger.info(`[CrawlDB] Backed up current DB to: ${this.paths.prev}`);
       } catch (e) {
-        console.error(`[CrawlDB] Error backing up current DB: ${e.message}`);
+        logger.error(`[CrawlDB] Error backing up current DB: ${e.message}`);
         // Continue anyway - we still want to try to promote the session DB
       }
     }
@@ -370,10 +371,10 @@ export class CrawlDB {
     // 2. Rename session DB to current DB
     try {
       fs.renameSync(this.paths.session, this.paths.main);
-      console.log(`[CrawlDB] Promoted session DB to: ${this.paths.main}`);
+      logger.info(`[CrawlDB] Promoted session DB to: ${this.paths.main}`);
       return true;
     } catch (e) {
-      console.error(`[CrawlDB] Error promoting session DB: ${e.message}`);
+      logger.error(`[CrawlDB] Error promoting session DB: ${e.message}`);
       return false;
     }
   }

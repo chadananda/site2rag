@@ -8,6 +8,7 @@ import { CrawlStateService } from '../src/services/crawl_state_service.js';
 import fs from 'fs';
 import path from 'path';
 import http from 'http';
+import logger from '../src/services/logger_service.js';
 
 // Clean output directory
 const outputDir = './output/binary-test';
@@ -18,7 +19,7 @@ fs.mkdirSync(outputDir, { recursive: true });
 
 // Create a simple HTTP server to serve test files
 const server = http.createServer((req, res) => {
-  console.log(`Request received: ${req.url}`);
+  logger.info(`Request received: ${req.url}`);
   
   if (req.url === '/test.pdf') {
     res.setHeader('Content-Type', 'application/pdf');
@@ -41,7 +42,7 @@ const server = http.createServer((req, res) => {
 // Start the server
 const PORT = 3456;
 server.listen(PORT, async () => {
-  console.log(`Test server running on http://localhost:${PORT}`);
+  logger.info(`Test server running on http://localhost:${PORT}`);
   
   try {
     // Initialize services
@@ -67,25 +68,25 @@ server.listen(PORT, async () => {
     // Initialize crawl service
     await crawlService.initialize();
     
-    console.log('\n--- Testing PDF file download ---');
+    logger.info('\n--- Testing PDF file download ---');
     // Test PDF file
     await crawlService.crawl(`http://localhost:${PORT}/test.pdf`);
     
-    console.log('\n--- Testing PDF file in nested directory ---');
+    logger.info('\n--- Testing PDF file in nested directory ---');
     // Test PDF file in nested directory
     await crawlService.crawl(`http://localhost:${PORT}/documents/report.pdf`);
     
-    console.log('\n--- Testing DOCX file in nested directory ---');
+    logger.info('\n--- Testing DOCX file in nested directory ---');
     // Test DOCX file in nested directory
     await crawlService.crawl(`http://localhost:${PORT}/files/document.docx`);
     
-    console.log('\n--- Test completed ---');
+    logger.info('\n--- Test completed ---');
     
     // Check if files were saved correctly
-    console.log('\nChecking saved files:');
+    logger.info('\nChecking saved files:');
     const checkFile = (filePath) => {
       const exists = fs.existsSync(filePath);
-      console.log(`${filePath}: ${exists ? 'EXISTS' : 'MISSING'}`);
+      logger.info(`${filePath}: ${exists ? 'EXISTS' : 'MISSING'}`);
       return exists;
     };
     
@@ -98,13 +99,13 @@ server.listen(PORT, async () => {
       checkFile(nestedPdfPath) && 
       checkFile(nestedDocxPath);
       
-    console.log(`\nTest result: ${allFilesExist ? 'SUCCESS' : 'FAILURE'}`);
+    logger.info(`\nTest result: ${allFilesExist ? 'SUCCESS' : 'FAILURE'}`);
   } catch (error) {
-    console.error('Test failed with error:', error);
+    logger.error('Test failed with error:', error);
   } finally {
     // Close the server
     server.close(() => {
-      console.log('Test server closed');
+      logger.info('Test server closed');
       process.exit(0);
     });
   }

@@ -12,6 +12,7 @@ import {
   cleanupContent,
   generateConsistentSelector
 } from './services/content_extractor.js';
+import logger from './services/logger_service.js';
 
 // Sample HTML files to test
 const testFiles = [
@@ -100,7 +101,7 @@ const sampleHTML = `
  * @param {String} source - Source identifier for logging
  */
 function testContentExtractor(html, source) {
-  console.log(`\n=== Testing content extractor on ${source} ===\n`);
+  logger.info(`\n=== Testing content extractor on ${source} ===\n`);
   
   // Load HTML with cheerio
   const $ = load(html);
@@ -117,50 +118,50 @@ function testContentExtractor(html, source) {
       if (!selectorDecisions[selector]) {
         selectorDecisions[selector] = { decision, reason };
       }
-      console.log(`[DECISION] ${selector}: ${decision} (${reason})`);
+      logger.info(`[DECISION] ${selector}: ${decision} (${reason})`);
     }
   };
   
   // Extract main content
-  console.log('Extracting main content...');
+  logger.info('Extracting main content...');
   const mainContent = extractMainContent($, $('body'), options);
   
   // Log results
-  console.log('\n--- Results ---\n');
-  console.log('Main content found:', mainContent.length > 0);
+  logger.info('\n--- Results ---\n');
+  logger.info('Main content found:', mainContent.length > 0);
   
   if (mainContent.length > 0) {
     const contentSelector = generateConsistentSelector($, mainContent);
-    console.log('Content selector:', contentSelector);
+    logger.info('Content selector:', contentSelector);
     
     // Get text length before and after extraction to calculate reduction percentage
     const originalTextLength = $('body').text().trim().length;
     const extractedTextLength = mainContent.text().trim().length;
     const reductionPercent = ((originalTextLength - extractedTextLength) / originalTextLength * 100).toFixed(1);
     
-    console.log('Original DOM text length:', originalTextLength);
-    console.log('Extracted content text length:', extractedTextLength);
-    console.log('Content reduction:', reductionPercent + '%');
+    logger.info('Original DOM text length:', originalTextLength);
+    logger.info('Extracted content text length:', extractedTextLength);
+    logger.info('Content reduction:', reductionPercent + '%');
     
     // Log content preview
     const contentPreview = mainContent.text().trim().substring(0, 150) + '...';
-    console.log('\nContent preview:', contentPreview);
+    logger.info('\nContent preview:', contentPreview);
     
     // Log HTML structure
-    console.log('\nExtracted HTML structure:');
-    console.log(mainContent.html().substring(0, 500) + (mainContent.html().length > 500 ? '...' : ''));
+    logger.info('\nExtracted HTML structure:');
+    logger.info(mainContent.html().substring(0, 500) + (mainContent.html().length > 500 ? '...' : ''));
   }
   
   // Log selector decisions summary
-  console.log('\n--- Selector Decisions ---\n');
+  logger.info('\n--- Selector Decisions ---\n');
   Object.entries(selectorDecisions).forEach(([selector, { decision, reason }]) => {
-    console.log(`${selector}: ${decision} (${reason})`);
+    logger.info(`${selector}: ${decision} (${reason})`);
   });
 }
 
 // Main test function
 async function runTests() {
-  console.log('=== Content Extractor Test ===\n');
+  logger.info('=== Content Extractor Test ===\n');
   
   // Test with sample HTML
   testContentExtractor(sampleHTML, 'sample HTML');
@@ -171,7 +172,7 @@ async function runTests() {
       const html = fs.readFileSync(file, 'utf-8');
       testContentExtractor(html, path.basename(file));
     } catch (error) {
-      console.error(`Error testing file ${file}:`, error);
+      logger.error(`Error testing file ${file}:`, error);
     }
   }
 }

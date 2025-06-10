@@ -1,4 +1,5 @@
 import { URL } from 'url';
+import logger from './logger_service.js';
 
 /**
  * Service for URL-related operations including normalization,
@@ -70,7 +71,7 @@ export class UrlService {
       // Join the segments back together with path separators
       return safeSegments.join('/');
     } catch (e) {
-      console.error(`Error creating safe filename for ${url}:`, e.message);
+      logger.error(`Error creating safe filename for ${url}:`, e.message);
       return 'page';
     }
   }
@@ -127,7 +128,7 @@ export class UrlService {
       // Otherwise, must match at least one include pattern
       return includes.some(pattern => this.matchGlob(pattern, pathname));
     } catch (e) {
-      console.log(`[URL] Error matching patterns: ${e.message}`);
+      logger.info(`[URL] Error matching patterns: ${e.message}`);
       return false;
     }
   }
@@ -145,7 +146,7 @@ export class UrlService {
     // Ensure URL is a string, not an object
     const urlString = typeof url === 'object' ? url.href : url;
     
-    console.log(`shouldSkip check for ${urlString}: depth=${depth}, maxDepth=${maxDepth}, visited=${visited.has(urlString)}, previouslyCrawled=${previouslyCrawled}`);
+    logger.info(`shouldSkip check for ${urlString}: depth=${depth}, maxDepth=${maxDepth}, visited=${visited.has(urlString)}, previouslyCrawled=${previouslyCrawled}`);
     
     // Skip if we've already visited this URL in the current session
     if (visited.has(urlString)) {
@@ -191,11 +192,11 @@ export class UrlService {
       }
       
       // Log domains that don't match for debugging
-      console.log(`[DOMAIN CHECK] ${hostname} is not part of ${baseDomain} - skipping`);
+      logger.info(`[DOMAIN CHECK] ${hostname} is not part of ${baseDomain} - skipping`);
       
       return false;
     } catch (e) {
-      console.error(`Error checking domain for ${url}:`, e.message);
+      logger.error(`Error checking domain for ${url}:`, e.message);
       return false;
     }
   }

@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import logger from './logger_service.js';
 
 /**
  * Service for file system operations
@@ -90,7 +91,7 @@ This file contains HTML blocks that were removed during content processing.
 
     // Write the debug file
     await this.writeFile(debugFilePath, debugContent);
-    console.log(`[DEBUG] Saved removed blocks to ${debugFilePath}`);
+    logger.info(`[DEBUG] Saved removed blocks to ${debugFilePath}`);
     return debugFilePath;
   }
 
@@ -118,7 +119,7 @@ This file contains HTML blocks that were removed during content processing.
   getOutputPath(domain, filename, createDir = true) {
     // Ensure the output directory exists
     if (createDir && !fs.existsSync(this.outputDir)) {
-      console.log(`Creating output directory: ${this.outputDir}`);
+      logger.info(`Creating output directory: ${this.outputDir}`);
       fs.mkdirSync(this.outputDir, { recursive: true });
     }
     
@@ -207,7 +208,7 @@ This file contains HTML blocks that were removed during content processing.
    */
   async downloadDocument(url, baseUrl, hostname) {
     try {
-      console.log(`[DOCUMENT] Downloading document from ${url}`);
+      logger.info(`[DOCUMENT] Downloading document from ${url}`);
       
       // Resolve URL if it's relative
       let absoluteUrl = url;
@@ -215,7 +216,7 @@ This file contains HTML blocks that were removed during content processing.
         try {
           absoluteUrl = new URL(url, baseUrl).href;
         } catch (error) {
-          console.warn(`[DOCUMENT] Error resolving URL: ${url}`, error);
+          logger.warn(`[DOCUMENT] Error resolving URL: ${url}`, error);
           return { success: false, error: 'Invalid URL' };
         }
       }
@@ -223,7 +224,7 @@ This file contains HTML blocks that were removed during content processing.
       // Fetch the document
       const response = await fetch(absoluteUrl);
       if (!response.ok) {
-        console.warn(`[DOCUMENT] Failed to download document: ${response.status} ${response.statusText}`);
+        logger.warn(`[DOCUMENT] Failed to download document: ${response.status} ${response.statusText}`);
         return { success: false, error: `HTTP error: ${response.status}` };
       }
       
@@ -263,7 +264,7 @@ This file contains HTML blocks that were removed during content processing.
       // Calculate the relative path from the hostname directory
       const relativePath = path.join('documents', filename);
       
-      console.log(`[DOCUMENT] Saved document to ${outputPath}`);
+      logger.info(`[DOCUMENT] Saved document to ${outputPath}`);
       return { 
         success: true, 
         relativePath, 
@@ -271,7 +272,7 @@ This file contains HTML blocks that were removed during content processing.
         filename
       };
     } catch (error) {
-      console.error(`[DOCUMENT] Error downloading document: ${error.message}`);
+      logger.error(`[DOCUMENT] Error downloading document: ${error.message}`);
       return { success: false, error: error.message };
     }
   }
@@ -286,7 +287,7 @@ This file contains HTML blocks that were removed during content processing.
   async saveBinaryFile(domain, filename, data) {
     const outputPath = this.getOutputPath(domain, filename);
     await this.writeBinaryFile(outputPath, data);
-    console.log(`Saved binary file to: ${outputPath}`);
+    logger.info(`Saved binary file to: ${outputPath}`);
     return outputPath;
   }
 }

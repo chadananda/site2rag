@@ -10,6 +10,7 @@ import {
   cleanupContent,
   generateConsistentSelector
 } from './content_extractor.js';
+import logger from './logger_service.js';
 
 /**
  * Service for HTML content processing, extraction, and classification
@@ -28,11 +29,11 @@ export class ContentService {
     // Create debug directory if debug mode is enabled
     if (this.debug) {
       this.debugDir = path.join(this.outputDir, '.site2rag', 'debug');
-      console.log(`[DEBUG] Debug mode enabled, debug info will be saved to ${this.debugDir}`);
+      logger.info(`[DEBUG] Debug mode enabled, debug info will be saved to ${this.debugDir}`);
       try {
         fs.mkdirSync(this.debugDir, { recursive: true });
       } catch (err) {
-        console.warn(`[DEBUG] Failed to create debug directory: ${err.message}`);
+        logger.warn(`[DEBUG] Failed to create debug directory: ${err.message}`);
       }
     }
     this.fileService = options.fileService;
@@ -55,7 +56,7 @@ export class ContentService {
     // Initialize debug tracking object early so we can track boilerplate removal
     let removedBlocks = null;
     if (this.debug) {
-      console.log('[DEBUG] Debug mode enabled, initializing removedBlocks tracking');
+      logger.info('[DEBUG] Debug mode enabled, initializing removedBlocks tracking');
       removedBlocks = { selectorDecisions: new Map() };
     }
     
@@ -63,7 +64,12 @@ export class ContentService {
     const main = await this.extractMainContent($, removedBlocks);
     
     if (!main || main.length === 0) {
-      console.warn('No main content found');
+      // Only log as warning in debug mode, otherwise use info level
+      if (this.debug) {
+        logger.warn('No main content found');
+      } else {
+        logger.info('No main content found');
+      }
       return { $, main: null, links, metadata, removedBlocks };
     }
     
@@ -77,7 +83,7 @@ export class ContentService {
       try {
         await this.applyBlockClassification($, main, removedBlocks);
       } catch (error) {
-        console.error('[AI] Error applying block classification:', error);
+        logger.error('[AI] Error applying block classification:', error);
       }
     }
     
@@ -102,7 +108,7 @@ export class ContentService {
    */
   extractMainContent($, removedBlocks = null) {
     try {
-      console.log('[CONTENT] Starting main content extraction with generic approach');
+      logger.info('[CONTENT] Starting main content extraction with generic approach');
       
       // Setup options for content extraction
       const options = {
@@ -113,19 +119,90 @@ export class ContentService {
         }
       };
       
-      // Use our framework-agnostic content extractor
-      const extractedContent = extractGenericContent($, $('body'), options);
-      
-      if (extractedContent && extractedContent.length > 0) {
-        console.log('[CONTENT] Successfully extracted main content');
-        return extractedContent;
+      try {
+        // Use our framework-agnostic content extractor
+        const extractedContent = extractGenericContent($, $('body'), options);
+        
+        if (extractedContent && extractedContent.length > 0) {
+          logger.info('[CONTENT] Successfully extracted main content');
+          return extractedContent;
+        }
+      } catch (extractError) {
+        // Log the specific extraction error but continue with fallbacks
+        if (this.debug) {
+          logger.warn('[CONTENT] Generic extractor failed, trying fallbacks:', extractError);
+        } else {
+          logger.info('[CONTENT] Generic extractor failed, trying fallbacks');
+        }
       }
       
-      console.warn('[CONTENT] No content found, returning empty set');
-      return $();
+      // Fallback 1: Try common content selectors
+      const commonSelectors = [
+        'article', 'main', '[role="main"]', '.content', '#content', '.main-content', 
+        '#main-content', '.post-content', '.entry-content', '.article-content'
+      ];
+      
+      for (const selector of commonSelectors) {
+        const element = $(selector).first();
+        if (element.length > 0 && element.text().trim().length > 100) {
+          logger.info(`[CONTENT] Found content using selector: ${selector}`);
+          return element;
+        }
+      }
+      
+      // Fallback 2: Find the element with the most paragraph tags
+      const containers = $('div, section').filter(function() {
+        return $(this).find('p').length >= 2 && $(this).text().trim().length > 200;
+      });
+      
+      if (containers.length > 0) {
+        // Sort by number of paragraphs (descending)
+        const sortedContainers = Array.from(containers).sort((a, b) => {
+          return $(b).find('p').length - $(a).find('p').length;
+        });
+        
+        if (sortedContainers.length > 0) {
+          logger.info('[CONTENT] Found content using paragraph density heuristic');
+          return $(sortedContainers[0]);
+        }
+      }
+      
+      // Only log as warning in debug mode, otherwise use info level
+      if (this.debug) {
+        logger.warn('[CONTENT] No content found after all fallbacks, returning body');
+      } else {
+        logger.info('[CONTENT] No content found after fallbacks');
+      }
+      
+      // Last resort: return the body element
+      return $('body');
     } catch (error) {
-      console.error('[CONTENT] Error extracting main content:', error);
-      return $();
+      // Only log full error in debug mode
+      if (this.debug) {
+        logger.error('[CONTENT] Error extracting main content:', error);
+      } else {
+        // In production, only log for the first few URLs to avoid repetition
+        // Use a class property to track error count instead of a static variable
+        if (!this.contentExtractionErrorCount) {
+          this.contentExtractionErrorCount = 0;
+        }
+        
+        if (this.contentExtractionErrorCount < 3) {
+          logger.error('[CONTENT] Error extracting main content');
+          this.contentExtractionErrorCount++;
+        } else if (this.contentExtractionErrorCount === 3) {
+          logger.error('[CONTENT] Additional content extraction errors suppressed to reduce verbosity');
+          this.contentExtractionErrorCount++;
+        }
+      }
+      
+      // Even in case of error, return the body element as a fallback
+      try {
+        return $('body');
+      } catch (e) {
+        // If even that fails, return an empty set
+        return $();
+      }
     }
   }
 
@@ -139,7 +216,7 @@ export class ContentService {
   trackSelectorDecision(selector, decision, removedBlocks, reason) {
     if (this.debug && removedBlocks && removedBlocks.selectorDecisions) {
       removedBlocks.selectorDecisions.set(selector, { decision, reason });
-      console.log(`[DECISION] ${selector}: ${decision} (${reason})`);
+      logger.info(`[DECISION] ${selector}: ${decision} (${reason})`);
     }
   }
 
@@ -188,17 +265,17 @@ export class ContentService {
               const absoluteUrl = new URL(href, baseUrl).href;
               $(el).attr('href', absoluteUrl);
             } catch (error) {
-              console.warn(`[LINKS] Error resolving URL: ${href}`, error);
+              logger.warn(`[LINKS] Error resolving URL: ${href}`, error);
             }
           }
         } catch (error) {
-          console.warn(`[LINKS] Error processing link: ${href}`, error);
+          logger.warn(`[LINKS] Error processing link: ${href}`, error);
         }
       });
       
       // Process document downloads
       if (documentDownloads.length > 0) {
-        console.log(`[DOCUMENT] Found ${documentDownloads.length} document links to download`);
+        logger.info(`[DOCUMENT] Found ${documentDownloads.length} document links to download`);
         
         for (const item of documentDownloads) {
           const result = await this.fileService.downloadDocument(item.href, baseUrl, hostname);
@@ -206,13 +283,52 @@ export class ContentService {
           if (result.success) {
             // Update the link to point to the local file
             $(item.element).attr('href', result.relativePath);
-            console.log(`[DOCUMENT] Updated link to local path: ${result.relativePath}`);
+            logger.info(`[DOCUMENT] Updated link to local path: ${result.relativePath}`);
           }
         }
       }
     } catch (error) {
-      console.error(`[LINKS] Error processing links: ${error.message}`);
+      logger.error(`[LINKS] Error processing links: ${error.message}`);
     }
+  }
+  
+  /**
+   * Check if a resource filename represents a binary file
+   * @param {string} filename - Filename to check
+   * @returns {boolean} - Whether the filename likely represents a binary file
+   */
+  isBinaryResource(filename) {
+    if (!filename) return false;
+    
+    // Check file extension
+    const binaryExtensions = [
+      // Document formats
+      '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx',
+      '.odt', '.ods', '.odp', '.rtf',
+      
+      // Archive formats
+      '.zip', '.rar', '.7z', '.tar', '.gz',
+      
+      // Media formats
+      '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.svg',
+      '.mp3', '.mp4', '.wav', '.avi', '.mov'
+    ];
+    
+    const lowercaseFilename = filename.toLowerCase();
+    const result = binaryExtensions.some(ext => lowercaseFilename.endsWith(ext));
+    
+    if (result) {
+      logger.info(`[PDF_TRACKING] ContentService detected binary resource: ${filename}`);
+      // Log more details about the file type
+      const ext = filename.split('.').pop().toLowerCase();
+      if (ext === 'pdf') {
+        logger.info(`[PDF_TRACKING] PDF file detected: ${filename}`);
+      } else if (ext === 'docx' || ext === 'doc') {
+        logger.info(`[PDF_TRACKING] Word document detected: ${filename}`);
+      }
+    }
+    
+    return result;
   }
   
   /**
@@ -225,33 +341,98 @@ export class ContentService {
   extractLinks($, element, baseUrl) {
     const links = [];
     const seenUrls = new Set();
+    let totalFound = 0;
+    let totalAdded = 0;
     
     $(element).find('a[href]').each((i, el) => {
       const href = $(el).attr('href');
       if (!href) return;
       
+      totalFound++;
+      
       try {
-        // Resolve relative URLs
-        const resolvedUrl = new URL(href, baseUrl).href;
+        // Skip javascript: links, mailto:, tel:, etc.
+        if (href.startsWith('javascript:') || 
+            href.startsWith('mailto:') || 
+            href.startsWith('tel:') || 
+            href === '#') {
+          return;
+        }
+        
+        // Handle both absolute and relative URLs
+        let resolvedUrl;
+        
+        if (href.match(/^https?:\/\//)) {
+          // Absolute URL
+          resolvedUrl = href;
+        } else if (href.startsWith('/')) {
+          // Root-relative URL
+          try {
+            const baseUrlObj = new URL(baseUrl);
+            resolvedUrl = `${baseUrlObj.protocol}//${baseUrlObj.host}${href}`;
+          } catch (e) {
+            logger.warn(`[LINKS] Cannot resolve root-relative URL: ${href} with base ${baseUrl}`);
+            return;
+          }
+        } else {
+          // Relative URL - use URL constructor
+          try {
+            resolvedUrl = new URL(href, baseUrl).href;
+          } catch (e) {
+            logger.warn(`[LINKS] Cannot resolve relative URL: ${href} with base ${baseUrl}`);
+            return;
+          }
+        }
         
         // Skip duplicates
         if (seenUrls.has(resolvedUrl)) return;
         seenUrls.add(resolvedUrl);
         
-        // Add to links array - just the URL string, not an object
-        links.push(resolvedUrl);
+        // Check if this is a resource link (PDF, DOCX, etc.)
+        const urlObj = new URL(resolvedUrl);
+        const resourceParam = urlObj.searchParams.get('resource');
+        
+        if (resourceParam && this.isBinaryResource(resourceParam)) {
+          // This is a binary resource link
+          // Create a direct URL to the resource
+          const directResourceUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}${urlObj.search}`;
+          
+          // Enhanced logging for PDF tracking
+          const ext = resourceParam.split('.').pop().toLowerCase();
+          if (ext === 'pdf') {
+            logger.info(`[PDF_TRACKING] Found PDF link: ${resourceParam}`);
+            logger.info(`[PDF_TRACKING] Page URL: ${resolvedUrl}`);
+            logger.info(`[PDF_TRACKING] Direct URL: ${directResourceUrl}`);
+          } else if (ext === 'docx' || ext === 'doc') {
+            logger.info(`[PDF_TRACKING] Found Word document link: ${resourceParam}`);
+          } else {
+            logger.info(`[LINKS] Found binary resource: ${resourceParam} at ${directResourceUrl}`);
+          }
+          
+          // Add both the page URL and the resource URL
+          links.push(resolvedUrl);
+          totalAdded++;
+          links.push(directResourceUrl);
+          totalAdded++;
+        } else {
+          // Regular link
+          links.push(resolvedUrl);
+          totalAdded++;
+        }
         
         // Store metadata for future use if needed
         const metadata = {
           text: $(el).text().trim(),
-          title: $(el).attr('title') || ''
+          title: $(el).attr('title') || '',
+          isResource: !!resourceParam
         };
         // We could store this metadata somewhere if needed
       } catch (error) {
-        console.warn(`[LINKS] Invalid URL: ${href}`);
+        logger.warn(`[LINKS] Error processing URL: ${href} - ${error.message}`);
       }
     });
     
+    logger.info(`[LINKS] Found ${totalFound} links, added ${totalAdded} unique URLs from ${baseUrl}`);
     return links;
   }
 
@@ -372,14 +553,14 @@ export class ContentService {
     if (!main || main.length === 0) return;
     
     try {
-      console.log('[AI] Applying AI-based block classification');
+      logger.info('[AI] Applying AI-based block classification');
       
       // Get all blocks to classify
       const blocks = main.children().toArray();
       
       // Skip if no blocks to classify
       if (blocks.length === 0) {
-        console.log('[AI] No blocks to classify');
+        logger.info('[AI] No blocks to classify');
         return;
       }
       
@@ -421,9 +602,9 @@ export class ContentService {
         }
       });
       
-      console.log('[AI] Block classification complete');
+      logger.info('[AI] Block classification complete');
     } catch (error) {
-      console.error('[AI] Error applying block classification:', error);
+      logger.error('[AI] Error applying block classification:', error);
     }
   }
 
@@ -565,7 +746,7 @@ export class ContentService {
         pathname = decodeURIComponent(pathname);
       } catch (e) {
         // If decoding fails, use the original pathname
-        console.warn(`[DEBUG] Failed to decode pathname: ${pathname}`);
+        logger.warn(`[DEBUG] Failed to decode pathname: ${pathname}`);
       }
       
       // Remove leading and trailing slashes
@@ -609,9 +790,9 @@ export class ContentService {
       // Save the debug markdown file
       fs.writeFileSync(debugFilePath, debugMarkdown);
       
-      console.log(`[DEBUG] Saved debug report to ${debugFilePath}`);
+      logger.info(`[DEBUG] Saved debug report to ${debugFilePath}`);
     } catch (err) {
-      console.error(`[DEBUG] Error saving debug information: ${err.message}`);
+      logger.error(`[DEBUG] Error saving debug information: ${err.message}`);
     }
   }
 }

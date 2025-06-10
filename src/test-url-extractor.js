@@ -8,6 +8,7 @@ import fetch from 'node-fetch';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import logger from './services/logger_service.js';
 
 // Get the directory name
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -25,7 +26,7 @@ if (!fs.existsSync(outputDir)) {
  */
 async function fetchHtml(url) {
   try {
-    console.log(`Fetching URL: ${url}`);
+    logger.info(`Fetching URL: ${url}`);
     const response = await fetch(url);
     
     if (!response.ok) {
@@ -35,7 +36,7 @@ async function fetchHtml(url) {
     const html = await response.text();
     return html;
   } catch (error) {
-    console.error('Error fetching URL:', error);
+    logger.error('Error fetching URL:', error);
     throw error;
   }
 }
@@ -48,7 +49,7 @@ async function fetchHtml(url) {
 function saveToFile(content, filename) {
   const filePath = path.join(outputDir, filename);
   fs.writeFileSync(filePath, content);
-  console.log(`Output saved to: ${filePath}`);
+  logger.info(`Output saved to: ${filePath}`);
 }
 
 /**
@@ -57,7 +58,7 @@ function saveToFile(content, filename) {
  */
 async function testUrlExtraction(url) {
   try {
-    console.log(`\n=== Testing content extraction on ${url} ===\n`);
+    logger.info(`\n=== Testing content extraction on ${url} ===\n`);
     
     // Fetch HTML content
     const html = await fetchHtml(url);
@@ -66,12 +67,12 @@ async function testUrlExtraction(url) {
     const contentService = new ContentService({ debug: true });
     
     // Process HTML content
-    console.log('Processing HTML content...');
+    logger.info('Processing HTML content...');
     const { $, main, removedBlocks } = await contentService.processHtml(html, url);
     
     // Check if content was extracted
     if (!main || main.length === 0) {
-      console.error('No content extracted!');
+      logger.error('No content extracted!');
       return;
     }
     
@@ -80,10 +81,10 @@ async function testUrlExtraction(url) {
     const extractedTextLength = main.text().trim().length;
     const reductionPercent = ((originalTextLength - extractedTextLength) / originalTextLength * 100).toFixed(1);
     
-    console.log('\n--- Results ---\n');
-    console.log('Original DOM text length:', originalTextLength);
-    console.log('Extracted content text length:', extractedTextLength);
-    console.log('Content reduction:', reductionPercent + '%');
+    logger.info('\n--- Results ---\n');
+    logger.info('Original DOM text length:', originalTextLength);
+    logger.info('Extracted content text length:', extractedTextLength);
+    logger.info('Content reduction:', reductionPercent + '%');
     
     // Generate output files
     const urlObj = new URL(url);
@@ -124,9 +125,9 @@ ${main.text().trim().split('\\n').filter(line => line.trim()).join('\\n\\n')}
       saveToFile(debugReport, `${baseFilename}_debug.md`);
     }
     
-    console.log('\nExtraction test completed successfully!');
+    logger.info('\nExtraction test completed successfully!');
   } catch (error) {
-    console.error('Error testing URL extraction:', error);
+    logger.error('Error testing URL extraction:', error);
   }
 }
 
@@ -136,8 +137,8 @@ async function main() {
   const url = process.argv[2];
   
   if (!url) {
-    console.error('Please provide a URL to test');
-    console.error('Usage: node test-url-extractor.js <url>');
+    logger.error('Please provide a URL to test');
+    logger.error('Usage: node test-url-extractor.js <url>');
     process.exit(1);
   }
   

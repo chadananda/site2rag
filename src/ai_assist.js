@@ -1,4 +1,5 @@
 import fetch from 'node-fetch';
+import logger from './services/logger_service.js';
 
 export async function aiServiceAvailable({ provider = 'ollama', host } = {}) {
   if (provider === 'ollama') {
@@ -78,7 +79,7 @@ export async function classifyBlocksWithAI(blocks, opts = {}) {
     lastPrompt = prompt;
     lastModel = model;
     
-    console.log(`[AI] Sending ${blocks.length} blocks to AI for classification`);
+    logger.info(`[AI] Sending ${blocks.length} blocks to AI for classification`);
     
     try {
       const ollamaRes = await fetch(`${host}/api/generate`, {

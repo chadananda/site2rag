@@ -1,6 +1,7 @@
 import fetch from 'node-fetch';
 import robotsParser from 'robots-parser';
 import { URL } from 'url';
+import logger from './logger_service.js';
 
 /**
  * Service for handling HTTP requests, conditional fetching, and robots.txt compliance
@@ -13,7 +14,7 @@ export class FetchService {
    * @param {string} options.userAgent - User agent string for requests (default: 'site2rag-crawler')
    */
   constructor(options = {}) {
-    this.politeDelay = options.politeDelay || 1000;
+    this.politeDelay = options.politeDelay || 500; // Reduced from 1000ms to 500ms
     this.lastFetchStartedAt = null;
     this.robots = null;
     this.userAgent = options.userAgent || 'site2rag-crawler';
@@ -55,7 +56,7 @@ export class FetchService {
       }
       return false;
     } catch (e) {
-      console.log(`[FETCH] Error fetching robots.txt: ${e.message}`);
+      logger.info(`[FETCH] Error fetching robots.txt: ${e.message}`);
       return false;
     }
   }
@@ -88,7 +89,7 @@ export class FetchService {
    * @returns {Promise<Response>} - Fetch response
    */
   async fetchUrl(url, options = {}) {
-    console.log(`FetchService.fetchUrl: Fetching ${url}`);
+    logger.info(`FetchService.fetchUrl: Fetching ${url}`);
     await this.applyPoliteDelay();
     
     const controller = this.createController();
@@ -100,7 +101,10 @@ export class FetchService {
         ...options.headers
       };
       
-      console.log(`Fetch headers:`, headers);
+      // Only log headers in debug mode
+      if (this.debug) {
+        logger.log('DEBUG', `Fetch headers:`, headers);
+      }
       
       try {
         const response = await fetch(url, {
@@ -109,10 +113,10 @@ export class FetchService {
           timeout: options.timeout || 30000
         });
         
-        console.log(`Fetch response for ${url}: status=${response.status}, ok=${response.ok}`);
+        logger.info(`Fetch response for ${url}: status=${response.status}, ok=${response.ok}`);
         return response;
       } catch (error) {
-        console.error(`Fetch error for ${url}:`, error.message);
+        logger.error(`Fetch error for ${url}:`, error.message);
         throw error;
       }
     } finally {

@@ -1,4 +1,5 @@
 import TurndownService from 'turndown';
+import logger from './logger_service.js';
 
 /**
  * Service for HTML to Markdown conversion and content formatting
@@ -45,7 +46,7 @@ export class MarkdownService {
         if (isPdfOrDocx && !href.startsWith('http') && !href.startsWith('//')) {
           // For PDF/DOCX, we'll keep the relative path
           // TODO: Download the file to the local folder structure
-          console.log(`[MARKDOWN] Keeping relative link for document: ${href}`);
+          logger.info(`[MARKDOWN] Keeping relative link for document: ${href}`);
           return `[${content}](${href}${title})`;
         } else {
           // For all other links, ensure they are absolute
@@ -56,7 +57,7 @@ export class MarkdownService {
             try {
               absoluteUrl = new URL(href, this.baseUrl).href;
             } catch (error) {
-              console.warn(`[MARKDOWN] Error resolving URL: ${href}`, error);
+              logger.warn(`[MARKDOWN] Error resolving URL: ${href}`, error);
               absoluteUrl = href; // Fallback to original
             }
           }
@@ -137,7 +138,7 @@ export class MarkdownService {
       
       return markdown;
     } catch (e) {
-      console.log(`[MARKDOWN] Error converting to markdown: ${e.message}`);
+      logger.info(`[MARKDOWN] Error converting to markdown: ${e.message}`);
       return '';
     }
   }
