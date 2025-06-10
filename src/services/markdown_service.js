@@ -26,6 +26,46 @@ export class MarkdownService {
    * @private
    */
   addCustomRules() {
+    // Custom link handling
+    this.turndownService.addRule('links', {
+      filter: 'a',
+      replacement: (content, node) => {
+        // Get the href attribute
+        const href = node.getAttribute('href');
+        if (!href) return content;
+        
+        // Check if this is a PDF or DOCX link
+        const isPdfOrDocx = href.toLowerCase().endsWith('.pdf') || href.toLowerCase().endsWith('.docx');
+        
+        // Get the title attribute
+        const title = node.title ? ` "${node.title}"` : '';
+        
+        // If it's a PDF or DOCX and it's a relative link, keep it relative
+        // Otherwise, make sure it's an absolute URL
+        if (isPdfOrDocx && !href.startsWith('http') && !href.startsWith('//')) {
+          // For PDF/DOCX, we'll keep the relative path
+          // TODO: Download the file to the local folder structure
+          console.log(`[MARKDOWN] Keeping relative link for document: ${href}`);
+          return `[${content}](${href}${title})`;
+        } else {
+          // For all other links, ensure they are absolute
+          let absoluteUrl = href;
+          
+          // If we have a baseUrl in the context, use it to resolve relative URLs
+          if (this.baseUrl && !href.startsWith('http') && !href.startsWith('//')) {
+            try {
+              absoluteUrl = new URL(href, this.baseUrl).href;
+            } catch (error) {
+              console.warn(`[MARKDOWN] Error resolving URL: ${href}`, error);
+              absoluteUrl = href; // Fallback to original
+            }
+          }
+          
+          return `[${content}](${absoluteUrl}${title})`;
+        }
+      }
+    });
+    
     // Preserve tables
     this.turndownService.addRule('tables', {
       filter: ['table'],
@@ -80,13 +120,22 @@ export class MarkdownService {
   /**
    * Converts HTML to Markdown
    * @param {string|Object} html - HTML string or cheerio element
+   * @param {string} baseUrl - Base URL for resolving relative links
    * @returns {string} - Markdown content
    */
-  toMarkdown(html) {
+  toMarkdown(html, baseUrl) {
     try {
+      // Store the base URL for link resolution in our custom rules
+      this.baseUrl = baseUrl;
+      
       // Handle both string and cheerio element
       const content = typeof html === 'string' ? html : html.html();
-      return this.turndownService.turndown(content);
+      const markdown = this.turndownService.turndown(content);
+      
+      // Clear the baseUrl after conversion
+      this.baseUrl = null;
+      
+      return markdown;
     } catch (e) {
       console.log(`[MARKDOWN] Error converting to markdown: ${e.message}`);
       return '';

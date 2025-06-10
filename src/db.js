@@ -113,7 +113,8 @@ export function getDB(dbPath, opts = {}) {
   
   while (!dbReady) {
     try {
-      dbInstance = new Database(paths.session);
+      // Explicitly open the database with write permissions
+      dbInstance = new Database(paths.session, { readonly: false });
       const res = dbInstance.pragma('integrity_check', { simple: true });
       
       if (res !== 'ok') {

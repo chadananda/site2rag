@@ -54,6 +54,47 @@ export class FileService {
   }
 
   /**
+   * Saves debug information about removed blocks to a parallel file
+   * @param {string} originalFilePath - Path to the original content file
+   * @param {Array} removedBlocks - Array of removed block objects
+   * @returns {Promise<string>} - Path to the debug file
+   */
+  async saveRemovedBlocksDebug(originalFilePath, removedBlocks) {
+    if (!removedBlocks || removedBlocks.length === 0) {
+      return null;
+    }
+
+    // Create a debug file path with _deleted.md suffix
+    const parsedPath = path.parse(originalFilePath);
+    const debugFilePath = path.join(
+      parsedPath.dir,
+      `${parsedPath.name}_deleted${parsedPath.ext}`
+    );
+
+    // Format the debug content
+    let debugContent = `# Removed Blocks Debug Information
+
+This file contains HTML blocks that were removed during content processing.
+
+`;
+
+    // Add each removed block with its reason
+    removedBlocks.forEach((block, index) => {
+      debugContent += `## Block ${index + 1}: ${block.source}
+
+`;
+      debugContent += '```html\n';
+      debugContent += block.content;
+      debugContent += '\n```\n\n';
+    });
+
+    // Write the debug file
+    await this.writeFile(debugFilePath, debugContent);
+    console.log(`[DEBUG] Saved removed blocks to ${debugFilePath}`);
+    return debugFilePath;
+  }
+
+  /**
    * Checks if a file exists
    * @param {string} filePath - File path
    * @returns {Promise<boolean>} - Whether the file exists
@@ -155,6 +196,84 @@ export class FileService {
     const dirPath = path.dirname(filePath);
     await this.ensureDir(dirPath);
     await fs.promises.writeFile(filePath, data);
+  }
+  
+  /**
+   * Downloads and saves a document file (PDF, DOCX, etc.) to the output directory
+   * @param {string} url - URL of the document to download
+   * @param {string} baseUrl - Base URL for resolving relative URLs
+   * @param {string} hostname - Hostname for organizing files
+   * @returns {Promise<Object>} - Object with relative path and full path
+   */
+  async downloadDocument(url, baseUrl, hostname) {
+    try {
+      console.log(`[DOCUMENT] Downloading document from ${url}`);
+      
+      // Resolve URL if it's relative
+      let absoluteUrl = url;
+      if (!url.startsWith('http') && !url.startsWith('//')) {
+        try {
+          absoluteUrl = new URL(url, baseUrl).href;
+        } catch (error) {
+          console.warn(`[DOCUMENT] Error resolving URL: ${url}`, error);
+          return { success: false, error: 'Invalid URL' };
+        }
+      }
+      
+      // Fetch the document
+      const response = await fetch(absoluteUrl);
+      if (!response.ok) {
+        console.warn(`[DOCUMENT] Failed to download document: ${response.status} ${response.statusText}`);
+        return { success: false, error: `HTTP error: ${response.status}` };
+      }
+      
+      // Get the document data as buffer
+      const documentData = await response.arrayBuffer();
+      const buffer = Buffer.from(documentData);
+      
+      // Extract filename from URL or use a hash
+      const urlObj = new URL(absoluteUrl);
+      let filename = path.basename(urlObj.pathname);
+      
+      // If filename is empty or doesn't have an extension, generate one
+      if (!filename || !path.extname(filename)) {
+        const contentType = response.headers.get('content-type');
+        let extension = '.bin';
+        
+        if (contentType) {
+          if (contentType.includes('pdf')) extension = '.pdf';
+          else if (contentType.includes('word') || contentType.includes('docx')) extension = '.docx';
+          else if (contentType.includes('excel') || contentType.includes('xlsx')) extension = '.xlsx';
+          else if (contentType.includes('powerpoint') || contentType.includes('pptx')) extension = '.pptx';
+        }
+        
+        // Use URL path as filename or fallback to a timestamp
+        const pathParts = urlObj.pathname.split('/');
+        const lastPathPart = pathParts[pathParts.length - 1];
+        filename = lastPathPart || `document-${Date.now()}${extension}`;
+      }
+      
+      // Create documents directory within the hostname directory
+      const documentsDir = path.join(hostname, 'documents');
+      const outputPath = this.getOutputPath(documentsDir, filename);
+      
+      // Save the document
+      await this.writeBinaryFile(outputPath, buffer);
+      
+      // Calculate the relative path from the hostname directory
+      const relativePath = path.join('documents', filename);
+      
+      console.log(`[DOCUMENT] Saved document to ${outputPath}`);
+      return { 
+        success: true, 
+        relativePath, 
+        fullPath: outputPath,
+        filename
+      };
+    } catch (error) {
+      console.error(`[DOCUMENT] Error downloading document: ${error.message}`);
+      return { success: false, error: error.message };
+    }
   }
   
   /**

@@ -140,9 +140,10 @@ export class CrawlStateService {
    * Checks if a URL has changed since the last crawl
    * @param {string} url - URL to check
    * @param {Object} response - Fetch response
+   * @param {string} [contentHash] - Hash of the content for comparison
    * @returns {boolean} - Whether the URL has changed
    */
-  hasChanged(url, response) {
+  hasChanged(url, response, contentHash = null) {
     const pageData = this.getPage(url);
     
     // If no previous data, it has changed
@@ -150,13 +151,26 @@ export class CrawlStateService {
     
     // Check ETag if available
     const etag = response.headers.get('etag');
-    if (etag && pageData.etag && pageData.etag === etag) return false;
+    if (etag && pageData.etag && pageData.etag === etag) {
+      console.log(`[CACHE] ETag match for ${url}: ${etag}`);
+      return false;
+    }
     
     // Check Last-Modified if available
     const lastModified = response.headers.get('last-modified');
-    if (lastModified && pageData.lastModified && pageData.lastModified === lastModified) return false;
+    if (lastModified && pageData.last_modified && pageData.last_modified === lastModified) {
+      console.log(`[CACHE] Last-Modified match for ${url}: ${lastModified}`);
+      return false;
+    }
     
-    // Default to changed
+    // Check content hash as a fallback
+    if (contentHash && pageData.content_hash && pageData.content_hash === contentHash) {
+      console.log(`[CACHE] Content hash match for ${url}: ${contentHash}`);
+      return false;
+    }
+    
+    // If we got here, the content has changed
+    console.log(`[CACHE] Content changed for ${url}`);
     return true;
   }
 
@@ -164,8 +178,9 @@ export class CrawlStateService {
    * Updates page data with response headers
    * @param {string} url - URL to update
    * @param {Object} response - Fetch response
+   * @param {string} [contentHash] - Hash of the content for comparison
    */
-  updateHeaders(url, response) {
+  updateHeaders(url, response, contentHash = null) {
     const pageData = this.getPage(url) || {};
     
     // Update with response headers
@@ -174,11 +189,12 @@ export class CrawlStateService {
     
     this.upsertPage(url, {
       etag: etag || pageData.etag,
-      lastModified: lastModified || pageData.lastModified,
+      last_modified: lastModified || pageData.last_modified,
+      content_hash: contentHash || pageData.content_hash,
       status: response.status,
-      lastCrawled: new Date().toISOString(),
+      last_crawled: new Date().toISOString(),
       title: pageData.title || null,
-      filePath: pageData.filePath || null
+      file_path: pageData.file_path || null
     });
   }
 

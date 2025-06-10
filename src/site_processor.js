@@ -45,14 +45,15 @@ export class SiteProcessor {
       maxDepth: options.maxDepth !== undefined ? options.maxDepth : -1,
       politeWaitMs: options.politeWaitMs || 1000,
       outputDir: options.outputDir || options.output || `${process.cwd()}/${hostname}`,
-      aiConfig: options.aiConfig || {}
+      aiConfig: options.aiConfig || {},
+      debug: options.debug || false
     };
     // Initialize services as instance properties
-    const { outputDir, politeWaitMs, aiConfig } = this.options;
+    const { outputDir, politeWaitMs, aiConfig, debug } = this.options;
     this.fileService = new FileService({ outputDir });
     this.urlService = new UrlService();
     this.fetchService = new FetchService({ politeWaitMs });
-    this.contentService = new ContentService({ aiConfig });
+    this.contentService = new ContentService({ aiConfig, debug, outputDir });
     this.markdownService = new MarkdownService();
     this.crawlStateService = options.crawlState || new CrawlStateService({ outputDir, fileService: this.fileService });
     // Copy configuration options to instance properties for backward compatibility
@@ -86,7 +87,8 @@ export class SiteProcessor {
       fetchService: this.fetchService,
       contentService: this.contentService,
       markdownService: this.markdownService,
-      crawlStateService: this.crawlStateService
+      crawlStateService: this.crawlStateService,
+      debug: debug
     });
     // State tracking for this instance
     this.visited = new Set();

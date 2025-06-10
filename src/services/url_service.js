@@ -32,7 +32,8 @@ export class UrlService {
    */
   safeFilename(url) {
     try {
-      const { pathname } = new URL(url);
+      const urlObj = new URL(url);
+      const { pathname } = urlObj;
       let file = pathname.replace(/\/+$/, '') || 'index';
       
       // If it's the root path, return 'index'
@@ -46,18 +47,30 @@ export class UrlService {
       
       // Process each segment to make it safe
       const safeSegments = segments.map(segment => {
-        // Replace special characters in each segment
-        let safeSegment = segment.replace(/[^a-zA-Z0-9-_\.]+/g, '_');
+        // For non-ASCII paths, use a more readable approach
+        // First try to decode URI components if they're encoded
+        try {
+          segment = decodeURIComponent(segment);
+        } catch (e) {
+          // If decoding fails, use the original segment
+        }
+        
+        // Replace special characters with underscores, but preserve alphanumeric in any language
+        // This allows Arabic, Chinese, etc. characters to remain intact
+        let safeSegment = segment.replace(/[\/?*:|"<>\\]+/g, '_');
+        
         // Remove any existing extension from the last segment
         if (segment === segments[segments.length - 1]) {
           safeSegment = safeSegment.replace(/\.[^.]+$/, '');
         }
+        
         return safeSegment;
       });
       
       // Join the segments back together with path separators
       return safeSegments.join('/');
-    } catch {
+    } catch (e) {
+      console.error(`Error creating safe filename for ${url}:`, e.message);
       return 'page';
     }
   }
@@ -120,18 +133,27 @@ export class UrlService {
   }
 
   /**
-   * Determines if a URL should be skipped based on depth and visited status
+   * Determines if a URL should be skipped based on depth, visited status, and previous crawl history
    * @param {string} url - URL to check
    * @param {number} depth - Current crawl depth
    * @param {number} maxDepth - Maximum crawl depth
-   * @param {Set<string>} visited - Set of already visited URLs
+   * @param {Set<string>} visited - Set of already visited URLs in current session
+   * @param {boolean} previouslyCrawled - Whether this URL was crawled in a previous session
    * @returns {boolean} - Whether the URL should be skipped
    */
-  shouldSkip(url, depth, maxDepth, visited) {
-    console.log(`shouldSkip check for ${url}: depth=${depth}, maxDepth=${maxDepth}, visited=${visited.has(url)}`);
+  shouldSkip(url, depth, maxDepth, visited, previouslyCrawled = false) {
+    // Ensure URL is a string, not an object
+    const urlString = typeof url === 'object' ? url.href : url;
     
-    // Skip if we've already visited this URL
-    if (visited.has(url)) {
+    console.log(`shouldSkip check for ${urlString}: depth=${depth}, maxDepth=${maxDepth}, visited=${visited.has(urlString)}, previouslyCrawled=${previouslyCrawled}`);
+    
+    // Skip if we've already visited this URL in the current session
+    if (visited.has(urlString)) {
+      return true;
+    }
+    
+    // Skip if this URL was crawled in a previous session
+    if (previouslyCrawled) {
       return true;
     }
     
@@ -151,8 +173,27 @@ export class UrlService {
    */
   isSameDomain(url, baseDomain) {
     try {
-      const urlObj = new URL(url);
-      return urlObj.hostname === baseDomain || urlObj.hostname.endsWith('.' + baseDomain);
+      // Ensure URL is a string, not an object
+      const urlString = typeof url === 'object' ? url.href : url;
+      const urlObj = new URL(urlString);
+      
+      // Extract hostname from the URL
+      const hostname = urlObj.hostname;
+      
+      // Exact match
+      if (hostname === baseDomain) {
+        return true;
+      }
+      
+      // Check for subdomains (must end with .baseDomain)
+      if (hostname.endsWith('.' + baseDomain)) {
+        return true;
+      }
+      
+      // Log domains that don't match for debugging
+      console.log(`[DOMAIN CHECK] ${hostname} is not part of ${baseDomain} - skipping`);
+      
+      return false;
     } catch (e) {
       console.error(`Error checking domain for ${url}:`, e.message);
       return false;

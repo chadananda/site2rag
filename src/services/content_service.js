@@ -1,5 +1,15 @@
 import { load } from 'cheerio';
 import { aiServiceAvailable, classifyBlocksWithAI } from '../ai_assist.js';
+import path from 'path';
+import fs from 'fs';
+import { URL } from 'url';
+import { 
+  extractMainContent as extractGenericContent,
+  scoreContentElement,
+  isLikelyNavigationOrBoilerplate,
+  cleanupContent,
+  generateConsistentSelector
+} from './content_extractor.js';
 
 /**
  * Service for HTML content processing, extraction, and classification
@@ -11,460 +21,234 @@ export class ContentService {
    * @param {Object} options.aiConfig - AI service configuration
    */
   constructor(options = {}) {
-    this.aiConfig = options.aiConfig || {};
+    this.aiConfig = options.aiConfig || null;
+    this.debug = options.debug || false;
+    this.outputDir = options.outputDir || './output';
+    
+    // Create debug directory if debug mode is enabled
+    if (this.debug) {
+      this.debugDir = path.join(this.outputDir, '.site2rag', 'debug');
+      console.log(`[DEBUG] Debug mode enabled, debug info will be saved to ${this.debugDir}`);
+      try {
+        fs.mkdirSync(this.debugDir, { recursive: true });
+      } catch (err) {
+        console.warn(`[DEBUG] Failed to create debug directory: ${err.message}`);
+      }
+    }
+    this.fileService = options.fileService;
   }
 
   /**
    * Processes HTML content, extracts main content, and removes boilerplate
    * @param {string} html - Raw HTML content
    * @param {string} url - Source URL of the content
-   * @returns {Promise<Object>} - Processed content with $ (cheerio), main (content), and links
    */
   async processHtml(html, url) {
     const $ = load(html);
     
-    // IMPORTANT: Extract links from the entire document BEFORE removing any elements
-    // This ensures we capture all navigation links for crawling
+    // Extract links from the entire document BEFORE removing any elements
     const links = this.extractLinks($, $('html'), url);
     
     // Extract metadata from HTML (also before content cleaning)
     const metadata = this.extractMetadata($);
     
-    // Now remove common navigation and boilerplate elements for content extraction
-    this.removeCommonBoilerplate($);
+    // Initialize debug tracking object early so we can track boilerplate removal
+    let removedBlocks = null;
+    if (this.debug) {
+      console.log('[DEBUG] Debug mode enabled, initializing removedBlocks tracking');
+      removedBlocks = { selectorDecisions: new Map() };
+    }
     
-    // Find main content area with comprehensive selectors
-    // 1. Try standard semantic elements first
-    let main = $('main, article, [role="main"]').first();
+    // Extract main content
+    const main = await this.extractMainContent($, removedBlocks);
     
-    // 2. If not found, try common content class/id patterns
-    if (!main.length) {
-      // First try site-specific selectors for known sites
-      if (url.includes('oceanoflights.org')) {
-        // For Ocean of Lights, we need both the title section and content container
-        const titleSection = $('.col h1.main-title').closest('.col');
-        const contentContainer = $('.content-container .main-text-block');
-        
-        if (titleSection.length && contentContainer.length) {
-          // Create a wrapper to hold both sections
-          const wrapper = $('<div class="site2rag-extracted-content"></div>');
-          wrapper.append(titleSection.clone());
-          wrapper.append(contentContainer.clone());
-          main = wrapper;
-          console.log('[CONTENT] Using Ocean of Lights specific content extraction');
+    if (!main || main.length === 0) {
+      console.warn('No main content found');
+      return { $, main: null, links, metadata, removedBlocks };
+    }
+    
+    // Process links in the main content - convert relative to absolute and handle documents
+    if (url && this.fileService) {
+      await this.processLinks($, main, url);
+    }
+    
+    // Apply AI-based block classification if enabled
+    if (this.aiConfig && this.aiConfig.blockClassificationEnabled) {
+      try {
+        await this.applyBlockClassification($, main, removedBlocks);
+      } catch (error) {
+        console.error('[AI] Error applying block classification:', error);
+      }
+    }
+    
+    // Add a separator in the debug tracking to distinguish between phases
+    if (this.debug && removedBlocks && removedBlocks.selectorDecisions) {
+      this.trackSelectorDecision('--phase-separator--', 'info', removedBlocks, 'Above: Initial boilerplate removal | Below: Content classification');
+      
+      // Save debug information if URL is provided
+      if (url) {
+        this.saveDebugInfo(url, $, main, removedBlocks);
+      }
+    }
+    
+    return { $, html: $.html(main), main, links, metadata, removedBlocks };
+  }
+  
+  /**
+   * Extract main content from HTML using a framework-agnostic approach
+   * @param {Object} $ - Cheerio instance
+   * @param {Object} removedBlocks - Object to track removed blocks for debugging
+   * @returns {Object} - Main content element
+   */
+  extractMainContent($, removedBlocks = null) {
+    try {
+      console.log('[CONTENT] Starting main content extraction with generic approach');
+      
+      // Setup options for content extraction
+      const options = {
+        debug: this.debug,
+        removedBlocks,
+        trackSelectorDecision: (selector, decision, blocks, reason) => {
+          this.trackSelectorDecision(selector, decision, blocks, reason);
         }
+      };
+      
+      // Use our framework-agnostic content extractor
+      const extractedContent = extractGenericContent($, $('body'), options);
+      
+      if (extractedContent && extractedContent.length > 0) {
+        console.log('[CONTENT] Successfully extracted main content');
+        return extractedContent;
       }
       
-      // If site-specific extraction didn't work, try generic selectors
-      if (!main.length) {
-        // Look for elements with a class containing 'content'
-        // More efficient than $('*') - only check divs, sections, and articles
-        const contentElements = [];
-        $('div, section, article').each((i, el) => {
-          const $el = $(el);
-          const className = $el.attr('class') || '';
-          if (className.toLowerCase().includes('content')) {
-            // Filter out tiny content blocks or those with little text
-            const textLength = $el.text().trim().length;
-            const hasChildren = $el.children().length > 0;
-            if (textLength > 50 || hasChildren) {
-              contentElements.push({
-                element: $el,
-                textLength: textLength,
-                className: className
-              });
+      console.warn('[CONTENT] No content found, returning empty set');
+      return $();
+    } catch (error) {
+      console.error('[CONTENT] Error extracting main content:', error);
+      return $();
+    }
+  }
+
+  /**
+   * Track selector decisions for debugging
+   * @param {string} selector - CSS selector
+   * @param {string} decision - Decision (keep, remove, skip)
+   * @param {Object} removedBlocks - Object to track removed blocks
+   * @param {string} reason - Reason for decision
+   */
+  trackSelectorDecision(selector, decision, removedBlocks, reason) {
+    if (this.debug && removedBlocks && removedBlocks.selectorDecisions) {
+      removedBlocks.selectorDecisions.set(selector, { decision, reason });
+      console.log(`[DECISION] ${selector}: ${decision} (${reason})`);
+    }
+  }
+
+  /**
+   * Process links in the main content - convert relative to absolute and handle documents
+   * @param {Object} $ - Cheerio instance
+   * @param {Object} main - Main content element
+   * @param {string} baseUrl - Base URL for resolving relative links
+   * @returns {Promise<void>}
+   */
+  async processLinks($, main, baseUrl) {
+    if (!main || !baseUrl || !this.fileService) return;
+    
+    try {
+      const { hostname } = new URL(baseUrl);
+      const documentDownloads = [];
+      
+      // Find all links in the main content
+      $(main).find('a[href]').each((i, el) => {
+        const href = $(el).attr('href');
+        if (!href) return;
+        
+        try {
+          // Skip fragment-only links, javascript:, mailto:, tel:, etc.
+          if (href.startsWith('#') || 
+              href.startsWith('javascript:') || 
+              href.startsWith('mailto:') || 
+              href.startsWith('tel:')) {
+            return;
+          }
+          
+          // Check if this is a PDF or DOCX link
+          const isPdfOrDocx = href.toLowerCase().endsWith('.pdf') || 
+                             href.toLowerCase().endsWith('.docx');
+          
+          // For PDF/DOCX links that are relative, we'll download them
+          if (isPdfOrDocx && !href.startsWith('http') && !href.startsWith('//')) {
+            // Add to download queue - we'll process these after scanning all links
+            documentDownloads.push({
+              element: el,
+              href
+            });
+          } else if (!href.startsWith('http') && !href.startsWith('//')) {
+            // For other relative links, convert to absolute
+            try {
+              const absoluteUrl = new URL(href, baseUrl).href;
+              $(el).attr('href', absoluteUrl);
+            } catch (error) {
+              console.warn(`[LINKS] Error resolving URL: ${href}`, error);
             }
           }
-        });
-        
-        // Sort by text length (descending) to prioritize content-rich elements
-        contentElements.sort((a, b) => b.textLength - a.textLength);
-        
-        if (contentElements.length > 0) {
-          main = contentElements[0].element;
-          console.log(`[CONTENT] Found element with content class: ${contentElements[0].className}`);
-        }
-        
-        // If still not found, try specific selectors
-        if (!main.length) {
-          main = $(
-            '.content-container .main-text-block, .content-container, ' +
-            '.content, #content, .main-content, #main-content, .page-content, #page-content, ' +
-            '.post-content, #post-content, .entry-content, #entry-content, .article-content, #article-content, ' +
-            '.content-area, #content-area, .site-content, #site-content, ' +
-            '.page-container .main, #main, [class*="content-"], [id*="content-"], [class*="-content"], [id*="-content"], ' +
-            '.two-column-text, .main-text-block'
-          ).first();
-        }
-      }
-    }
-    
-    // 3. Try to combine multiple content sections if we have a simple selector match
-    if (main.length && !main.hasClass('site2rag-extracted-content')) {
-      // Check if there are important adjacent content blocks we should include
-      const mainParent = main.parent();
-      const siblings = mainParent.children();
-      
-      if (siblings.length > 1 && siblings.length < 10) { // Only for reasonable numbers of siblings
-        let hasImportantContent = false;
-        siblings.each((i, el) => {
-          const $el = $(el);
-          if (!$el.is(main) && this.hasSignificantContent($el)) {
-            hasImportantContent = true;
-            return false; // Break the loop
-          }
-        });
-        
-        if (hasImportantContent) {
-          console.log('[CONTENT] Found important adjacent content, using parent container');
-          main = mainParent;
-        }
-      }
-    }
-    
-    // 4. If still not found, try to find the element with most substantial text content
-    if (!main.length) {
-      console.log('[CONTENT] No standard content containers found, using content density detection');
-      main = this.findContentByTextDensity($);
-    }
-    
-    // 5. Fallback to body if no main content container found
-    if (!main.length) {
-      console.log('[CONTENT] No content container found, using body');
-      main = $('body');
-    }
-    
-    // When using body or a large container, make a more aggressive attempt to remove navigation
-    if (main.is('body') || main.find('*').length > 100) {
-      this.removeNavigationElements($, main);
-    }
-    
-    // Apply AI-based block classification if available
-    await this.applyBlockClassification($, main);
-    
-    return { $, html: $.html(main), main, links, metadata };
-  }
-  
-  /**
-   * Find the element with the highest text density, which is likely the main content
-   * @param {Object} $ - Cheerio instance
-   * @returns {Object} - Cheerio element with highest text density
-   */
-  findContentByTextDensity($) {
-    let bestElement = $('body');
-    let bestScore = 0;
-    
-    // Check common content containers
-    $('div, section, article').each((i, el) => {
-      const $el = $(el);
-      
-      // Skip very small elements or hidden elements
-      if ($el.find('*').length < 5) return;
-      if ($el.css('display') === 'none' || $el.css('visibility') === 'hidden') return;
-      
-      // Calculate text density
-      const text = $el.text().trim();
-      const textLength = text.length;
-      const linkText = $el.find('a').text().trim().length;
-      const linkRatio = linkText / (textLength || 1);
-      
-      // Skip navigation-heavy elements
-      if (linkRatio > 0.5) return;
-      
-      // Calculate a score based on text length and link ratio
-      const score = textLength * (1 - linkRatio);
-      
-      if (score > bestScore) {
-        bestScore = score;
-        bestElement = $el;
-      }
-    });
-    
-    if (bestElement) {
-      console.log('[CONTENT] Found content by text density analysis');
-    }
-    
-    return bestElement || $();
-  }
-
-  /**
-   * Determines if an element contains significant content worth preserving
-   * @param {Object} $el - Cheerio element to check
-   * @returns {boolean} - True if the element has significant content
-   */
-  hasSignificantContent($el) {
-    // Check for headings
-    if ($el.find('h1, h2, h3, h4, h5, h6').length > 0) return true;
-    
-    // Check for substantial text content
-    const text = $el.text().trim();
-    if (text.length > 100) return true;
-    
-    // Check for important content markers
-    const className = $el.attr('class') || '';
-    const id = $el.attr('id') || '';
-    
-    const importantClasses = [
-      'content', 'main', 'article', 'post', 'entry', 'text', 'body', 
-      'summary', 'desc', 'description', 'intro', 'welcome', 'about',
-      'two-column', 'column', 'main-text'
-    ];
-    
-    for (const marker of importantClasses) {
-      if (className.toLowerCase().includes(marker) || id.toLowerCase().includes(marker)) {
-        return true;
-      }
-    }
-    
-    // Check for important elements
-    if ($el.find('img[alt], figure, blockquote, code, pre, table').length > 0) return true;
-    
-    // Check for links with substantial text
-    if ($el.find('a').text().trim().length > 50) return true;
-    
-    return false;
-  }
-
-  /**
-   * Applies AI-based block classification and heuristic rules to remove boilerplate content
-   * @param {Object} $ - Cheerio instance
-   * @param {Object} main - Main content element
-   * @returns {Promise<void>}
-   * @private
-   */
-  async applyBlockClassification($, main) {
-    try {
-      // Get all top-level blocks in the main content
-      const blocks = main.children().toArray();
-      
-      // Only worth classifying if we have several blocks (more than 2)
-      if (blocks.length > 2) {
-        // Apply heuristic-based classification first
-        this.applyHeuristicClassification($, blocks);
-        
-        // Then apply AI-based classification if available
-        const blockHtmls = main.children().toArray().map(el => $.html(el));
-        
-        // Check if AI service is available
-        const aiAvailable = await aiServiceAvailable(this.aiConfig);
-        
-        if (aiAvailable) {
-          console.log(`[CONTENT] Using AI to classify ${blockHtmls.length} content blocks`);
-          
-          // Get indices of blocks classified as boilerplate
-          const boilerplateIndices = await classifyBlocksWithAI(blockHtmls, this.aiConfig);
-          
-          if (boilerplateIndices && boilerplateIndices.length) {
-            console.log(`[CONTENT] Removing ${boilerplateIndices.length} boilerplate blocks identified by AI`);
-            
-            // Remove boilerplate blocks in reverse order to maintain indices
-            [...boilerplateIndices]
-              .sort((a, b) => b - a)
-              .forEach(idx => {
-                if (idx >= 0 && idx < blockHtmls.length) {
-                  $(main.children().get(idx)).remove();
-                }
-              });
-          }
-        }
-      }
-      
-      // Final cleanup - remove any remaining navigation-like elements
-      this.cleanupRemainingNavigation($, main);
-    } catch (e) {
-      console.log(`[CONTENT] Error in block classification: ${e.message}`);
-    }
-  }
-  
-  /**
-   * Applies heuristic rules to identify and remove boilerplate content
-   * @param {Object} $ - Cheerio instance
-   * @param {Array} blocks - Array of DOM elements
-   * @private
-   */
-  applyHeuristicClassification($, blocks) {
-    try {
-      // Process blocks in reverse order to maintain indices
-      for (let i = blocks.length - 1; i >= 0; i--) {
-        const $block = $(blocks[i]);
-        
-        // Check various heuristics to identify boilerplate
-        const isLikelyBoilerplate = (
-          // 1. Navigation-like blocks with many links
-          ($block.find('a').length > 3 && $block.find('a').length / $block.find('*').length > 0.4) ||
-          
-          // 2. Very short blocks with links
-          ($block.text().trim().length < 80 && $block.find('a').length > 0) ||
-          
-          // 3. Blocks with navigation-related classes or IDs
-          /nav|menu|header|footer|sidebar|language|social|breadcrumb/i.test($block.attr('class') || '') ||
-          /nav|menu|header|footer|sidebar|language|social|breadcrumb/i.test($block.attr('id') || '') ||
-          
-          // 4. Blocks with list-based navigation
-          ($block.is('ul, ol') && $block.find('a').length > 2) ||
-          
-          // 5. Blocks with very little text but many non-text elements
-          ($block.text().trim().length < 150 && $block.find('img, svg, button, input').length > 2) ||
-          
-          // 6. Blocks that are likely pagination
-          ($block.find('.pagination').length || /pagination|pager/i.test($block.attr('class') || '')) ||
-          
-          // 7. Blocks that are likely social sharing
-          /share|social-media|follow-us/i.test($block.attr('class') || '') ||
-          
-          // 8. Blocks with repetitive link patterns (like tag clouds)
-          this.hasRepetitiveLinks($block)
-        );
-        
-        if (isLikelyBoilerplate) {
-          console.log(`[CONTENT] Removing likely boilerplate block at index ${i}`);
-          $block.remove();
-        }
-      }
-    } catch (e) {
-      console.log(`[CONTENT] Error in heuristic classification: ${e.message}`);
-    }
-  }
-  
-  /**
-   * Checks if a block has repetitive link patterns (like tag clouds or category lists)
-   * @param {Object} $block - jQuery-like object for the block
-   * @returns {boolean} - Whether the block has repetitive links
-   * @private
-   */
-  hasRepetitiveLinks($block) {
-    // Count links with similar structure
-    const linkTexts = [];
-    const linkClasses = [];
-    
-    $block.find('a').each((_, el) => {
-      const $link = $block.constructor(el);
-      linkTexts.push($link.text().trim());
-      linkClasses.push($link.attr('class') || '');
-    });
-    
-    // If there are many links with similar length or classes, likely navigation
-    if (linkTexts.length >= 3) {
-      // Check for similar text lengths (tag clouds, categories, etc.)
-      const lengths = linkTexts.map(t => t.length);
-      const avgLength = lengths.reduce((a, b) => a + b, 0) / lengths.length;
-      const similarLengths = lengths.filter(l => Math.abs(l - avgLength) < 5).length;
-      
-      // If 70% of links have similar length, likely navigation
-      if (similarLengths / linkTexts.length > 0.7) {
-        return true;
-      }
-      
-      // Check for similar classes (likely navigation)
-      if (linkClasses.length >= 3) {
-        const uniqueClasses = new Set(linkClasses);
-        // If there are few unique classes compared to total links, likely navigation
-        if (uniqueClasses.size <= 2 && linkClasses.length >= 4) {
-          return true;
-        }
-      }
-    }
-    
-    return false;
-  }
-  
-  /**
-   * Final cleanup to remove any remaining navigation-like elements
-   * @param {Object} $ - Cheerio instance
-   * @param {Object} main - Main content element
-   * @private
-   */
-  cleanupRemainingNavigation($, main) {
-    try {
-      // Remove remaining navigation-like elements
-      main.find('*').each((_, el) => {
-        const $el = $(el);
-        
-        // Skip if it's a top-level element or has substantial content
-        if ($el.parent().is(main) || $el.text().trim().length > 300) {
-          return;
-        }
-        
-        // Check for navigation-like structures
-        const isNavLike = (
-          // Elements with many links in a small area
-          ($el.find('a').length > 3 && $el.text().trim().length < 200) ||
-          
-          // Elements with navigation-related classes or IDs
-          /\b(nav|menu|header|footer|sidebar|language|social)\b/i.test($el.attr('class') || '') ||
-          /\b(nav|menu|header|footer|sidebar|language|social)\b/i.test($el.attr('id') || '') ||
-          
-          // Elements with list-based navigation
-          ($el.is('ul, ol') && $el.find('a').length > 3 && $el.text().trim().length < 300)
-        );
-        
-        if (isNavLike) {
-          $el.remove();
+        } catch (error) {
+          console.warn(`[LINKS] Error processing link: ${href}`, error);
         }
       });
-    } catch (e) {
-      console.error(`[CONTENT] Error in final cleanup: ${e.message}`);
-    }
-  }
-
-  /**
-   * Normalizes a URL by removing query parameters and hash fragments
-   * @param {string} url - URL to normalize
-   * @returns {string} - Normalized URL
-   */
-  normalizeUrl(url) {
-    try {
-      const parsed = new URL(url);
-      return `${parsed.origin}${parsed.pathname}`;
-    } catch (e) {
-      return url;
-    }
-  }
-
-  /**
-   * Extracts links from HTML content, normalizes them, and filters by domain
-   * @param {cheerio.CheerioAPI} $ - Cheerio instance
-   * @param {cheerio.Cheerio} $content - Content element to extract links from
-   * @param {string} baseUrl - Base URL for resolving relative links
-   * @returns {string[]} - Array of normalized URLs
-   */
-  extractLinks($, $content, baseUrl) {
-    const links = [];
-    const { hostname, origin } = new URL(baseUrl);
-    
-    $content.find('a[href]').each((_, el) => {
-      const href = $(el).attr('href');
       
-      // Skip obviously invalid URLs
-      if (!href || href.includes(':::')) {
-        console.log(`[CONTENT] Skipping invalid URL: ${href}`);
-        return;
+      // Process document downloads
+      if (documentDownloads.length > 0) {
+        console.log(`[DOCUMENT] Found ${documentDownloads.length} document links to download`);
+        
+        for (const item of documentDownloads) {
+          const result = await this.fileService.downloadDocument(item.href, baseUrl, hostname);
+          
+          if (result.success) {
+            // Update the link to point to the local file
+            $(item.element).attr('href', result.relativePath);
+            console.log(`[DOCUMENT] Updated link to local path: ${result.relativePath}`);
+          }
+        }
       }
+    } catch (error) {
+      console.error(`[LINKS] Error processing links: ${error.message}`);
+    }
+  }
+  
+  /**
+   * Extract links from HTML for crawling
+   * @param {Object} $ - Cheerio instance
+   * @param {Object} element - Element to extract links from
+   * @param {string} baseUrl - Base URL for resolving relative links
+   * @returns {Array} - Array of extracted links
+   */
+  extractLinks($, element, baseUrl) {
+    const links = [];
+    const seenUrls = new Set();
+    
+    $(element).find('a[href]').each((i, el) => {
+      const href = $(el).attr('href');
+      if (!href) return;
       
       try {
-        // For test compatibility, handle special test URLs directly
-        if (href === '/relative-link') {
-          links.push('https://example.com/relative-link');
-          return;
-        }
-        if (href === 'https://example.com/absolute-link') {
-          links.push('https://example.com/absolute-link');
-          return;
-        }
+        // Resolve relative URLs
+        const resolvedUrl = new URL(href, baseUrl).href;
         
-        // Normal case: resolve relative URLs and normalize
-        const absoluteUrl = new URL(href, baseUrl).toString();
-        const normalizedUrl = this.normalizeUrl(absoluteUrl);
+        // Skip duplicates
+        if (seenUrls.has(resolvedUrl)) return;
+        seenUrls.add(resolvedUrl);
         
-        // Only include links from the same domain
-        const linkHostname = new URL(normalizedUrl).hostname;
-        if (linkHostname === hostname && !links.includes(normalizedUrl)) {
-          console.log(`[CONTENT] Found same-domain link: ${normalizedUrl}`);
-          links.push(normalizedUrl);
-        }
-      } catch (e) {
-        // Skip invalid URLs
-        console.log(`[CONTENT] Skipping invalid URL: ${href}`);
+        // Add to links array - just the URL string, not an object
+        links.push(resolvedUrl);
+        
+        // Store metadata for future use if needed
+        const metadata = {
+          text: $(el).text().trim(),
+          title: $(el).attr('title') || ''
+        };
+        // We could store this metadata somewhere if needed
+      } catch (error) {
+        console.warn(`[LINKS] Invalid URL: ${href}`);
       }
     });
     
@@ -472,177 +256,362 @@ export class ContentService {
   }
 
   /**
-   * Removes common navigation and boilerplate elements from HTML
+   * Extract metadata from HTML
    * @param {Object} $ - Cheerio instance
-   * @private
+   * @returns {Object} - Extracted metadata
    */
-  removeCommonBoilerplate($) {
-    try {
-      // 1. Remove by semantic HTML5 elements
-      $('nav, header, footer, aside').remove();
+  extractMetadata($) {
+    // Basic metadata
+    const metadata = {
+      title: $('title').text().trim(),
+      description: $('meta[name="description"]').attr('content') || '',
+      keywords: $('meta[name="keywords"]').attr('content') || '',
+      author: $('meta[name="author"]').attr('content') || '',
+      language: $('html').attr('lang') || '',
+      canonical: $('link[rel="canonical"]').attr('href') || ''
+    };
+    
+    // Open Graph metadata
+    metadata.og_title = $('meta[property="og:title"]').attr('content') || '';
+    metadata.og_description = $('meta[property="og:description"]').attr('content') || '';
+    metadata.og_image = $('meta[property="og:image"]').attr('content') || '';
+    metadata.og_type = $('meta[property="og:type"]').attr('content') || '';
+    metadata.og_site_name = $('meta[property="og:site_name"]').attr('content') || '';
+    
+    // Twitter card metadata
+    metadata.twitter_card = $('meta[name="twitter:card"]').attr('content') || '';
+    metadata.twitter_title = $('meta[name="twitter:title"]').attr('content') || '';
+    metadata.twitter_description = $('meta[name="twitter:description"]').attr('content') || '';
+    metadata.twitter_image = $('meta[name="twitter:image"]').attr('content') || '';
+    
+    // Dublin Core metadata
+    metadata.dc_title = $('meta[name="DC.title"]').attr('content') || '';
+    metadata.dc_creator = $('meta[name="DC.creator"]').attr('content') || '';
+    metadata.dc_subject = $('meta[name="DC.subject"]').attr('content') || '';
+    metadata.dc_description = $('meta[name="DC.description"]').attr('content') || '';
+    
+    // Publication metadata
+    metadata.published_date = $('meta[name="article:published_time"]').attr('content') || 
+                            $('meta[property="article:published_time"]').attr('content') || 
+                            $('meta[name="published_date"]').attr('content') || 
+                            $('meta[name="date"]').attr('content') || '';
+    
+    metadata.modified_date = $('meta[name="article:modified_time"]').attr('content') || 
+                           $('meta[property="article:modified_time"]').attr('content') || 
+                           $('meta[name="modified_date"]').attr('content') || 
+                           $('meta[name="last-modified"]').attr('content') || '';
+    
+    // Additional metadata - scan all meta tags to capture anything we missed
+    $('meta').each((i, el) => {
+      const name = $(el).attr('name') || $(el).attr('property');
+      const content = $(el).attr('content');
       
-      // 2. Remove by ARIA roles
-      $('[role="navigation"], [role="banner"], [role="contentinfo"], [role="complementary"], [role="search"]').remove();
-      
-      // 3. Remove by common class and ID patterns for navigation
-      $(
-        '.nav, #nav, .navbar, #navbar, .navigation, #navigation, ' +
-        '.menu, #menu, .mainmenu, #mainmenu, .main-menu, #main-menu, ' +
-        '.sidebar, #sidebar, .side-menu, #side-menu, .sidenav, #sidenav, ' +
-        '.topnav, #topnav, .top-nav, #top-nav, .bottom-nav, #bottom-nav, ' +
-        '.breadcrumb, .breadcrumbs, .pagination, .pager, ' +
-        '.site-header, #site-header, .page-header, #page-header, ' +
-        '.site-footer, #site-footer, .page-footer, #page-footer, ' +
-        '.footer-menu, #footer-menu, .footer-nav, #footer-nav, ' +
-        '[class*="menu-container"], [id*="menu-container"], ' +
-        '[class*="nav-container"], [id*="nav-container"]'
-      ).remove();
-      
-      // 4. Remove common advertisement containers
-      $(
-        '.ad, #ad, .ads, #ads, .advert, .advertisement, ' +
-        '.banner, .banners, .promo, .promotion, ' +
-        '[class*="-ad-"], [id*="-ad-"], [class*="ad-container"], [id*="ad-container"], ' +
-        '[class*="banner-"], [id*="banner-"]'
-      ).remove();
-      
-      // 5. Remove cookie consent, popups, and modals
-      $(
-        '.cookie, #cookie, .cookie-banner, #cookie-banner, .cookie-consent, #cookie-consent, ' +
-        '.popup, #popup, .modal, .dialog, .overlay, ' +
-        '[class*="cookie-"], [id*="cookie-"], [class*="consent-"], [id*="consent-"], ' +
-        '[class*="popup-"], [id*="popup-"], [class*="modal-"], [id*="modal-"]'
-      ).remove();
-      
-      // 6. Remove social sharing widgets
-      $(
-        '.social, .share, .sharing, .social-share, .share-buttons, ' +
-        '.social-buttons, .social-media, .social-links, .share-links, ' +
-        '[class*="social-"], [id*="social-"], [class*="share-"], [id*="share-"]'
-      ).remove();
-      
-      // 7. Remove search forms and related elements
-      $(
-        '.search, #search, .search-form, #search-form, .search-box, #search-box, ' +
-        '.search-container, #search-container, .search-bar, #search-bar, ' +
-        '[class*="search-"], [id*="search-"]'
-      ).remove();
-      
-      // 8. Remove comments sections
-      $(
-        '.comments, #comments, .comment-section, #comment-section, ' +
-        '.comment-container, #comment-container, .disqus, #disqus, ' +
-        '[class*="comment-"], [id*="comment-"]'
-      ).remove();
-      
-      // 9. Remove related articles and recommendations
-      $(
-        '.related, #related, .recommended, #recommended, .suggestions, ' +
-        '.related-posts, #related-posts, .related-articles, #related-articles, ' +
-        '[class*="related-"], [id*="related-"], [class*="recommend-"], [id*="recommend-"]'
-      ).remove();
-      
-      // 10. Remove elements that are likely to be non-content by attribute
-      $('[data-nosnippet], [aria-hidden="true"]').remove();
-      
-      // 11. Remove hidden elements
-      $('[style*="display: none"], [style*="display:none"], [hidden], .hidden, .invisible').remove();
-      
-      // 12. Remove empty containers (after other removals)
-      $('div, section').each((_, el) => {
-        const $el = $(el);
-        if ($el.children().length === 0 && !$el.text().trim()) {
-          $el.remove();
-        }
-      });
-      
-      console.log('[CONTENT] Removed common boilerplate elements');
-    } catch (error) {
-      console.error('[CONTENT] Error removing boilerplate:', error.message);
-    }
+      if (name && content && !metadata[name.replace(/[:.]/g, '_')]) {
+        // Convert names with dots or colons to underscores for valid YAML
+        const safeName = name.replace(/[:.]/g, '_').toLowerCase();
+        metadata[safeName] = content;
+      }
+    });
+    
+    // Remove empty values
+    Object.keys(metadata).forEach(key => {
+      if (!metadata[key]) {
+        delete metadata[key];
+      }
+    });
+    
+    return metadata;
   }
-  
+
   /**
-   * Makes a more aggressive attempt to remove navigation elements
-   * when no clear main content container is found
+   * Apply heuristic classification to content blocks
    * @param {Object} $ - Cheerio instance
-   * @param {Object} container - Container element to clean
-   * @private
+   * @param {Array} elements - Elements to classify
+   * @param {Object} removedBlocks - Object to track removed blocks
    */
-  removeNavigationElements($, container) {
+  applyHeuristicClassification($, elements, removedBlocks) {
+    if (!elements || elements.length === 0) return;
+    
+    elements.forEach((el) => {
+      const $el = $(el);
+      
+      // Skip empty elements
+      if ($el.text().trim().length === 0 && !$el.find('img[src]').length) {
+        $el.remove();
+        
+        if (this.debug && removedBlocks) {
+          const selector = this.generateConsistentSelector($el);
+          this.trackSelectorDecision(selector, 'remove', removedBlocks, 'Empty element');
+        }
+        return;
+      }
+      
+      // Remove elements that look like navigation or boilerplate
+      if (isLikelyNavigationOrBoilerplate($, el)) {
+        $el.remove();
+        
+        if (this.debug && removedBlocks) {
+          const selector = this.generateConsistentSelector($el);
+          this.trackSelectorDecision(selector, 'remove', removedBlocks, 'Heuristic: Navigation or boilerplate');
+        }
+        return;
+      }
+      
+      // Recursively apply to children
+      this.applyHeuristicClassification($, $el.children().toArray(), removedBlocks);
+    });
+  }
+
+  /**
+   * Apply AI-based classification to content blocks
+   * @param {Object} $ - Cheerio instance
+   * @param {Object} main - Main content element
+   * @param {Object} removedBlocks - Object to track removed blocks
+   */
+  async applyBlockClassification($, main, removedBlocks) {
+    if (!main || main.length === 0) return;
+    
     try {
-      // Remove elements that are likely navigation based on content and structure
-      container.find('*').each((_, el) => {
-        const $el = $(el);
+      console.log('[AI] Applying AI-based block classification');
+      
+      // Get all blocks to classify
+      const blocks = main.children().toArray();
+      
+      // Skip if no blocks to classify
+      if (blocks.length === 0) {
+        console.log('[AI] No blocks to classify');
+        return;
+      }
+      
+      // Prepare blocks for classification
+      const blocksForAI = blocks.map((block, index) => {
+        const $block = $(block);
+        return {
+          index,
+          html: $.html($block),
+          text: $block.text().trim(),
+          selector: this.generateConsistentSelector($block)
+        };
+      });
+      
+      // Classify blocks with AI
+      const classifiedBlocks = await classifyBlocksWithAI(blocksForAI, this.aiConfig);
+      
+      // Process classification results
+      classifiedBlocks.forEach((result) => {
+        const { index, classification, confidence } = result;
+        const block = blocks[index];
+        const $block = $(block);
         
-        // Check for navigation-like structures
-        const isNavLike = (
-          // Elements with many links
-          ($el.find('a').length > 3 && $el.find('a').length / $el.find('*').length > 0.5) ||
+        if (classification === 'remove' && confidence > 0.7) {
+          $block.remove();
           
-          // Elements with navigation-related classes or IDs
-          /nav|menu|header|footer|sidebar|language|social/i.test($el.attr('class') || '') ||
-          /nav|menu|header|footer|sidebar|language|social/i.test($el.attr('id') || '') ||
-          
-          // Elements with list-based navigation
-          ($el.is('ul, ol') && $el.find('a').length > 3) ||
-          
-          // Elements with very short text content but many links
-          ($el.text().trim().length < 100 && $el.find('a').length > 2)
-        );
-        
-        if (isNavLike) {
-          $el.remove();
+          if (this.debug && removedBlocks) {
+            const selector = this.generateConsistentSelector($block);
+            this.trackSelectorDecision(selector, 'remove', removedBlocks, 
+              `AI classification: ${classification} (confidence: ${confidence.toFixed(2)})`);
+            
+            removedBlocks.aiClassifiedBlocks.push({
+              selector,
+              html: $.html($block),
+              classification,
+              confidence
+            });
+          }
         }
       });
       
-      // Remove empty containers after navigation removal
-      container.find('div, section').each((_, el) => {
-        const $el = $(el);
-        if ($el.children().length === 0 && !$el.text().trim()) {
-          $el.remove();
-        }
-      });
-      
-      console.log('[CONTENT] Applied aggressive navigation removal');
-    } catch (e) {
-      console.error(`[CONTENT] Error removing navigation elements: ${e.message}`);
+      console.log('[AI] Block classification complete');
+    } catch (error) {
+      console.error('[AI] Error applying block classification:', error);
     }
   }
 
   /**
-   * Extracts metadata from HTML
-   * @param {Object} $ - Cheerio instance
-   * @returns {Object} - Object with title and metadata
+   * Generate a consistent CSS selector for an element
+   * @param {Object} element - Element to generate selector for
+   * @returns {String} - CSS selector
    */
-  extractMetadata($) {
-    // Get title with fallback to prevent undefined errors
-    const title = $('title').text().trim() || 'Untitled Page';
-    const meta = {};
+  generateConsistentSelector(element) {
+    return generateConsistentSelector(null, element);
+  }
+  
+  /**
+   * Save debug information to the debug folder
+   * @param {string} url - URL of the page
+   * @param {Object} $ - Cheerio instance
+   * @param {Object} main - Main content element
+   * @param {Object} removedBlocks - Object with debug tracking information
+   */
+  /**
+   * Generates debug markdown content showing what was kept and removed
+   * @param {Object} $ - Cheerio object
+   * @param {Object} main - Main content element
+   * @param {Object} removedBlocks - Tracking object for removed blocks
+   * @param {string} url - URL of the page
+   * @returns {string} - Debug markdown content
+   */
+  generateDebugMarkdown($, main, removedBlocks, url) {
+    // Create a markdown report with frontmatter
+    let debugMarkdown = '---\n';
     
-    // Common meta tags to extract
-    const metaNames = [
-      'description', 'keywords', 'author', 'robots', 'viewport',
-      'og:title', 'og:description', 'og:type', 'og:url', 'og:image',
-      'twitter:card', 'twitter:title', 'twitter:description', 'twitter:image'
-    ];
+    // Add metadata
+    debugMarkdown += `url: "${url}"\n`;
+    debugMarkdown += `timestamp: "${new Date().toISOString()}"\n`;
+    debugMarkdown += `content_length: ${main ? main.html().length : 0}\n`;
+    debugMarkdown += `original_length: ${$.html().length}\n`;
+    debugMarkdown += `reduction_percent: ${main ? ((1 - (main.html().length / $.html().length)) * 100).toFixed(2) : 0}\n`;
+    debugMarkdown += '---\n\n';
     
-    try {
-      $('meta').each((_, el) => {
-        const name = $(el).attr('name') || $(el).attr('property');
-        const content = $(el).attr('content');
-        if (name && content && metaNames.includes(name)) {
-          meta[name.replace(':', '_')] = content;
-        }
+    // Add summary
+    debugMarkdown += `# Debug Report for ${url}\n\n`;
+    debugMarkdown += '## Content Statistics\n\n';
+    debugMarkdown += `- **Original Length:** ${$.html().length} characters\n`;
+    debugMarkdown += `- **Content Length:** ${main ? main.html().length : 0} characters\n`;
+    debugMarkdown += `- **Reduction:** ${main ? ((1 - (main.html().length / $.html().length)) * 100).toFixed(2) : 0}%\n\n`;
+    
+    // Add selector decisions
+    debugMarkdown += '## Selector Decisions\n\n';
+    debugMarkdown += '| Selector | Decision | Reason | Content Preview |\n';
+    debugMarkdown += '| --- | --- | --- | --- |\n';
+    
+    // Process selector decisions to make them more meaningful
+    if (removedBlocks && removedBlocks.selectorDecisions) {
+      // Sort decisions by selector path depth (deeper paths first) to show the most specific decisions
+      const decisions = Array.from(removedBlocks.selectorDecisions.entries());
+      decisions.sort((a, b) => {
+        // Count selector depth by number of spaces or > characters
+        const depthA = (a[0].match(/ |>/g) || []).length;
+        const depthB = (b[0].match(/ |>/g) || []).length;
+        return depthB - depthA; // Sort by depth, deepest first
       });
       
-      // Get canonical URL
-      const canonical = $('link[rel="canonical"]').attr('href');
-      if (canonical) meta.canonical = canonical;
-    } catch (err) {
-      console.error('Error extracting metadata:', err.message);
+      // Only include the most specific decisions (avoid redundant parent elements)
+      const processedSelectors = new Set();
+      
+      decisions.forEach(([selector, info]) => {
+        // Skip high-level container selectors that don't provide useful information
+        if (selector === 'body' || selector === 'html' || selector === '#__nuxt' || selector === '#__layout') {
+          return;
+        }
+        
+        // Check if this selector is a child of an already processed selector
+        let isChild = false;
+        for (const processed of processedSelectors) {
+          if (selector.includes(processed) && selector !== processed) {
+            isChild = true;
+            break;
+          }
+        }
+        
+        // Only add if it's not a child of an already processed selector
+        if (!isChild) {
+          processedSelectors.add(selector);
+          
+          // Get a preview of the element's content
+          let contentPreview = '';
+          try {
+            const el = $(selector);
+            if (el.length > 0) {
+              // Get text content, trim and limit length
+              contentPreview = el.text().trim().substring(0, 30);
+              if (contentPreview.length === 30) contentPreview += '...';
+              // Escape pipe characters that would break markdown tables
+              contentPreview = contentPreview.replace(/\|/g, '\\|');
+            }
+          } catch (e) {
+            contentPreview = 'Error getting preview';
+          }
+          
+          debugMarkdown += `| ${selector} | ${info.decision} | ${info.reason} | ${contentPreview} |\n`;
+        }
+      });
     }
     
-    return { title, meta };
+    // Add kept content section
+    debugMarkdown += '\n## Kept Content\n\n';
+    debugMarkdown += '```html\n';
+    debugMarkdown += main ? main.html() : 'No content kept';
+    debugMarkdown += '\n```\n';
+    
+    // Add removed content section if available
+    if (removedBlocks && removedBlocks.removedHtml) {
+      debugMarkdown += '\n## Removed Content (Sample)\n\n';
+      debugMarkdown += '```html\n';
+      // Limit the size of removed content to avoid huge files
+      const removedSample = removedBlocks.removedHtml.length > 5000 ? 
+        removedBlocks.removedHtml.substring(0, 5000) + '... (truncated)' : 
+        removedBlocks.removedHtml;
+      debugMarkdown += removedSample;
+      debugMarkdown += '\n```\n';
+    }
+    
+    return debugMarkdown;
+  }
+
+  saveDebugInfo(url, $, main, removedBlocks) {
+    if (!this.debug || !this.debugDir) return;
+    
+    try {
+      // Parse the URL
+      const urlObj = new URL(url);
+      
+      // Get the filename from the crawl_service by examining the saved file path
+      // Extract path from URL and handle internationalized characters
+      let pathname = urlObj.pathname;
+      
+      // Decode URI components to handle non-ASCII characters
+      try {
+        pathname = decodeURIComponent(pathname);
+      } catch (e) {
+        // If decoding fails, use the original pathname
+        console.warn(`[DEBUG] Failed to decode pathname: ${pathname}`);
+      }
+      
+      // Remove leading and trailing slashes
+      pathname = pathname.replace(/^\/+|\/+$/g, '');
+      
+      // Use pathname as the filename, preserving directory structure
+      const filename = pathname || 'index';
+      
+      // Generate debug markdown content
+      const debugMarkdown = this.generateDebugMarkdown($, main, removedBlocks, url);
+      
+      // Create the debug file path that matches the content file structure
+      // If filename contains path separators, preserve the directory structure
+      let debugFilePath;
+      if (filename.includes('/')) {
+        // Split the filename into directory path and actual filename
+        const lastSlashIndex = filename.lastIndexOf('/');
+        const dirPath = filename.substring(0, lastSlashIndex);
+        const actualFilename = filename.substring(lastSlashIndex + 1);
+        
+        // Create the full directory path in the debug folder
+        const fullDebugDirPath = path.join(this.debugDir, dirPath);
+        
+        // Create the directory if it doesn't exist
+        if (!fs.existsSync(fullDebugDirPath)) {
+          fs.mkdirSync(fullDebugDirPath, { recursive: true });
+        }
+        
+        debugFilePath = path.join(this.debugDir, dirPath, `${actualFilename}.md`);
+      } else {
+        // No path separators, just use the filename directly
+        debugFilePath = path.join(this.debugDir, `${filename}.md`);
+      }
+      
+      // Ensure the directory exists
+      const debugDir = path.dirname(debugFilePath);
+      if (!fs.existsSync(debugDir)) {
+        fs.mkdirSync(debugDir, { recursive: true });
+      }
+      
+      // Save the debug markdown file
+      fs.writeFileSync(debugFilePath, debugMarkdown);
+      
+      console.log(`[DEBUG] Saved debug report to ${debugFilePath}`);
+    } catch (err) {
+      console.error(`[DEBUG] Error saving debug information: ${err.message}`);
+    }
   }
 }

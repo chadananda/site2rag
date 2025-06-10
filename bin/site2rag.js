@@ -32,6 +32,7 @@ program
   .option('-c, --clean', 'Clean crawl state before starting')
   .option('-v, --verbose', 'Enable verbose logging')
   .option('--dry-run', 'Show what would be crawled without downloading')
+  .option('-d, --debug', 'Enable debug mode to save removed content blocks')
   .action(async (url, options, command) => {
     // Add https:// prefix if missing
     if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
@@ -202,13 +203,19 @@ const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
     
     console.log(`Creating SiteProcessor with limit=${limit}, maxDepth=${maxDepth}`);
     
+    // Load AI configuration
+    const aiConfig = loadAIConfig();
+    console.log(`AI configuration: ${aiConfig ? 'loaded' : 'not available'}`);
+    
     const processor = new SiteProcessor(url, {
       crawlState,
       outputDir,
       limit: limit,
       concurrency: configMgr.config.concurrency || 3,
       politeDelay: configMgr.config.politeDelay || 1000,
-      maxDepth: maxDepth
+      maxDepth: maxDepth,
+      debug: options.debug || false,
+      aiConfig: aiConfig
     });
     // Set up verbose logging if requested
     const verbose = options.verbose;
