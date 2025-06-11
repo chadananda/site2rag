@@ -13,6 +13,8 @@ import fs from 'fs';
 import path from 'path';
 import { program } from 'commander';
 
+
+
 // Use ~/.site2rag/crawl.json as the default global config path
 const homeDir = process.env.HOME || process.env.USERPROFILE;
 const defaultConfigPath = path.join(homeDir, '.site2rag', 'crawl.json');
@@ -76,9 +78,10 @@ program
       logger.info('Cleaning crawl state');
       process.exit(0);
     }
+    // Update flag is now handled in the main crawl flow
     if (options.update && url) {
       logger.info(`Updating crawl for ${url}`);
-      process.exit(0);
+      // Don't exit early, continue with processing
     }
     if (options.dryRun && url) {
       logger.info(`[Dry Run] Would crawl: ${url}`);
@@ -216,7 +219,8 @@ const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
       politeDelay: configMgr.config.politeDelay || 1000,
       maxDepth: maxDepth,
       debug: options.debug || false,
-      aiConfig: aiConfig
+      aiConfig: aiConfig,
+      update: options.update || false // Pass the update flag to SiteProcessor
     });
     // Set up verbose logging if requested
     const verbose = options.verbose;

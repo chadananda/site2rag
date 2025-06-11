@@ -4,6 +4,7 @@ import { URL } from 'url';
 import { CrawlLimitReached } from '../errors.js';
 
 import logger from './logger_service.js';
+import ProgressService from './progress_service.js';
 
 export class CrawlService {
   /**
@@ -46,6 +47,23 @@ export class CrawlService {
     this.debug = options.debug === true; // Ensure it's a boolean
     this.totalUrlsMapped = 0; // Counter for total URLs mapped
     
+    // Initialize progress service
+    this.progressService = options.progressService || new ProgressService({
+      updateFrequency: options.progressUpdateFrequency || 500
+    });
+    
+    this.assetStats = {
+      total: 0,
+      images: 0,
+      documents: 0,
+      other: 0
+    };
+    
+    this.errorStats = {
+      total: 0,
+      retries: 0
+    };
+    
     // Configure logger based on debug option
     logger.configure({ debug: this.debug });
     logger.crawl(`Debug mode is ${this.debug ? 'enabled' : 'disabled'}`);
@@ -74,6 +92,13 @@ export class CrawlService {
     // Initialize crawl state service if it has an initialize method
     if (this.crawlStateService && typeof this.crawlStateService.initialize === 'function') {
       await this.crawlStateService.initialize(hostname);
+      logger.info(`[STATE] Initialized crawl state service for ${hostname}`);
+      
+      // Log the number of pages in the crawl state
+      if (this.crawlStateService.pages) {
+        const pageCount = this.crawlStateService.pages.size;
+        logger.info(`[STATE] Loaded ${pageCount} pages from crawl state`);
+      }
     }
     
     // Initialize fetch service (loads robots.txt) if domain is valid
@@ -96,6 +121,81 @@ export class CrawlService {
     const url = startUrl || this.startUrl;
     logger.info(`Starting crawl from ${url}`, true);
     logger.info(`Max pages: ${this.maxPages}, Max depth: ${this.maxDepth}`, true);
+        // Check if we have previous pages (re-crawl)
+    this.isReCrawl = false;
+
+    // Check if previous database files exist
+    const outputDir = this.options.outputDir || './output';
+    const site2ragDir = path.join(outputDir, '.site2rag');
+    const dbPath = path.join(site2ragDir, 'crawl.db');
+    const prevDbPath = path.join(site2ragDir, 'crawl_prev.db');
+
+    try {
+      // Check if any database file exists (either current or previous)
+      const dbExists = fs.existsSync(dbPath);
+      const prevDbExists = fs.existsSync(prevDbPath);
+      
+      if (dbExists || prevDbExists) {
+        this.isReCrawl = true;
+        logger.info(`Re-crawl detected - Found existing data: DB=${dbExists}, PrevDB=${prevDbExists}`);
+        
+        // Initialize re-crawl statistics
+        if (this.progressService) {
+          this.progressService.stats.newPages = 0;
+          this.progressService.stats.updatedPages = 0;
+          this.progressService.stats.unchangedPages = 0;
+          
+          // Set re-crawl flag in progress service
+          this.progressService.isReCrawl = true;
+          logger.debug(`Set isReCrawl flag in progress service: ${this.progressService.isReCrawl}`);
+        }
+        
+        // Check if we can access the database
+        if (this.contentService && this.contentService.db) {
+          try {
+            // Count pages in the database
+            const stmt = this.contentService.db.prepare('SELECT COUNT(*) as count FROM pages');
+            const result = stmt.get();
+            logger.info(`[DB] Found ${result.count} pages in the database`);
+            
+            // List all pages in the database for debugging
+            if (result.count > 0) {
+              const pagesStmt = this.contentService.db.prepare('SELECT url, content_hash FROM pages');
+              const pages = pagesStmt.all();
+              logger.info(`[DB] Pages in database:`);
+              pages.forEach(page => {
+                logger.info(`[DB] - ${page.url} (hash: ${page.content_hash || 'none'})`);
+              });
+            }
+            
+            // Check database file paths
+            const dbPath = this.contentService.db.name;
+            logger.info(`[DB] Current database file: ${dbPath}`);
+          } catch (err) {
+            logger.error(`[DB] Error accessing database: ${err.message}`);
+          }
+        } else {
+          logger.warn('[DB] Database not accessible for re-crawl detection');
+        }
+      } else {
+        logger.info(`New crawl - No existing data found in ${outputDir}`);
+      }
+    } catch (err) {
+      logger.warn(`Error checking for existing database: ${err.message}`);
+    }
+    
+    // Start progress display
+    if (this.progressService) {
+      // Use maxPages (which comes from options.limit in the constructor) as the total
+      // This ensures the progress bar shows the correct limit
+      const totalUrls = this.maxPages;
+      
+      this.progressService.start({
+        totalUrls: totalUrls,
+        isReCrawl: this.isReCrawl,
+        siteUrl: this.options.startUrl || this.domain
+      });
+    }
     
     // Extract and store base domain from the starting URL for domain filtering
     try {
@@ -121,17 +221,19 @@ export class CrawlService {
       
       // Pre-load content hashes from previous session if crawlStateService is available
       // This allows for more efficient skipping of unchanged content
-      if (this.crawlStateService && typeof this.crawlStateService.getAllPages === 'function') {
+      if (this.crawlStateService && this.crawlStateService.pages) {
         logger.info('[CACHE] Loading content hashes from previous session...');
-        const previousPages = await this.crawlStateService.getAllPages();
-        if (previousPages && previousPages.length > 0) {
-          logger.info(`[CACHE] Loaded ${previousPages.length} pages from previous session`);
+        
+        if (this.crawlStateService.pages.size > 0) {
+          logger.info(`[CACHE] Loaded ${this.crawlStateService.pages.size} pages from previous session`);
           
           // Populate in-memory content hash cache
           let hashCount = 0;
-          for (const page of previousPages) {
-            if (page.url && page.content_hash) {
-              this.contentHashes.set(page.url, page.content_hash);
+          
+          // Iterate through the pages Map
+          for (const [url, pageData] of this.crawlStateService.pages.entries()) {
+            if (url && pageData.content_hash) {
+              this.contentHashes.set(url, pageData.content_hash);
               hashCount++;
             }
           }
@@ -143,18 +245,63 @@ export class CrawlService {
       logger.info('Starting recursive crawl...');
       await this.crawl(url, 0);
       logger.info(`Crawl completed with ${this.foundUrls.length} URLs found`);
+      
       return this.foundUrls;
     } catch (err) {
       if (err instanceof CrawlLimitReached) {
         logger.info(`Crawl limit reached after ${this.foundUrls.length} URLs`);
         // This is an expected condition, not an error
+        // Database state is automatically saved as we go
+        logger.info(`[STATE] Crawl state is stored in the database`);
+        
+        // Return the array of found URLs
         return this.foundUrls;
       }
       logger.error('Error during crawl:', err);
       throw err;
     } finally {
+      // Ensure all active downloads are properly accounted for
+      if (this.activeCrawls > 0) {
+        logger.info(`Waiting for ${this.activeCrawls} active downloads to complete...`);
+        // Wait a bit for active downloads to finish
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+      
       // Abort any pending requests
       this.fetchService.abortAll();
+      
+      // Database state is automatically saved as we go
+      logger.info(`[STATE] Crawl state is stored in the database`);
+      
+      
+      // Stop progress display without clearing the screen
+      if (this.progressService) {
+        // Final update of stats before stopping
+        // Use the maxPages value (which comes from options.limit in the constructor)
+        const finalTotal = this.maxPages;
+        
+        this.progressService.updateStats({
+          totalUrls: finalTotal,
+          crawledUrls: this.visitedUrls.size,
+          queuedUrls: 0,
+          activeUrls: 0,
+          assets: this.assetStats,
+          errors: this.errorStats,
+          // Include re-crawl statistics if this is a re-crawl
+          ...(this.isReCrawl ? {
+            newPages: this.progressService.stats.newPages,
+            updatedPages: this.progressService.stats.updatedPages,
+            unchangedPages: this.progressService.stats.unchangedPages
+          } : {})
+        });
+        
+        // Log final re-crawl statistics for debugging
+        if (this.isReCrawl) {
+          logger.info(`[STATS] Final re-crawl statistics: ${this.progressService.stats.newPages} new, ${this.progressService.stats.updatedPages} updated, ${this.progressService.stats.unchangedPages} unchanged`);
+        }
+        
+        this.progressService.stop();
+      }
     }
   }
 
@@ -223,6 +370,9 @@ export class CrawlService {
       return;
     }
     
+    // Add to active downloads in progress service
+    this.progressService.addActiveUrl(normalizedUrl);
+    
     // Strict domain filtering at the beginning of crawl
     if (depth > 0 && this.options.sameDomain === true) {
       try {
@@ -269,6 +419,9 @@ export class CrawlService {
           await this.crawlStateService.queueUrl(normalizedUrl, { resourceType: 'binary', resourceParam });
           logger.info(`[BINARY_TRACKING] Added binary resource to queue: ${resourceParam}`);
         }
+        
+        // Add to active downloads in progress service
+        this.progressService.addActiveUrl(normalizedUrl);
         
         // First try to build a direct URL to the resource based on the base URL and resource parameter
         const resourceUrlObj = new URL(normalizedUrl);
@@ -319,6 +472,8 @@ export class CrawlService {
         // If all attempts failed, skip this resource
         if (!resourceResponse) {
           logger.error(`[CRAWL] Failed to download resource: ${resourceParam} from any URL`);
+          // Mark download as failed in progress service
+          this.progressService.completeUrl(normalizedUrl, 'error');
           return;
         }
         
@@ -386,21 +541,68 @@ export class CrawlService {
                 if (cachedHash === contentHash) {
                   contentChanged = false;
                   logger.cache(`Content unchanged (in-memory): ${normalizedUrl}`);
+                  
+                  // Increment unchanged pages count for re-crawls
+                  if (this.progressService && this.isReCrawl) {
+                    this.progressService.stats.unchangedPages++;
+                  }
                 }
-              } else {
-                // Check database cache
-                const previousHash = await this.crawlStateService.getPageHash(normalizedUrl);
-                if (previousHash && previousHash === contentHash) {
-                  contentChanged = false;
-                  logger.cache(`Content unchanged for ${normalizedUrl}, using cached version`);
-                } else if (previousHash) {
-                  logger.cache(`Content changed for ${normalizedUrl}, processing new version`);
+              } else if (this.isReCrawl && this.contentService.db) {
+                // We'll handle re-crawl statistics in the database section below
+                if (this.isReCrawl) {
+                  logger.debug(`Processing URL in re-crawl mode: ${normalizedUrl}`);
                 }
               }
               
-              // Update caches
+              // Update in-memory cache
               this.contentHashes.set(normalizedUrl, contentHash);
-              await this.crawlStateService.savePageHash(normalizedUrl, contentHash);
+              
+              // Update database directly if available
+              if (this.contentService.db) {
+                try {
+                  // First check if the page already exists in the database
+                  const checkStmt = this.contentService.db.prepare('SELECT url, content_hash FROM pages WHERE url = ?');
+                  const existingPage = checkStmt.get(normalizedUrl);
+                  
+                  // For re-crawls, determine if the page is new, updated, or unchanged
+                  if (this.isReCrawl) {
+                    // Normal re-crawl logic
+                    if (!existingPage) {
+                      // New page
+                      logger.debug(`New page: ${normalizedUrl}`);
+                      if (this.progressService) {
+                        this.progressService.stats.newPages++;
+                        logger.debug(`New pages: ${this.progressService.stats.newPages}`);
+                      }
+                    } else if (existingPage.content_hash !== contentHash) {
+                      // Updated page
+                      logger.debug(`Updated page: ${normalizedUrl} (old hash: ${existingPage.content_hash}, new hash: ${contentHash})`);
+                      if (this.progressService) {
+                        this.progressService.stats.updatedPages++;
+                        logger.debug(`Updated pages: ${this.progressService.stats.updatedPages}`);
+                      }
+                    } else {
+                      // Unchanged page
+                      logger.debug(`Unchanged page: ${normalizedUrl} (hash: ${contentHash})`);
+                      if (this.progressService) {
+                        this.progressService.stats.unchangedPages++;
+                        logger.debug(`Unchanged pages: ${this.progressService.stats.unchangedPages}`);
+                      }
+                    }
+                  }
+                  
+                  // Use upsert pattern (insert or update)
+                  const stmt = this.contentService.db.prepare(
+                    'INSERT INTO pages (url, content_hash, last_crawled) VALUES (?, ?, ?) ' +
+                    'ON CONFLICT(url) DO UPDATE SET content_hash = ?, last_crawled = ?'
+                  );
+                  
+                  const now = new Date().toISOString();
+                  stmt.run(normalizedUrl, contentHash, now, contentHash, now);
+                } catch (err) {
+                  logger.error(`[DB] Error saving page hash: ${err.message}`);
+                }
+              }
             }
           }
           
@@ -498,8 +700,33 @@ export class CrawlService {
       logger.crawl(`Total URLs mapped so far: ${this.totalUrlsMapped}`);
     }
     
-    // Get existing page data from database
-    const pageData = this.crawlStateService.getPage(normalizedUrl);
+    // Mark download as complete in progress service
+    this.progressService.completeUrl(normalizedUrl, 'success');
+    
+    // Update crawl stats
+    this.progressService.updateStats({
+      crawledUrls: this.visitedUrls.size,
+      queuedUrls: this.queuedUrls.size,
+      activeUrls: this.activeCrawls
+    });
+    
+    // For re-crawls, check if the page exists in the database
+    let existingPage = null;
+    if (this.isReCrawl && this.contentService.db) {
+      try {
+        // Query the database directly for the page data
+        const stmt = this.contentService.db.prepare('SELECT url, etag, last_modified, content_hash FROM pages WHERE url = ?');
+        existingPage = stmt.get(normalizedUrl);
+        
+        // Debug log for re-crawl detection
+        logger.info(`[DEBUG] DB page data for ${normalizedUrl}: ${existingPage ? 'Found' : 'Not found'}`);
+        if (existingPage) {
+          logger.info(`[DEBUG] DB content hash: ${existingPage.content_hash || 'Not set'}`);
+        }
+      } catch (err) {
+        logger.error(`[DB] Error querying page data: ${err.message}`);
+      }
+    }
     
     // Skip if we're beyond the max depth (but allow if maxDepth is -1, which means no limit)
     if (this.maxDepth >= 0 && depth > this.maxDepth) {
@@ -518,6 +745,9 @@ export class CrawlService {
       // Prepare headers for conditional request
       const headers = { 'User-Agent': 'site2rag-crawler' };
       
+      // Use existingPage as pageData to avoid the undefined error
+      const pageData = existingPage;
+      
       // Add conditional headers if we have page data
       if (pageData) {
         logger.cache(`Found previous data for ${urlString}`);
@@ -535,7 +765,12 @@ export class CrawlService {
         }
       } else {
         // Initialize page data if this is the first time crawling this URL
+        // Check if this is a new page or an existing one
+        const isNewPage = !pageData;
+        
+        // Store page data in crawl state
         this.crawlStateService.upsertPage(urlString, {
+          url: urlString,
           etag: null,
           last_modified: null,
           content_hash: null,
@@ -544,6 +779,11 @@ export class CrawlService {
           title: null,
           file_path: null
         });
+        
+        // Track new pages for re-crawls - only if this is truly a new page
+        if (this.progressService && this.isReCrawl && isNewPage) {
+          this.progressService.stats.newPages++;
+        }
       }
       
       // Fetch the URL with conditional headers
@@ -561,6 +801,13 @@ export class CrawlService {
         this.crawlStateService.upsertPage(urlString, {
           last_crawled: new Date().toISOString()
         });
+        
+        // Track unchanged pages for re-crawls
+        if (this.progressService && this.isReCrawl) {
+          this.progressService.stats.unchangedPages++;
+          this.progressService.stats.crawledUrls++; // Count as crawled for progress
+          logger.info(`[STATS] Unchanged page (304): ${normalizedUrl}, total unchanged: ${this.progressService.stats.unchangedPages}`);
+        }
         return;
       }
       
@@ -594,12 +841,26 @@ export class CrawlService {
           this.crawlStateService.upsertPage(urlString, {
             last_crawled: new Date().toISOString()
           });
+          
+          // Track unchanged pages for re-crawls
+          if (this.progressService && this.isReCrawl) {
+            this.progressService.stats.unchangedPages++;
+            this.progressService.stats.crawledUrls++; // Count as crawled for progress
+          }
           return;
         }
       }
       
       // Update in-memory cache with new hash
       this.contentHashes.set(normalizedUrl, contentHash);
+      
+      // Always store the content hash in the page data
+      // This ensures it's available for future re-crawls
+      if (pageData) {
+        this.crawlStateService.upsertPage(urlString, {
+          content_hash: contentHash
+        });
+      }
       
       // Check if content has changed using ETag, Last-Modified, and content hash
       if (pageData) {
@@ -623,12 +884,17 @@ export class CrawlService {
           contentUnchanged = true;
         }
         
-        // Check content hash as a fallback
-        if (!contentUnchanged && contentHash && pageData.content_hash && pageData.content_hash === contentHash) {
-          if (this.debug) {
-            logger.log('DEBUG', `Content hash match for ${urlString}: ${contentHash}`);
+        // Check content hash as a fallback - this is the most reliable method
+        // for re-crawls since ETags and Last-Modified headers might not be consistent
+        if (!contentUnchanged && contentHash && pageData.content_hash) {
+          if (contentHash === pageData.content_hash) {
+            if (this.debug) {
+              logger.log('DEBUG', `Content hash match for ${urlString}: ${contentHash}`);
+            }
+            contentUnchanged = true;
+          } else if (this.debug) {
+            logger.log('DEBUG', `Content hash mismatch for ${urlString}: ${contentHash} vs ${pageData.content_hash}`);
           }
-          contentUnchanged = true;
         }
         
         if (contentUnchanged) {
@@ -638,9 +904,21 @@ export class CrawlService {
             last_crawled: new Date().toISOString(),
             content_hash: contentHash // Update the hash in case it wasn't stored before
           });
+          
+          // Track unchanged pages for re-crawls
+          if (this.progressService && this.isReCrawl) {
+            this.progressService.stats.unchangedPages++;
+            this.progressService.stats.crawledUrls++; // Count as crawled for progress
+          }
+          
           return;
         } else {
           logger.cache(`Content changed for ${urlString}`);
+          
+          // Track updated pages for re-crawls
+          if (this.progressService && this.isReCrawl && pageData) {
+            this.progressService.stats.updatedPages++;
+          }
         }
       }
       
@@ -1064,6 +1342,9 @@ export class CrawlService {
           filename
         );
         logger.info(`[BINARY_TRACKING] Successfully saved binary file: ${savedPath}`);
+        
+        // Mark download as complete in progress service
+        this.progressService.completeUrl(url, 'success');
         
         // Log detailed information about the saved file
         const fileExtension = filename.split('.').pop().toLowerCase();

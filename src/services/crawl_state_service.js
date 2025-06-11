@@ -50,15 +50,19 @@ export class CrawlStateService {
    */
   async loadState(domain) {
     const stateFile = this.getStateFilePath(domain);
+    logger.info(`[STATE] Attempting to load state from ${stateFile}`);
     
     if (await this.fileService.fileExists(stateFile)) {
+      logger.info(`[STATE] Found existing state file at ${stateFile}`);
       const state = await this.fileService.readJson(stateFile, { pages: {} });
       
       // Convert pages object to Map
       this.pages = new Map(
         Object.entries(state.pages || {})
       );
+      logger.info(`[STATE] Loaded ${this.pages.size} pages from state file`);
     } else {
+      logger.info(`[STATE] No existing state file found at ${stateFile}`);
       this.pages = new Map();
     }
   }
@@ -70,15 +74,27 @@ export class CrawlStateService {
    */
   async saveState(domain) {
     const stateFile = this.getStateFilePath(domain);
+    logger.info(`[STATE] Saving state to ${stateFile}`);
     
     // Convert Map to object for serialization
     const pagesObject = Object.fromEntries(this.pages.entries());
+    logger.info(`[STATE] Saving ${Object.keys(pagesObject).length} pages to state file`);
     
-    await this.fileService.writeJson(stateFile, {
-      domain,
-      lastCrawled: new Date().toISOString(),
-      pages: pagesObject
-    });
+    try {
+      // Ensure directory exists
+      const stateDir = path.dirname(stateFile);
+      await this.fileService.ensureDir(stateDir);
+      logger.info(`[STATE] Ensured state directory exists: ${stateDir}`);
+      
+      await this.fileService.writeJson(stateFile, {
+        domain,
+        lastCrawled: new Date().toISOString(),
+        pages: pagesObject
+      });
+      logger.info(`[STATE] Successfully saved state to ${stateFile}`);
+    } catch (err) {
+      logger.error(`[STATE] Error saving state to ${stateFile}:`, err);
+    }
   }
 
   /**
@@ -196,6 +212,20 @@ export class CrawlStateService {
       last_crawled: new Date().toISOString(),
       title: pageData.title || null,
       file_path: pageData.file_path || null
+    });
+  }
+
+  /**
+   * Gets all pages from the current state
+   * @returns {Array<Object>} - Array of page objects with their URLs
+   */
+  getAllPages() {
+    // Convert the pages Map to an array of objects with URLs
+    return Array.from(this.pages.entries()).map(([url, data]) => {
+      return {
+        url,
+        ...data
+      };
     });
   }
 
