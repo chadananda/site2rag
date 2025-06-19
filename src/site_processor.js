@@ -68,8 +68,8 @@ export class SiteProcessor {
       logger.domainFilter(`Domain filtering explicitly disabled, will crawl external domains`);
     }
     // Initialize services as instance properties
-    const { outputDir, politeWaitMs, aiConfig, debug } = this.options;
-    this.fileService = new FileService({ outputDir });
+    const { outputDir, politeWaitMs, aiConfig, debug, flat } = this.options;
+    this.fileService = new FileService({ outputDir, flat });
     this.urlService = new UrlService();
     this.fetchService = new FetchService({ politeWaitMs });
     this.contentService = new ContentService({ aiConfig, debug, outputDir });

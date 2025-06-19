@@ -123,6 +123,7 @@ program
   .option('-v, --verbose', 'Enable verbose logging')
   .option('--dry-run', 'Show what would be crawled without downloading')
   .option('-d, --debug', 'Enable debug mode to save removed content blocks')
+  .option('--flat', 'Store all files in top-level folder with path-derived names')
   .action(async (url, options, command) => {
     // Display header when running with no arguments (for testing)
     if (process.argv.length === 2) {
@@ -312,7 +313,8 @@ const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
       maxDepth: maxDepth,
       debug: options.debug || false,
       aiConfig: aiConfig,
-      update: options.update || false // Pass the update flag to SiteProcessor
+      update: options.update || false, // Pass the update flag to SiteProcessor
+      flat: options.flat || false // Pass the flat flag to SiteProcessor
     });
     // Set up verbose logging if requested
     const verbose = options.verbose;

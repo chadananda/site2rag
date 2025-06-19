@@ -1,7 +1,13 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(mv:*)",
+      "Bash(cp:*)",
+      "Bash(mkdir:*)",
+      "Bash(for file in *_*.test.js)",
+      "Bash(do mv \"$file\" \"$file//_/-\")",
+      "Bash(done)"
     ],
     "deny": []
   }

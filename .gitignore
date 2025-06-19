@@ -36,6 +36,8 @@ node_modules/
 # Task files
 tasks.json
 tasks/
-tests/tmpdb/
 output/
+
+# Test temporary files
+tests/tmp/
 
