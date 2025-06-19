@@ -35,30 +35,45 @@ export class MarkdownService {
         const href = node.getAttribute('href');
         if (!href) return content;
         
+        // Decode percent-encoded URLs for better readability
+        let decodedHref = href;
+        try {
+          decodedHref = decodeURIComponent(href);
+        } catch (e) {
+          // If decoding fails, use the original href
+          decodedHref = href;
+        }
+        
         // Check if this is a PDF or DOCX link
-        const isPdfOrDocx = href.toLowerCase().endsWith('.pdf') || href.toLowerCase().endsWith('.docx');
+        const isPdfOrDocx = decodedHref.toLowerCase().endsWith('.pdf') || decodedHref.toLowerCase().endsWith('.docx');
         
         // Get the title attribute
         const title = node.title ? ` "${node.title}"` : '';
         
         // If it's a PDF or DOCX and it's a relative link, keep it relative
         // Otherwise, make sure it's an absolute URL
-        if (isPdfOrDocx && !href.startsWith('http') && !href.startsWith('//')) {
+        if (isPdfOrDocx && !decodedHref.startsWith('http') && !decodedHref.startsWith('//')) {
           // For PDF/DOCX, we'll keep the relative path
           // TODO: Download the file to the local folder structure
-          logger.info(`[MARKDOWN] Keeping relative link for document: ${href}`);
-          return `[${content}](${href}${title})`;
+          logger.info(`[MARKDOWN] Keeping relative link for document: ${decodedHref}`);
+          return `[${content}](${decodedHref}${title})`;
         } else {
           // For all other links, ensure they are absolute
-          let absoluteUrl = href;
+          let absoluteUrl = decodedHref;
           
           // If we have a baseUrl in the context, use it to resolve relative URLs
-          if (this.baseUrl && !href.startsWith('http') && !href.startsWith('//')) {
+          if (this.baseUrl && !decodedHref.startsWith('http') && !decodedHref.startsWith('//')) {
             try {
-              absoluteUrl = new URL(href, this.baseUrl).href;
+              absoluteUrl = new URL(decodedHref, this.baseUrl).href;
+              // Decode the final URL as well
+              try {
+                absoluteUrl = decodeURIComponent(absoluteUrl);
+              } catch (e) {
+                // If decoding the final URL fails, keep it as is
+              }
             } catch (error) {
-              logger.warn(`[MARKDOWN] Error resolving URL: ${href}`, error);
-              absoluteUrl = href; // Fallback to original
+              logger.warn(`[MARKDOWN] Error resolving URL: ${decodedHref}`, error);
+              absoluteUrl = decodedHref; // Fallback to decoded href
             }
           }
           

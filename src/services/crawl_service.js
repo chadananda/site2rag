@@ -1024,12 +1024,15 @@ export class CrawlService {
       logger.crawl(`- Hostname: ${hostname}`);
       logger.crawl(`- Filename: ${filename}.md`);
       
+      // Add blank lines at the end for better VS Code/Windsurf display
+      const markdownWithBlankLines = markdownWithFrontmatter + '\n\n';
+      
       let filePath = null;
       try {
         filePath = await this.fileService.saveMarkdown(
           hostname,
           filename + '.md', 
-          markdownWithFrontmatter
+          markdownWithBlankLines
         );
         logger.crawl(`- Saved to: ${filePath}`, true);
         
