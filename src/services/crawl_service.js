@@ -776,18 +776,17 @@ export class CrawlService {
         Object.assign(headers, conditionalHeaders);
       } else {
         // Fallback to basic conditional headers
-        const pageData = existingPage;
-        if (pageData) {
+        if (existingPage) {
           logger.cache(`Found previous data for ${urlString}`);
           
-          if (pageData.etag) {
-            logger.cache(`Using ETag: ${pageData.etag}`);
-            headers['If-None-Match'] = pageData.etag;
+          if (existingPage.etag) {
+            logger.cache(`Using ETag: ${existingPage.etag}`);
+            headers['If-None-Match'] = existingPage.etag;
           }
           
-          if (pageData.last_modified) {
-            logger.cache(`Using Last-Modified: ${pageData.last_modified}`);
-            headers['If-Modified-Since'] = pageData.last_modified;
+          if (existingPage.last_modified) {
+            logger.cache(`Using Last-Modified: ${existingPage.last_modified}`);
+            headers['If-Modified-Since'] = existingPage.last_modified;
           }
         }
       }
@@ -862,19 +861,19 @@ export class CrawlService {
       
       // Always store the content hash in the page data
       // This ensures it's available for future re-crawls
-      if (pageData) {
+      if (existingPage) {
         this.crawlStateService.upsertPage(urlString, {
           content_hash: contentHash
         });
       }
       
       // Check if content has changed using ETag, Last-Modified, and content hash
-      if (pageData) {
+      if (existingPage) {
         let contentUnchanged = false;
         
         // Check ETag if available
         const etag = response.headers.get('etag');
-        if (etag && pageData.etag && pageData.etag === etag) {
+        if (etag && existingPage.etag && existingPage.etag === etag) {
           if (this.debug) {
             logger.log('DEBUG', `ETag match for ${urlString}: ${etag}`);
           }
@@ -883,7 +882,7 @@ export class CrawlService {
         
         // Check Last-Modified if available
         const lastModified = response.headers.get('last-modified');
-        if (!contentUnchanged && lastModified && pageData.last_modified && pageData.last_modified === lastModified) {
+        if (!contentUnchanged && lastModified && existingPage.last_modified && existingPage.last_modified === lastModified) {
           if (this.debug) {
             logger.log('DEBUG', `Last-Modified match for ${urlString}: ${lastModified}`);
           }
@@ -892,14 +891,14 @@ export class CrawlService {
         
         // Check content hash as a fallback - this is the most reliable method
         // for re-crawls since ETags and Last-Modified headers might not be consistent
-        if (!contentUnchanged && contentHash && pageData.content_hash) {
-          if (contentHash === pageData.content_hash) {
+        if (!contentUnchanged && contentHash && existingPage.content_hash) {
+          if (contentHash === existingPage.content_hash) {
             if (this.debug) {
               logger.log('DEBUG', `Content hash match for ${urlString}: ${contentHash}`);
             }
             contentUnchanged = true;
           } else if (this.debug) {
-            logger.log('DEBUG', `Content hash mismatch for ${urlString}: ${contentHash} vs ${pageData.content_hash}`);
+            logger.log('DEBUG', `Content hash mismatch for ${urlString}: ${contentHash} vs ${existingPage.content_hash}`);
           }
         }
         
@@ -922,7 +921,7 @@ export class CrawlService {
           logger.cache(`Content changed for ${urlString}`);
           
           // Track updated pages for re-crawls
-          if (this.progressService && this.isReCrawl && pageData) {
+          if (this.progressService && this.isReCrawl && existingPage) {
             this.progressService.stats.updatedPages++;
           }
         }
@@ -972,7 +971,8 @@ export class CrawlService {
       }
       
       // Extract metadata from HTML
-      const { title, meta } = this.contentService.extractMetadata($);
+      const metadata = this.contentService.extractMetadata($);
+      const title = metadata.title;
       
       // Convert to markdown and generate frontmatter
       // Pass the normalized URL as the base URL for link resolution
@@ -1010,8 +1010,8 @@ export class CrawlService {
         }
       }
       
-      // Ensure meta is an object to prevent undefined errors
-      const metaData = meta || {};
+      // Use the extracted metadata
+      const metaData = metadata || {};
       
       // Decode the URL for human-readable frontmatter
       let decodedUrl = normalizedUrl;
