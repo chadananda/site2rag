@@ -1,0 +1,11 @@
+{
+  "domain": "https://tests/output/docs.example.com",
+  "outputDir": "./tests",
+  "maxDepth": "-1",
+  "maxPages": null,
+  "lastCrawl": "2025-06-19T02:08:17.027Z",
+  "crawlSettings": {
+    "politeWaitMs": 1000,
+    "followRobotsTxt": true
+  }
+}
