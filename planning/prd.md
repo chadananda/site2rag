@@ -359,6 +359,25 @@ npx site2rag --clean [--output ./dir]
 - **Conditional requests** using ETags/Last-Modified
 - **Intelligent retries** with circuit breaker pattern
 
+## Testing Strategy
+
+### Comprehensive Test Coverage
+- **Unit Tests**: Fast, isolated component testing with >90% coverage
+- **Integration Tests**: End-to-end workflow validation
+- **Real Website Testing**: Manual validation with actual sites
+- **Consistent Naming**: kebab-case convention for all test files
+
+**Detailed testing documentation**: See [tests/README.md](../tests/README.md)
+
+### Test Organization
+```
+tests/
+├── unit/                   # Fast, isolated component tests
+├── integration/           # End-to-end workflow tests  
+├── fixtures/              # Static test data (committed)
+└── tmp/                   # Temporary outputs (gitignored)
+```
+
 ## Success Metrics
 
 ### Primary KPIs
