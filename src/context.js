@@ -148,26 +148,36 @@ export async function extractEntitiesWithSlidingWindow(blocks, metadata, aiConfi
     console.log(`[ENTITIES] Processing window ${i + 1}/${windows.length}`);
     
     const windowText = windows[i].join('\n\n');
+    const metadataEscaped = JSON.stringify(metadata);
+    const contentEscaped = JSON.stringify(windowText);
+    
     const prompt = `Extract all entities, subjects, and relationships from this document section. 
 Focus on people, places, organizations, dates, events, and main subjects/topics.
 
-Return your response as valid JSON only, no other text or explanation.
+Document metadata: ${metadataEscaped}
+Content section ${i + 1}/${windows.length}: ${contentEscaped}
 
-Document metadata: ${JSON.stringify(metadata)}
-
-Content section ${i + 1}/${windows.length}:
-${windowText}
-
-Respond with valid JSON matching this structure:
+IMPORTANT: Return exactly this JSON structure:
 {
-  "people": [{"name": "string", "roles": ["array"], "aliases": ["array"], "context": "string"}],
-  "places": [{"name": "string", "context": "string", "aliases": ["array"], "type": "string"}],
-  "organizations": [{"name": "string", "context": "string", "aliases": ["array"], "type": "string"}],
-  "dates": [{"date": "string", "context": "string", "precision": "string"}],
-  "events": [{"name": "string", "timeframe": "string", "participants": ["array"], "location": "string", "context": "string"}],
-  "subjects": ["array of main topics/subjects"],
-  "relationships": [{"from": "string", "relationship": "string", "to": "string", "context": "string"}]
-}`;
+  "people": [],
+  "places": [],
+  "organizations": [],
+  "dates": [],
+  "events": [],
+  "subjects": [],
+  "relationships": []
+}
+
+Fill the arrays with extracted entities. Use this format for each entity type:
+- people: {"name": "string", "roles": ["array"], "aliases": ["array"], "context": "string"}
+- places: {"name": "string", "context": "string", "aliases": ["array"], "type": "string"}
+- organizations: {"name": "string", "context": "string", "aliases": ["array"], "type": "string"}
+- dates: {"date": "string", "context": "string", "precision": "string"}
+- events: {"name": "string", "timeframe": "string", "participants": ["array"], "location": "string", "context": "string"}
+- subjects: ["string"] (main topics/subjects)
+- relationships: {"from": "string", "relationship": "string", "to": "string", "context": "string"}
+
+Return valid JSON only, no other text or explanation.`;
 
     try {
       const extraction = await callAIImpl(prompt, EntityExtractionSchema, aiConfig);
@@ -555,17 +565,22 @@ export async function enhanceBlocksWithEntityContext(blocks, entityGraph, aiConf
     
     const contextWindow = buildEntityAwareContextWindow(i, blocks, processedBlocks, entityGraph);
     
+    // Pre-escape the original text for JSON safety
+    const originalEscaped = JSON.stringify(blocks[i].text);
+    
     const enrichPrompt = `Using the provided entity context, enhance this content block with disambiguating information. Add context that helps readers understand references, abbreviations, and implicit knowledge while preserving the original meaning and flow.
 
 ${contextWindow}
 
-Return your response as valid JSON only, no other text or explanation.
-
-Respond with valid JSON matching this structure:
+IMPORTANT: Return exactly this JSON structure with the enhanced text:
 {
-  "contexted_markdown": "enhanced content block with added context",
-  "context_summary": "optional brief summary of changes made"
-}`;
+  "contexted_markdown": ${originalEscaped},
+  "context_summary": "brief summary of changes made"
+}
+
+Replace the content inside contexted_markdown with your enhanced version, keeping the same JSON string format. The original text is: ${originalEscaped}
+
+Enhance the text and return valid JSON only, no other text or explanation.`;
 
     try {
       const contextedResult = await callAIImpl(enrichPrompt, ContextedDocSchema, aiConfig);
