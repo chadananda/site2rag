@@ -151,17 +151,36 @@ These hints help your RAG system understand exactly what "system" and "API" refe
 
 ## 📁 Perfect File Organization
 
+### Hierarchical Structure (Default)
 ```
 ./docs.example.com/
-├── site.db                 # 🗄️ Smart change tracking
-├── pages/                  # 📄 Clean markdown content
-│   ├── getting-started.md
-│   ├── api/
-│   │   ├── authentication.md
-│   │   └── rate-limits.md
-│   └── guides/
-│       └── best-practices.md
-└── assets/                 # 🖼️ All site assets (mirror structure)
+├── .site2rag/              # 🗄️ Smart change tracking & config
+│   ├── crawl.db           # SQLite database
+│   └── config.json        # Site configuration  
+├── getting-started.md      # 📄 Clean markdown content
+├── api/
+│   ├── authentication.md
+│   └── rate-limits.md
+├── guides/
+│   └── best-practices.md
+└── assets/                 # 🖼️ All site assets 
+    ├── images/
+    │   └── architecture.png
+    └── documents/
+        └── api-spec.pdf
+```
+
+### Flat Structure (--flat, Perfect for RAG)
+```
+./docs.example.com/
+├── .site2rag/              # 🗄️ Smart change tracking & config
+│   ├── crawl.db           # SQLite database  
+│   └── config.json        # Site configuration
+├── getting-started.md      # 📄 Root page
+├── api_authentication.md   # 🔥 Flattened with path-derived names
+├── api_rate-limits.md     
+├── guides_best-practices.md
+└── assets/                 # 🖼️ All site assets
     ├── images/
     │   └── architecture.png
     └── documents/
@@ -170,8 +189,9 @@ These hints help your RAG system understand exactly what "system" and "API" refe
 
 **Why this structure?**
 - 📚 **RAG-friendly**: Clean markdown files perfect for vector databases
-- 🔗 **Citation-ready**: Assets maintain exact URL structure for perfect citations
+- 🔗 **Citation-ready**: Assets maintain exact URL structure for perfect citations  
 - 🔄 **Update-efficient**: Database tracks changes without file system overhead
+- 🎯 **Flat mode**: Single directory structure ideal for RAG systems that prefer flat file lists
 
 ---
 
@@ -185,63 +205,56 @@ npx site2rag docs.react.dev
 npx site2rag kubernetes.io/docs  
 npx site2rag python.org/dev/peps
 
+# For RAG systems that prefer flat file structure
+npx site2rag docs.example.com --flat
+
 # That's it! Your knowledge base is ready 🎉
 ```
 
 ### Advanced Configuration
 
 ```bash
-# Interactive setup for complex sites
-npx site2rag docs.example.com --setup-advanced
-# → Prompts for crawl patterns, AI settings, processing options
+# Limit crawl depth and pages
+npx site2rag docs.example.com --max-depth 3 --limit 100
 
-# Use a custom config file
-npx site2rag docs.example.com --config ./my-crawl.json
+# Custom output directory
+npx site2rag docs.example.com --output ./my-knowledge-base
 
-# Override config with CLI options
-npx site2rag docs.example.com --output ./output --max-depth 3
-  --exclude "*/blog/*" \
-  --max-depth 5
-```
+# Update existing crawl (only downloads changed content)
+npx site2rag docs.example.com --update
 
-### Site-Specific Persistence
-
-Once configured, settings persist:
-
-```bash
-# First time: setup prompts
-npx site2rag docs.example.com --setup-advanced
-
-# Future runs: uses saved config automatically  
-npx site2rag docs.example.com
-# ✅ Using saved patterns: include */api/*, exclude */blog/*
+# Debug mode (saves removed content for analysis)
+npx site2rag docs.example.com --debug
 ```
 
 ---
 
-## 🤖 AI Integration
+## 🤖 AI Integration (Optional)
 
-`site2rag` works great with local AI setups:
+`site2rag` includes optional AI features for enhanced content processing:
 
-### Local AI (Recommended)
+### Local AI (Default & Recommended)
 ```bash
-# Install Ollama first: https://ollama.ai
-ollama pull llama3.2
+# Install Ollama: https://ollama.ai
+ollama pull qwen2.5:14b
 
-# Then use AI features
-npx site2rag docs.example.com --ai-enhanced
-# ✅ Using local Ollama for content processing
+# AI features work automatically when Ollama is available
+npx site2rag docs.example.com
+# ✅ 🧠 AI Processing: qwen2.5:14b ready
 ```
 
-### Cloud AI (Optional)
-```bash
-# OpenAI
-npx site2rag docs.example.com --ai-enhanced --ai-provider openai
-# → Prompts for API key, saves securely
+### Multiple AI Providers Supported
+- **Ollama** (default) - Local, private, free
+- **OpenAI** - Cloud-based (requires API key)  
+- **Anthropic Claude** - Cloud-based (requires API key)
+- **More providers** - Easily extensible architecture
 
-# Anthropic Claude  
-npx site2rag docs.example.com --ai-enhanced --ai-provider anthropic
-# → Prompts for API key, saves securely
+### No AI? No Problem!
+```bash
+# Works perfectly without any AI
+npx site2rag docs.example.com
+# ⚠ AI Processing: AI not available
+# → Falls back to excellent heuristic-based content extraction
 ```
 
 **Privacy First**: Local AI processing means your data never leaves your machine! 🔒
@@ -278,7 +291,7 @@ npx site2rag docs.example.com --ai-enhanced --ai-provider anthropic
 
 ### Prerequisites
 - **Node.js 18+** (for npx)
-- **Optional**: [Ollama](https://ollama.ai) for local AI processing
+- **Optional**: [Ollama](https://ollama.ai) for AI-enhanced content processing
 
 ### Quick Start
 ```bash
@@ -286,18 +299,18 @@ npx site2rag docs.example.com --ai-enhanced --ai-provider anthropic
 npx site2rag docs.example.com
 
 # Optional: AI setup for enhanced processing
-ollama pull llama3.2
-npx site2rag docs.example.com --ai-enhanced
+ollama pull qwen2.5:14b
+npx site2rag docs.example.com
+# ✅ 🧠 AI Processing: qwen2.5:14b ready
 ```
 
-### Global Configuration
+### Check Status
 ```bash
-# Set default AI provider
-npx site2rag --config-ai
-# → Interactive menu for global AI preferences
+# View crawl status for a site
+npx site2rag docs.example.com --status
 
-# View current settings
-npx site2rag --status
+# Clean crawl state (start fresh)
+npx site2rag docs.example.com --clean
 ```
 
 ---
@@ -308,13 +321,14 @@ npx site2rag --status
 
 | Option | Description | Example |
 |--------|-------------|---------|
-| `--ai-enhanced` | Enable AI content processing | `npx site2rag docs.com --ai-enhanced` |
-| `--setup-advanced` | Interactive site configuration | `npx site2rag docs.com --setup-advanced` |
-| `--include <patterns>` | Include URL patterns | `--include "*/api/*,*/guides/*"` |
-| `--exclude <patterns>` | Exclude URL patterns | `--exclude "*/blog/*,*/news/*"` |
-| `--max-depth <num>` | Maximum crawl depth | `--max-depth 5` |
-| `--concurrency <num>` | Concurrent requests | `--concurrency 3` |
+| `--flat` | Store all files in flat structure with path-derived names | `npx site2rag docs.com --flat` |
 | `--output <dir>` | Custom output directory | `--output ./my-docs` |
+| `--max-depth <num>` | Maximum crawl depth | `--max-depth 5` |
+| `--limit <num>` | Maximum number of pages to crawl | `--limit 100` |
+| `--update` | Update existing crawl (only changed content) | `--update` |
+| `--verbose` | Enable verbose logging | `--verbose` |
+| `--dry-run` | Show what would be crawled without downloading | `--dry-run` |
+| `--debug` | Enable debug mode to save removed content blocks | `--debug` |
 
 ### Site Configuration
 
@@ -376,32 +390,17 @@ for md_file in docs_path.glob('**/*.md'):
 
 ## 🚀 Advanced Features
 
-### Database-Only Mode
-```bash
-# Store everything in a single database file
-npx site2rag docs.example.com --database-only
-# → Creates ./docs.example.com.db (single file, perfect for cloud sync)
-```
+### Smart Change Detection
+- **ETag & Last-Modified** headers for HTTP-level change detection
+- **Content hashing** for precise change identification  
+- **Incremental updates** - only download what actually changed
+- **Database state** - resume interrupted crawls seamlessly
 
-### Custom Document Processing
-```bash
-# Enhanced OCR for PDFs
-npx site2rag docs.example.com --enhance-ocr --ocr-service custom
-
-# Convert documents to markdown
-npx site2rag docs.example.com --convert-docs --api-key sk-...
-```
-
-### Citation Management
-```bash
-# Find source URL for any local file
-npx site2rag --cite ./docs.example.com/assets/guide.pdf
-# → https://docs.example.com/assets/guide.pdf
-
-# Generate bibliography
-npx site2rag --bibliography ./docs.example.com
-# → Creates complete citation list
-```
+### Asset Management
+- **Automatic asset discovery** - images, PDFs, documents
+- **Local asset storage** with proper path rewriting
+- **Asset deduplication** by content hash
+- **Maintains link relationships** for perfect citations
 
 ---
 

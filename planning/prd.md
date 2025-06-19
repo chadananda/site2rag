@@ -53,12 +53,13 @@ A CLI tool designed for `npx` execution that converts entire websites into maint
 - **Content hash comparison** for change detection
 - **Crawl session metadata** (date, duration, pages processed)
 
-### 3. AI-Friendly Markdown Generation
-- **Clean content extraction** removing navigation/UI chrome
-- **Structured YAML frontmatter** with metadata
+### 3. AI-Enhanced Markdown Generation
+- **AI-powered content extraction** using local models (Ollama default, supports OpenAI/Anthropic)
+- **Smart chrome removal** via semantic analysis, not just CSS selectors
+- **Structured YAML frontmatter** with comprehensive metadata
 - **Reference-style links** for better LLM context
-- **Content filtering** based on density scoring
-- **Consistent formatting** optimized for RAG ingestion
+- **Content classification** to identify valuable vs. boilerplate content
+- **Flexible output formats** - hierarchical folders or flat structure for RAG systems
 
 ### 4. Asset Management
 - **Download linked assets** (images, PDFs, DOCX, etc.)
@@ -66,7 +67,14 @@ A CLI tool designed for `npx` execution that converts entire websites into maint
 - **Asset deduplication** by content hash
 - **Organize by content type** in structured folders
 
-### 5. Progress Tracking & Logging
+### 5. AI Integration (Optional)
+- **Local AI processing** using Ollama (default), OpenAI, or Anthropic
+- **Smart content classification** to distinguish main content from boilerplate
+- **Content enhancement** adding context and improving structure
+- **Model fallbacks** for robust operation
+- **Provider flexibility** - not locked to any specific AI service
+
+### 6. Progress Tracking & Logging
 - **Real-time progress display** with URL queue status
 - **Detailed logging** with configurable verbosity
 - **Error handling** with retry mechanisms
@@ -121,27 +129,42 @@ npx site2rag docs.example.com \
   --exclude "*/admin/*" \
   --max-depth 5 \
   --concurrency 3 \
+  --flat \
   --update
 ```
 
 ### File Structure
+
+**Hierarchical Mode (default):**
 ```
 ./output-directory/
-├── .crawl                    # State tracking file
-├── pages/                    # Markdown content
-│   ├── index.md
-│   ├── docs/
-│   │   ├── getting-started.md
-│   │   └── api-reference.md
-│   └── blog/
-│       └── 2024-update.md
-├── assets/                   # Downloaded assets
-│   ├── images/
-│   ├── documents/
-│   └── styles/              # CSS for completeness
-└── meta/
-    ├── crawl-log.json       # Detailed crawl history
-    └── sitemap.json         # Discovered URL structure
+├── .site2rag/               # State and config
+│   ├── crawl.db            # SQLite database
+│   └── config.json         # Crawl configuration
+├── index.md                 # Root page
+├── docs/
+│   ├── getting-started.md
+│   └── api-reference.md
+├── blog/
+│   └── 2024-update.md
+└── assets/                  # Downloaded assets
+    ├── images/
+    └── documents/
+```
+
+**Flat Mode (--flat, optimized for RAG):**
+```
+./output-directory/
+├── .site2rag/               # State and config
+│   ├── crawl.db            # SQLite database
+│   └── config.json         # Crawl configuration
+├── index.md                 # Root page
+├── docs_getting-started.md  # Flattened with path-derived names
+├── docs_api-reference.md
+├── blog_2024-update.md
+└── assets/                  # Downloaded assets
+    ├── images/
+    └── documents/
 ```
 
 ### YAML Frontmatter Schema
@@ -232,6 +255,7 @@ npx site2rag --clean [--output ./dir]
 - `--update` - Update existing crawl (only changed content)
 - `--force` - Force re-download all content
 - `--dry-run` - Show what would be crawled without downloading
+- `--flat` - Store all files in top-level folder with path-derived names (for RAG systems)
 - `--verbose, -v` - Verbose logging
 - `--quiet, -q` - Minimal output
 
