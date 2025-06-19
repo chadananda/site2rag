@@ -72,6 +72,11 @@ Watch for these and stop immediately:
 - No hard-coded values just to pass tests
 - Clean root directory with no temporary files
 
+## Testing Guidelines
+- **Always use npm scripts** - common tests should be added to package.json as npm scripts to avoid requiring extra permissions
+- **Run tests via npm** - always prefer `npm run test` over direct test runner commands when possible
+- **Add test shortcuts** - frequently used test patterns should become npm scripts for easier access
+
 ## Commands
 - Tests: `npm run test`
 - Lint: `npm run lint`
