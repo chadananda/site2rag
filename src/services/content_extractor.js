@@ -4,6 +4,8 @@
  * Focuses on content characteristics rather than specific frameworks or structures
  */
 
+import logger from './logger_service.js';
+
 /**
  * Score an element based on its content characteristics
  * @param {Object} $ - Cheerio instance
@@ -202,6 +204,21 @@ export function cleanupContent($, content, options = {}) {
   const processElement = (el) => {
     const $el = $(el);
     const tagName = $el.prop('tagName')?.toLowerCase();
+    
+    // Remove script, style, and other non-content elements
+    if (['script', 'style', 'noscript', 'iframe'].includes(tagName)) {
+      // Before removing, capture the HTML for debug
+      if (debug && removedBlocks) {
+        removedBlocks.removedHtml += $el.toString();
+      }
+      
+      if (debug && trackSelectorDecision) {
+        const selector = generateConsistentSelector($, $el);
+        trackSelectorDecision(selector, 'remove', removedBlocks, `Non-content element: ${tagName}`);
+      }
+      $el.remove();
+      return true; // Element was removed
+    }
     
     // Skip processing links, images, and inline elements - we want to preserve these
     if (['a', 'img', 'span', 'strong', 'em', 'b', 'i', 'u', 'code', 'br', 'hr'].includes(tagName)) {

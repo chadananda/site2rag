@@ -446,24 +446,14 @@ export class ContentService {
   }
 
   /**
-   * Clean title text by removing common contamination patterns
-   * @param {string} title - Raw title text
-   * @returns {string} - Cleaned title
-   */
-  cleanTitle(title) {
-    if (!title) return '';
-    // Remove common navigation menu text that gets appended to titles
-    return title.replace(/Toggle Menu$|Menu$|Navigation$/, '').trim();
-  }
-  /**
    * Extract metadata from HTML
    * @param {Object} $ - Cheerio instance
    * @returns {Object} - Extracted metadata
    */
   extractMetadata($) {
-    // Basic metadata
+    // Basic metadata - get only the FIRST title element to avoid concatenation
     const metadata = {
-      title: this.cleanTitle($('title').first().text().trim()),
+      title: $('title').first().text().trim(),
       description: $('meta[name="description"]').attr('content') || '',
       keywords: $('meta[name="keywords"]').attr('content') || '',
       author: $('meta[name="author"]').attr('content') || '',

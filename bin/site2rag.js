@@ -115,7 +115,6 @@ program
 program
   .argument('[url]', 'The URL to crawl (required unless using --status or --clean)')
   .option('-o, --output <dir>', 'Output directory (default: ./<domain>)')
-  .option('--max-depth <num>', 'Maximum crawl depth (default: -1 for no limit)', '-1')
   .option('--limit <num>', 'Limit the number of pages downloaded', null)
   .option('--update', 'Update existing crawl (only changed content)')
   .option('-s, --status', 'Show status for a previous crawl')
@@ -181,8 +180,6 @@ program
       process.exit(0);
     }
     if (url && !options.update && !options.dryRun) {
-      // Always print max depth and limit before Crawling/Output dir to match test output
-      logger.info(`Max depth: ${options.maxDepth}`);
       if (options.limit) {
         logger.info(`Limit: ${options.limit} pages`);
       }
@@ -235,8 +232,6 @@ program
       process.exit(0);
     }
     // Default crawl
-    // Always print max depth and limit before Crawling/Output dir to match test output
-    logger.info(`Max depth: ${options.maxDepth}`);
     if (options.limit) logger.info(`Limit: ${options.limit} pages`);
     // Print in test-expected order
     logger.info(`Crawling: ${url}`);
@@ -259,7 +254,6 @@ const configFilePath = path.join(site2ragDir, 'config.json');
 const defaultConfig = {
   domain: url,
   outputDir: outputDir,
-  maxDepth: options.maxDepth || -1,
   maxPages: options.limit || null,
   lastCrawl: new Date().toISOString(),
   crawlSettings: {
@@ -294,11 +288,10 @@ if (shouldClean) {
 }
 const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
     const crawlState = new DefaultCrawlState(crawlDb);
-    // Ensure limit and maxDepth are properly set
+    // Ensure limit is properly set
     const limit = options.limit ? parseInt(options.limit) : (configMgr.config.maxPages || 10);
-    const maxDepth = options.maxDepth ? parseInt(options.maxDepth) : (configMgr.config.maxDepth || -1);
     
-    logger.info(`Creating SiteProcessor with limit=${limit}, maxDepth=${maxDepth}`);
+    logger.info(`Creating SiteProcessor with limit=${limit}`);
     
     // Load AI configuration
     const aiConfig = loadAIConfig();
@@ -310,7 +303,6 @@ const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
       limit: limit,
       concurrency: configMgr.config.concurrency || 3,
       politeDelay: configMgr.config.politeDelay || 1000,
-      maxDepth: maxDepth,
       debug: options.debug || false,
       aiConfig: aiConfig,
       update: options.update || false, // Pass the update flag to SiteProcessor
@@ -332,7 +324,7 @@ const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
     
     try {
       logger.info(`Starting crawl of ${url} with output to ${outputDir}`);
-      logger.info(`Max pages: ${limit}, Max depth: ${maxDepth}`);
+      logger.info(`Max pages: ${limit}`);
       
       log('Database path:', dbPath);
       log('Config file path:', configFilePath);
