@@ -33,8 +33,11 @@ async function makeAICall(prompt, aiConfig) {
         model, 
         prompt, 
         stream: false,
+        format: 'json', // Request JSON format
         options: {
-          temperature: 0.7
+          temperature: 0.1, // Lower temperature for more structured output
+          top_p: 0.9,
+          repeat_penalty: 1.1
         }
       }),
       timeout: 60000 // 60 second timeout for context processing
@@ -81,6 +84,9 @@ export async function callAI(prompt, schema, aiConfig) {
         if (jsonMatch) {
           jsonText = jsonMatch[0];
         }
+        
+        // Basic cleanup for control characters only
+        jsonText = jsonText.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
         
         const parsed = JSON.parse(jsonText);
         return schema.parse(parsed);
