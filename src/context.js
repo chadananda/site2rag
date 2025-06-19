@@ -53,7 +53,41 @@ export async function analyzeDocument(blocks, metadata, aiConfig, callAIImpl = c
     used += words;
   }
   const docInput = selected.join('\n\n');
-  const prompt = `Analyze the following document content and metadata. Extract bibliographic metadata, key people, places, organizations, themes, and write a 2-3 paragraph prose context summary for disambiguation.\n\nMetadata: ${JSON.stringify(metadata)}\n\nContent:\n${docInput}`;
+  const prompt = `Analyze the following document content and metadata. Extract bibliographic metadata, key people, places, organizations, themes, and write a 2-3 paragraph prose context summary for disambiguation.
+
+Return your response as valid JSON only, no other text or explanation.
+
+Metadata: ${JSON.stringify(metadata)}
+
+Content:
+${docInput}
+
+Respond with valid JSON matching this structure:
+{
+  "bibliographic": {
+    "title": "optional string",
+    "author": "optional string", 
+    "publisher": "optional string",
+    "publication_date": "optional string",
+    "short_description": "optional string",
+    "long_description": "optional string",
+    "document_type": "optional string",
+    "language": "optional string",
+    "reading_level": "optional string",
+    "word_count": 0
+  },
+  "content_analysis": {
+    "subjects": ["optional array of strings"],
+    "geographical_scope": "optional string",
+    "time_period": "optional string", 
+    "narrative_perspective": "optional string",
+    "people": [{"name": "string", "role": "optional string"}],
+    "places": [{"name": "string", "context": "optional string"}],
+    "organizations": [{"name": "string", "context": "optional string"}],
+    "themes": ["optional array of strings"]
+  },
+  "context_summary": "required string - 2-3 paragraph summary for disambiguation"
+}`;
   return await callAIImpl(prompt, DocumentAnalysisSchema, aiConfig);
 }
 
@@ -205,11 +239,19 @@ export async function runContextEnrichment(dbOrPath, aiConfig) {
         const contextWindow = buildContextWindow(i, blocks, processedBlocks, analysis);
         
         // Create context enrichment prompt
-        const enrichPrompt = `Given the following context and content block, add helpful disambiguating context while preserving the original meaning. Return only the enhanced content block, no explanations.
+        const enrichPrompt = `Given the following context and content block, add helpful disambiguating context while preserving the original meaning.
 
 ${contextWindow}
 
-Enhance this block by adding context that helps readers understand references, abbreviations, and implicit knowledge:`;
+Enhance this block by adding context that helps readers understand references, abbreviations, and implicit knowledge.
+
+Return your response as valid JSON only, no other text or explanation.
+
+Respond with valid JSON matching this structure:
+{
+  "contexted_markdown": "enhanced content block with added context",
+  "context_summary": "optional brief summary of changes made"
+}`;
 
         // Call AI to enrich the block
         const contextedResult = await callAI(enrichPrompt, ContextedDocSchema, aiConfig);

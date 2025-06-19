@@ -87,7 +87,7 @@ export async function callAI(prompt, schema, aiConfig) {
       } catch (e) {
         lastError = e;
         if (attempt < 3) {
-          logger.debug(`AI call attempt ${attempt} failed: ${e.message}, retrying...`);
+          console.log(`[AI] Call attempt ${attempt} failed: ${e.message}, retrying...`);
           await delay(1000 * attempt); // Exponential backoff
         } else {
           logger.error(`AI response validation failed after 3 attempts: ${e.message}`);
