@@ -10,7 +10,7 @@ import { getDB } from '../../src/db.js';
 // All DB access must use getDB() from src/db.js. Never instantiate CrawlDB directly.
 // Always use getDB() to ensure DB is initialized with correct schema
 
-const TEST_OUTPUT = path.join(process.cwd(), 'tests', 'output', 'oceanoflights.org');
+const TEST_OUTPUT = path.join(process.cwd(), 'tests', 'tmp', 'sites', 'oceanoflights-integration');
 const TEST_URL = 'https://oceanoflights.org';
 const LIMIT = 2;
 const CONCURRENCY = 2;
@@ -39,7 +39,7 @@ describe('Integration: Crawl and Markdown Output', () => {
   it('crawls site, writes markdown files, and tracks state', async () => {
     console.log('Starting crawl/markdown integration test');
     // Clean up all DB files before test to guarantee fresh schema
-    const dbDir = path.join(process.cwd(), 'tests', 'tmpdb', '.site2rag');
+    const dbDir = path.join(process.cwd(), 'tests', 'tmp', 'db-integration');
     const dbPath = path.join(dbDir, 'crawl.db');
     const dbNewPath = path.join(dbDir, 'site2rag.sqlite_new.db');
     const dbPrevPath = path.join(dbDir, 'site2rag.sqlite_new_prev.db');

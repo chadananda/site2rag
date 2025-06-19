@@ -8,7 +8,7 @@ import { CrawlDB } from '../../src/db.js';
 // Use a real site but with a low --limit for polite, fast tests.
 const TEST_SITE = 'https://oceanoflights.org';
 
-const TEST_TMPDB = join(process.cwd(), 'tests', 'tmpdb', 'site_processor_test.sqlite');
+const TEST_TMPDB = join(process.cwd(), 'tests', 'tmp', 'site_processor_test.sqlite');
 const TEST_OUTPUT = join(process.cwd(), 'tests', 'output', 'site_processor');
 
 // Helper function for running crawls in tests

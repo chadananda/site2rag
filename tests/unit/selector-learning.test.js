@@ -8,7 +8,7 @@ import { ContentBlockAnalyzer } from '../src/preprocessing.js';
 import { beforeEach, afterAll, test, expect, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-const TEST_DB = path.join(process.cwd(), 'tests', 'tmpdb', 'test-selectors.sqlite');
+const TEST_DB = path.join(process.cwd(), 'tests', 'tmp', 'test-selectors.sqlite');
 
 beforeEach(() => {
   if (fs.existsSync(TEST_DB)) fs.unlinkSync(TEST_DB);

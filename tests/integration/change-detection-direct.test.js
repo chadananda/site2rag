@@ -9,7 +9,7 @@ import { CrawlService } from '../../src/services/crawl_service.js';
 describe('Change Detection Integration (Direct DB)', () => {
   const TEST_URLS = ['https://example.com/a', 'https://example.com/b'];
   // Use a dedicated test directory to avoid conflicts
-  const TEST_DIR = path.join(process.cwd(), 'tests', 'tmp_change_detection');
+  const TEST_DIR = path.join(process.cwd(), 'tests', 'tmp', 'change_detection_direct');
   // Database file will be in the test directory
   const TEST_DB_PATH = path.join(TEST_DIR, 'test.db');
   

@@ -253,7 +253,6 @@ if (!fs.existsSync(site2ragDir)) {
 const configFilePath = path.join(site2ragDir, 'config.json');
 const defaultConfig = {
   domain: url,
-  outputDir: outputDir,
   maxPages: options.limit || null,
   lastCrawl: new Date().toISOString(),
   crawlSettings: {

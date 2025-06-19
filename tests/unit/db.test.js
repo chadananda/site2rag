@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { CrawlDB } from '../../src/db.js';
+import { getDB } from '../../src/db.js';
 
-const TEST_DIR = path.join(process.cwd(), 'tests', 'tmpdb');
+const TEST_DIR = path.join(process.cwd(), 'tests', 'tmp');
 const DB_PATH = path.join(TEST_DIR, 'test.db');
 
 beforeEach(() => {
@@ -16,7 +16,7 @@ afterEach(() => {
 
 describe('CrawlDB', () => {
   it('creates schema and allows upsert/query for pages', () => {
-    const db = new CrawlDB(DB_PATH);
+    const db = getDB(DB_PATH);
     db.upsertPage({
       url: 'https://oceanoflights.org',
       etag: 'abc',
@@ -34,7 +34,7 @@ describe('CrawlDB', () => {
   });
 
   it('inserts crawl sessions', () => {
-    const db = new CrawlDB(DB_PATH);
+    const db = getDB(DB_PATH);
     db.insertSession({
       started_at: '2025-06-06T18:30',
       finished_at: '2025-06-06T18:31',
