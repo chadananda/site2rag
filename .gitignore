@@ -38,6 +38,9 @@ tasks.json
 tasks/
 output/
 
+# Temporary scripts (should be deleted when no longer needed)
+scripts/
+
 # Test temporary files
 tests/tmp/
 
