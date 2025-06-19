@@ -178,7 +178,14 @@ This file contains HTML blocks that were removed during content processing.
    * @returns {Promise<string>} - Full file path
    */
   async saveMarkdown(domain, filename, content) {
-    const outputPath = this.getOutputPath(domain, filename);
+    let outputPath;
+    if (this.flat) {
+      // In flat mode, ignore domain and use flat filename generation
+      outputPath = this.getOutputPath('', filename);
+    } else {
+      // In hierarchical mode, use domain as subdirectory
+      outputPath = this.getOutputPath('', `${domain}/${filename}`);
+    }
     await this.writeFile(outputPath, content);
     return outputPath;
   }
@@ -301,13 +308,20 @@ This file contains HTML blocks that were removed during content processing.
   
   /**
    * Saves binary file content to a file in the output directory
+   * @param {Buffer} data - Binary data to write
    * @param {string} domain - Domain name for subdirectory
    * @param {string} filename - Filename with extension
-   * @param {Buffer} data - Binary data to write
    * @returns {Promise<string>} - Full file path
    */
-  async saveBinaryFile(domain, filename, data) {
-    const outputPath = this.getOutputPath(domain, filename);
+  async saveBinaryFile(data, domain, filename) {
+    let outputPath;
+    if (this.flat) {
+      // In flat mode, ignore domain and use flat filename generation
+      outputPath = this.getOutputPath('', filename);
+    } else {
+      // In hierarchical mode, use domain as subdirectory
+      outputPath = this.getOutputPath('', `${domain}/${filename}`);
+    }
     await this.writeBinaryFile(outputPath, data);
     logger.info(`Saved binary file to: ${outputPath}`);
     return outputPath;

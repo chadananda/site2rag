@@ -48,6 +48,7 @@ export class SiteProcessor {
       outputDir: options.outputDir || options.output || `${process.cwd()}/${hostname}`,
       aiConfig: options.aiConfig || {},
       debug: options.debug || false,
+      flat: options.flat || false,
       // Explicitly set sameDomain to true by default unless explicitly disabled
       sameDomain: options.sameDomain !== false
     };
