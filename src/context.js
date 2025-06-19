@@ -160,27 +160,94 @@ export async function runContextEnrichment(dbOrPath, aiConfig) {
   // Import fs at the top to avoid dynamic import issues with Vite
   // const fs = await import('fs');
   for (const doc of rawDocs) {
-    const markdown = doc.file_path ? fs.promises.readFile(doc.file_path, 'utf8') : '';
-    // Parse markdown into blocks (simple split, or use a markdown parser for more accuracy)
-    const blocks = markdown.split(/\n{2,}/).map(text => ({ text }));
-    // Use metadata from DB if present, else empty
-    let meta = {};
-    try { if (doc.metadata) meta = JSON.parse(doc.metadata); } catch {}
-    // Analyze document (AI-powered, budget-filling)
-    const analysis = await analyzeDocument(blocks, meta, aiConfig);
-    // For each block, build a context window and enrich (could batch, but here per block)
-    let processedBlocks = [];
+    try {
+      console.log(`[CONTEXT] Processing: ${doc.url}`);
+      
+      if (!doc.file_path || !fs.existsSync(doc.file_path)) {
+        console.log(`[CONTEXT] Skipping ${doc.url} - no file path or file doesn't exist`);
+        continue;
+      }
 
-    //   }
-    // }
-    // Reassemble enriched markdown
-    const contextedMarkdown = processedBlocks.map(b => b.contexted).join('\n\n');
-    // Optionally prepend context summary
-    const finalMarkdown = analysis.context_summary ? `> CONTEXT SUMMARY\n> ${analysis.context_summary}\n\n` + contextedMarkdown : contextedMarkdown;
-    await fs.promises.writeFile(doc.file_path, finalMarkdown, 'utf8');
-    db.db.prepare('UPDATE pages SET content_status = "contexted" WHERE url = ?').run(doc.url);
-  // } catch (err) {
-  //   logger.error(`[runContextEnrichment] Failed processing doc with url=${doc.url}:`, err);
+      const markdown = await fs.promises.readFile(doc.file_path, 'utf8');
+      
+      // Parse markdown into blocks (simple split, or use a markdown parser for more accuracy)
+      const blocks = markdown.split(/\n{2,}/).map(text => ({ text }));
+      
+      if (blocks.length === 0) {
+        console.log(`[CONTEXT] Skipping ${doc.url} - no content blocks`);
+        continue;
+      }
+
+      // Use metadata from DB if present, else empty
+      let meta = { title: doc.title || '', url: doc.url };
+      try { 
+        if (doc.metadata) meta = { ...meta, ...JSON.parse(doc.metadata) }; 
+      } catch (e) {
+        // Continue with basic metadata if parsing fails
+      }
+
+      console.log(`[CONTEXT] Analyzing document: ${doc.url} (${blocks.length} blocks)`);
+      
+      // Analyze document (AI-powered, budget-filling)
+      const analysis = await analyzeDocument(blocks, meta, aiConfig);
+      
+      if (!analysis) {
+        console.log(`[CONTEXT] Skipping ${doc.url} - analysis failed`);
+        continue;
+      }
+
+      console.log(`[CONTEXT] Enriching content blocks for: ${doc.url}`);
+      
+      // For each block, build a context window and enrich
+      let processedBlocks = [];
+      
+      for (let i = 0; i < blocks.length; i++) {
+        const contextWindow = buildContextWindow(i, blocks, processedBlocks, analysis);
+        
+        // Create context enrichment prompt
+        const enrichPrompt = `Given the following context and content block, add helpful disambiguating context while preserving the original meaning. Return only the enhanced content block, no explanations.
+
+${contextWindow}
+
+Enhance this block by adding context that helps readers understand references, abbreviations, and implicit knowledge:`;
+
+        // Call AI to enrich the block
+        const contextedResult = await callAI(enrichPrompt, ContextedDocSchema, aiConfig);
+        
+        if (contextedResult && contextedResult.contexted_markdown) {
+          processedBlocks.push({
+            original: blocks[i].text,
+            contexted: contextedResult.contexted_markdown
+          });
+        } else {
+          // Fallback to original content if enrichment fails
+          processedBlocks.push({
+            original: blocks[i].text,
+            contexted: blocks[i].text
+          });
+        }
+      }
+
+      // Reassemble enriched markdown
+      const contextedMarkdown = processedBlocks.map(b => b.contexted).join('\n\n');
+      
+      // Optionally prepend context summary
+      const finalMarkdown = analysis.context_summary ? 
+        `> CONTEXT SUMMARY\n> ${analysis.context_summary}\n\n${contextedMarkdown}` : 
+        contextedMarkdown;
+
+      // Write the enriched content back to the file
+      await fs.promises.writeFile(doc.file_path, finalMarkdown, 'utf8');
+      
+      // Update the database to mark as processed
+      db.db.prepare('UPDATE pages SET content_status = "contexted" WHERE url = ?').run(doc.url);
+      
+      console.log(`[CONTEXT] ✓ Completed enrichment for: ${doc.url}`);
+      
+    } catch (err) {
+      console.error(`[CONTEXT] Failed processing doc with url=${doc.url}:`, err.message);
+      // Continue with next document instead of failing completely
+    }
   }
   if (shouldClose) db.close();
 }
