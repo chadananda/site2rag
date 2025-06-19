@@ -183,8 +183,9 @@ This file contains HTML blocks that were removed during content processing.
       // In flat mode, ignore domain and use flat filename generation
       outputPath = this.getOutputPath('', filename);
     } else {
-      // In hierarchical mode, use domain as subdirectory
-      outputPath = this.getOutputPath('', `${domain}/${filename}`);
+      // In hierarchical mode, save directly to output directory without extra domain subfolder
+      // The output directory is already domain-specific when provided by the user
+      outputPath = this.getOutputPath('', filename);
     }
     await this.writeFile(outputPath, content);
     return outputPath;
@@ -319,8 +320,9 @@ This file contains HTML blocks that were removed during content processing.
       // In flat mode, ignore domain and use flat filename generation
       outputPath = this.getOutputPath('', filename);
     } else {
-      // In hierarchical mode, use domain as subdirectory
-      outputPath = this.getOutputPath('', `${domain}/${filename}`);
+      // In hierarchical mode, save directly to output directory without extra domain subfolder
+      // The output directory is already domain-specific when provided by the user
+      outputPath = this.getOutputPath('', filename);
     }
     await this.writeBinaryFile(outputPath, data);
     logger.info(`Saved binary file to: ${outputPath}`);

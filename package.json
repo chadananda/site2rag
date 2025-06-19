@@ -19,11 +19,12 @@
     "test": "vitest run",
     "test:all": "vitest run",
     "db-test": "vitest run tests/unit/db.test.js",
-    "test:ocean": "rm -rf ./tests/tmp/oceanoflights && node ./bin/site2rag.js oceanoflights.org --limit 10 --output ./tests/tmp/oceanoflights",
-    "test:oceanupdate": "node ./bin/site2rag.js oceanoflights.org --limit 30 --output ./tests/tmp/oceanoflights",
-    "test:oceanupdate2": "node ./bin/site2rag.js oceanoflights.org --limit 100 --output ./tests/tmp/oceanoflights",
+    "test:ocean": "rm -rf ./tests/tmp/sites/oceanoflights && node ./bin/site2rag.js oceanoflights.org --limit 10 --output ./tests/tmp/sites/oceanoflights",
+    "test:oceanupdate": "rm -rf ./tests/tmp/sites/oceanoflights && node ./bin/site2rag.js oceanoflights.org --limit 30 --output ./tests/tmp/sites/oceanoflights",
+    "test:oceanupdate2": "rm -rf ./tests/tmp/sites/oceanoflights && node ./bin/site2rag.js oceanoflights.org --limit 100 --output ./tests/tmp/sites/oceanoflights",
     "test:pdf": "node ./scripts/test-pdf-links.js",
-    "test:domain": "node ./scripts/test-domain-filtering.js"
+    "test:domain": "node ./scripts/test-domain-filtering.js",
+    "test:bahai": "rm -rf ./tests/tmp/sites/bahai-education && node ./bin/site2rag.js bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-education --flat"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

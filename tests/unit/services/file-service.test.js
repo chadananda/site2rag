@@ -159,20 +159,19 @@ describe('FileService', () => {
   });
   
   describe('getOutputPath', () => {
-    it('should combine output directory, domain, and filename', () => {
+    it('should combine output directory and filename without domain subfolder', () => {
       // Reset the mock join function
       mockJoin.mockClear();
       
       const outputPath = fileService.getOutputPath('example.com', 'page.md');
       
-      expect(mockJoin).toHaveBeenCalledWith('./test-output', 'example.com');
-      expect(mockJoin).toHaveBeenCalledWith('./test-output/example.com', 'page.md');
-      expect(outputPath).toBe('./test-output/example.com/page.md');
+      expect(mockJoin).toHaveBeenCalledWith('./test-output', 'page.md');
+      expect(outputPath).toBe('./test-output/page.md');
     });
   });
   
   describe('saveMarkdown', () => {
-    it('should save markdown to the correct path', async () => {
+    it('should save markdown to the correct path without domain subfolder', async () => {
       const writeFileSpy = vi.spyOn(fileService, 'writeFile').mockResolvedValue();
       
       // Reset the mock join function
@@ -180,9 +179,8 @@ describe('FileService', () => {
       
       await fileService.saveMarkdown('example.com', 'page.md', '# Content');
       
-      expect(mockJoin).toHaveBeenCalledWith('./test-output', 'example.com');
-      expect(mockJoin).toHaveBeenCalledWith('./test-output/example.com', 'page.md');
-      expect(writeFileSpy).toHaveBeenCalledWith('./test-output/example.com/page.md', '# Content');
+      expect(mockJoin).toHaveBeenCalledWith('./test-output', 'page.md');
+      expect(writeFileSpy).toHaveBeenCalledWith('./test-output/page.md', '# Content');
     });
   });
   
