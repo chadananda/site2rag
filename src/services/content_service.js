@@ -73,15 +73,24 @@ export class ContentService {
       return { $, main: null, links, metadata, removedBlocks };
     }
     
+    // Clean up the extracted content to remove script tags and other non-content elements
+    const cleanedMain = cleanupContent($, main, {
+      debug: this.debug,
+      removedBlocks,
+      trackSelectorDecision: (selector, decision, blocks, reason) => {
+        this.trackSelectorDecision(selector, decision, blocks, reason);
+      }
+    });
+    
     // Process links in the main content - convert relative to absolute and handle documents
     if (url && this.fileService) {
-      await this.processLinks($, main, url);
+      await this.processLinks($, cleanedMain, url);
     }
     
     // Apply AI-based block classification if enabled
     if (this.aiConfig && this.aiConfig.blockClassificationEnabled) {
       try {
-        await this.applyBlockClassification($, main, removedBlocks);
+        await this.applyBlockClassification($, cleanedMain, removedBlocks);
       } catch (error) {
         logger.error('[AI] Error applying block classification:', error);
       }
@@ -93,11 +102,11 @@ export class ContentService {
       
       // Save debug information if URL is provided
       if (url) {
-        this.saveDebugInfo(url, $, main, removedBlocks);
+        this.saveDebugInfo(url, $, cleanedMain, removedBlocks);
       }
     }
     
-    return { $, html: $.html(main), main, links, metadata, removedBlocks };
+    return { $, html: $.html(cleanedMain), main: cleanedMain, links, metadata, removedBlocks };
   }
   
   /**
@@ -437,6 +446,16 @@ export class ContentService {
   }
 
   /**
+   * Clean title text by removing common contamination patterns
+   * @param {string} title - Raw title text
+   * @returns {string} - Cleaned title
+   */
+  cleanTitle(title) {
+    if (!title) return '';
+    // Remove common navigation menu text that gets appended to titles
+    return title.replace(/Toggle Menu$|Menu$|Navigation$/, '').trim();
+  }
+  /**
    * Extract metadata from HTML
    * @param {Object} $ - Cheerio instance
    * @returns {Object} - Extracted metadata
@@ -444,7 +463,7 @@ export class ContentService {
   extractMetadata($) {
     // Basic metadata
     const metadata = {
-      title: $('title').text().trim(),
+      title: this.cleanTitle($('title').first().text().trim()),
       description: $('meta[name="description"]').attr('content') || '',
       keywords: $('meta[name="keywords"]').attr('content') || '',
       author: $('meta[name="author"]').attr('content') || '',

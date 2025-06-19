@@ -116,6 +116,13 @@ export class MarkdownService {
         return `\n\n\`\`\`${language}\n${codeContent.trim()}\n\`\`\`\n\n`;
       }
     });
+    // Remove script and style elements completely during markdown conversion
+    this.turndownService.addRule('removeScripts', {
+      filter: ['script', 'style', 'noscript'],
+      replacement: function() {
+        return '';
+      }
+    });
   }
 
   /**
