@@ -151,11 +151,17 @@ export async function extractEntitiesWithSlidingWindow(blocks, metadata, aiConfi
     const metadataEscaped = JSON.stringify(metadata);
     const contentEscaped = JSON.stringify(windowText);
     
-    const prompt = `Extract all entities, subjects, and relationships from this document section. 
-Focus on people, places, organizations, dates, events, and main subjects/topics.
+    const prompt = `Extract entities, subjects, and relationships from this document section using ONLY information explicitly found in the text. Do not add external knowledge.
 
 Document metadata: ${metadataEscaped}
 Content section ${i + 1}/${windows.length}: ${contentEscaped}
+
+EXTRACTION RULES:
+1. Only extract entities explicitly mentioned in the text
+2. For context fields, only use information found in this document section
+3. For roles/types, only use what's stated or clearly implied in the text
+4. Do not add external knowledge about entities
+5. Extract subjects/topics that are clearly discussed in the content
 
 IMPORTANT: Return exactly this JSON structure:
 {
@@ -169,15 +175,15 @@ IMPORTANT: Return exactly this JSON structure:
 }
 
 Fill the arrays with extracted entities. Use this format for each entity type:
-- people: {"name": "string", "roles": ["array"], "aliases": ["array"], "context": "string"}
-- places: {"name": "string", "context": "string", "aliases": ["array"], "type": "string"}
-- organizations: {"name": "string", "context": "string", "aliases": ["array"], "type": "string"}
-- dates: {"date": "string", "context": "string", "precision": "string"}
-- events: {"name": "string", "timeframe": "string", "participants": ["array"], "location": "string", "context": "string"}
-- subjects: ["string"] (main topics/subjects)
-- relationships: {"from": "string", "relationship": "string", "to": "string", "context": "string"}
+- people: {"name": "string", "roles": ["array from text"], "aliases": ["array from text"], "context": "string from text"}
+- places: {"name": "string", "context": "string from text", "aliases": ["array from text"], "type": "string from text"}
+- organizations: {"name": "string", "context": "string from text", "aliases": ["array from text"], "type": "string from text"}
+- dates: {"date": "string", "context": "string from text", "precision": "string"}
+- events: {"name": "string", "timeframe": "string from text", "participants": ["array from text"], "location": "string from text", "context": "string from text"}
+- subjects: ["string"] (main topics explicitly discussed)
+- relationships: {"from": "string", "relationship": "string from text", "to": "string", "context": "string from text"}
 
-Return valid JSON only, no other text or explanation.`;
+Only extract what is explicitly stated in the document. Return valid JSON only, no other text or explanation.`;
 
     try {
       const extraction = await callAIImpl(prompt, EntityExtractionSchema, aiConfig);
@@ -568,9 +574,17 @@ export async function enhanceBlocksWithEntityContext(blocks, entityGraph, aiConf
     // Pre-escape the original text for JSON safety
     const originalEscaped = JSON.stringify(blocks[i].text);
     
-    const enrichPrompt = `Using the provided entity context, enhance this content block with disambiguating information. Add context that helps readers understand references, abbreviations, and implicit knowledge while preserving the original meaning and flow.
+    const enrichPrompt = `Add disambiguating context to this content block using ONLY information found elsewhere in this same document. Do not add external knowledge or information not present in the document.
 
 ${contextWindow}
+
+DISAMBIGUATION RULES:
+1. Only add context that appears elsewhere in this document
+2. Help clarify pronouns, abbreviations, and unclear references  
+3. Use parentheses for brief clarifications: "he" → "he (Chad Jones)"
+4. Do not add information not found in the document
+5. Do not repeat information already clear in the current sentence
+6. Preserve the original meaning and flow exactly
 
 IMPORTANT: Return exactly this JSON structure with the enhanced text:
 {
@@ -580,7 +594,7 @@ IMPORTANT: Return exactly this JSON structure with the enhanced text:
 
 Replace the content inside contexted_markdown with your enhanced version, keeping the same JSON string format. The original text is: ${originalEscaped}
 
-Enhance the text and return valid JSON only, no other text or explanation.`;
+Only add context that exists elsewhere in this document. Return valid JSON only, no other text or explanation.`;
 
     try {
       const contextedResult = await callAIImpl(enrichPrompt, ContextedDocSchema, aiConfig);
