@@ -8,6 +8,8 @@ import { MarkdownService } from './services/markdown_service.js';
 import { FileService } from './services/file_service.js';
 import { CrawlStateService } from './services/crawl_state_service.js';
 import { CrawlService } from './services/crawl_service.js';
+import { getDB } from './db.js';
+import { DefaultCrawlState } from './crawl_state.js';
 import logger from './services/logger_service.js';
 import fs from 'fs';
 import path from 'path';
@@ -45,7 +47,7 @@ export class SiteProcessor {
       maxPages: options.limit !== undefined ? options.limit : -1,
       maxDepth: options.maxDepth !== undefined ? options.maxDepth : -1,
       politeWaitMs: options.politeWaitMs || 1000,
-      outputDir: options.outputDir || options.output || `${process.cwd()}/${hostname}`,
+      outputDir: options.outputDir || options.output || `./${hostname}`,
       aiConfig: options.aiConfig || {},
       debug: options.debug || false,
       flat: options.flat || false,
@@ -73,9 +75,21 @@ export class SiteProcessor {
     this.fileService = new FileService({ outputDir, flat });
     this.urlService = new UrlService();
     this.fetchService = new FetchService({ politeWaitMs });
-    this.contentService = new ContentService({ aiConfig, debug, outputDir });
+    
+    // Create database and crawl state if not provided
+    let db = null;
+    if (options.crawlState) {
+      this.crawlStateService = options.crawlState;
+      db = this.crawlStateService.db;
+    } else {
+      // Create database and DefaultCrawlState for proper database integration
+      const dbPath = path.join(outputDir, '.site2rag');
+      db = getDB(dbPath);
+      this.crawlStateService = new DefaultCrawlState(db);
+    }
+    
+    this.contentService = new ContentService({ aiConfig, debug, outputDir, db });
     this.markdownService = new MarkdownService();
-    this.crawlStateService = options.crawlState || new CrawlStateService({ outputDir, fileService: this.fileService });
     // Copy configuration options to instance properties for backward compatibility
     Object.assign(this, this.options);
     // Proxy methods for backward compatibility

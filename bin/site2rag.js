@@ -19,9 +19,9 @@ import chalk from 'chalk';
 
 
 
-// Use ~/.site2rag/crawl.json as the default global config path
+// Use ~/.site2rag/config.json as the default global config path
 const homeDir = process.env.HOME || process.env.USERPROFILE;
-const defaultConfigPath = path.join(homeDir, '.site2rag', 'crawl.json');
+const defaultConfigPath = path.join(homeDir, '.site2rag', 'config.json');
 const configPath = process.env.SITE2RAG_CONFIG_PATH || defaultConfigPath;
 
 async function displayHeader() {
@@ -122,6 +122,7 @@ program
   .option('-v, --verbose', 'Enable verbose logging')
   .option('--dry-run', 'Show what would be crawled without downloading')
   .option('-d, --debug', 'Enable debug mode to save removed content blocks')
+  .option('--test', 'Enable test mode with detailed skip/download decision logging')
   .option('--flat', 'Store all files in top-level folder with path-derived names')
   .action(async (url, options, command) => {
     // Display header when running with no arguments (for testing)
@@ -249,21 +250,35 @@ if (!fs.existsSync(site2ragDir)) {
   fs.mkdirSync(site2ragDir, { recursive: true });
 }
 
-// Create or update config.json file
+// Load existing config or create new one
 const configFilePath = path.join(site2ragDir, 'config.json');
-const defaultConfig = {
+let existingConfig = {};
+if (fs.existsSync(configFilePath)) {
+  try {
+    existingConfig = JSON.parse(fs.readFileSync(configFilePath, 'utf8'));
+  } catch (err) {
+    // If config is corrupted, start fresh
+    existingConfig = {};
+  }
+}
+
+// Update config with current run settings
+const updatedConfig = {
+  ...existingConfig,
   domain: url,
-  maxPages: options.limit || null,
+  maxPages: options.limit || existingConfig.maxPages || null,
+  flat: options.flat !== undefined ? options.flat : existingConfig.flat || false,
   lastCrawl: new Date().toISOString(),
   crawlSettings: {
     politeWaitMs: 1000,
-    followRobotsTxt: true
+    followRobotsTxt: true,
+    ...existingConfig.crawlSettings
   }
 };
 
 fs.writeFileSync(
   configFilePath, 
-  JSON.stringify(defaultConfig, null, 2)
+  JSON.stringify(updatedConfig, null, 2)
 );
 
 // Set up database path
@@ -287,10 +302,11 @@ if (shouldClean) {
 }
 const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
     const crawlState = new DefaultCrawlState(crawlDb);
-    // Ensure limit is properly set
-    const limit = options.limit ? parseInt(options.limit) : (configMgr.config.maxPages || 10);
+    // Use config settings, allowing CLI flags to override
+    const limit = options.limit ? parseInt(options.limit) : (updatedConfig.maxPages || 10);
+    const useFlat = options.flat !== undefined ? options.flat : updatedConfig.flat;
     
-    logger.info(`Creating SiteProcessor with limit=${limit}`);
+    logger.info(`Creating SiteProcessor with limit=${limit}, flat=${useFlat}`);
     
     // Load AI configuration
     const aiConfig = loadAIConfig();
@@ -303,9 +319,10 @@ const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
       concurrency: configMgr.config.concurrency || 3,
       politeDelay: configMgr.config.politeDelay || 1000,
       debug: options.debug || false,
+      test: options.test || false, // Pass the test flag for detailed logging
       aiConfig: aiConfig,
       update: options.update || false, // Pass the update flag to SiteProcessor
-      flat: options.flat || false // Pass the flat flag to SiteProcessor
+      flat: useFlat // Use config value unless overridden by CLI flag
     });
     // Set up verbose logging if requested
     const verbose = options.verbose;

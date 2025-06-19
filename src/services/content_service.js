@@ -20,11 +20,13 @@ export class ContentService {
    * Creates a new ContentService instance
    * @param {Object} options - Configuration options
    * @param {Object} options.aiConfig - AI service configuration
+   * @param {Object} options.db - Database instance for page persistence
    */
   constructor(options = {}) {
     this.aiConfig = options.aiConfig || null;
     this.debug = options.debug || false;
     this.outputDir = options.outputDir || './output';
+    this.db = options.db || null; // Store database instance for crawl service access
     
     // Create debug directory if debug mode is enabled
     if (this.debug) {

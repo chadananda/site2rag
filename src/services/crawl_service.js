@@ -5,6 +5,7 @@ import { CrawlLimitReached } from '../errors.js';
 
 import logger from './logger_service.js';
 import ProgressService from './progress_service.js';
+import { FastChangeDetector, createFastChangeDetector } from './fast_change_detector.js';
 
 export class CrawlService {
   /**
@@ -64,6 +65,10 @@ export class CrawlService {
       retries: 0
     };
     
+    // Initialize fast change detector for optimized re-crawls
+    // Will be properly initialized with database in initialize() method
+    this.changeDetector = null;
+    
     // Configure logger based on debug option
     logger.configure({ debug: this.debug });
     logger.crawl(`Debug mode is ${this.debug ? 'enabled' : 'disabled'}`);
@@ -108,6 +113,22 @@ export class CrawlService {
       } catch (err) {
         logger.warn(`Could not fetch robots.txt for '${this.domain}': ${err.message}`);
       }
+    }
+    
+    // Initialize fast change detector with database access
+    if (this.contentService && this.contentService.db) {
+      // Use balanced configuration by default, can be made configurable
+      const testMode = this.options.test || false;
+      this.changeDetector = createFastChangeDetector.balanced(this.contentService.db, testMode);
+      
+      // Log test mode status
+      if (testMode) {
+        logger.info('[TEST_MODE] Enabled detailed skip/download decision logging');
+      }
+      
+      logger.info('[FAST_CHANGE] Initialized optimized change detection');
+    } else {
+      logger.warn('[FAST_CHANGE] No database available, change detection will be limited');
     }
   }
 
@@ -273,6 +294,10 @@ export class CrawlService {
       // Database state is automatically saved as we go
       logger.info(`[STATE] Crawl state is stored in the database`);
       
+      // Log performance summary for fast change detection
+      if (this.changeDetector) {
+        this.changeDetector.logPerformanceSummary();
+      }
       
       // Stop progress display without clearing the screen
       if (this.progressService) {
@@ -742,47 +767,28 @@ export class CrawlService {
     }
     
     try {
-      // Prepare headers for conditional request
+      // Prepare headers for conditional request using optimized change detector
       const headers = { 'User-Agent': 'site2rag-crawler' };
       
-      // Use existingPage as pageData to avoid the undefined error
-      const pageData = existingPage;
-      
-      // Add conditional headers if we have page data
-      if (pageData) {
-        logger.cache(`Found previous data for ${urlString}`);
-        
-        // Add ETag for conditional request
-        if (pageData.etag) {
-          logger.cache(`Using ETag: ${pageData.etag}`);
-          headers['If-None-Match'] = pageData.etag;
-        }
-        
-        // Add Last-Modified for conditional request
-        if (pageData.last_modified) {
-          logger.cache(`Using Last-Modified: ${pageData.last_modified}`);
-          headers['If-Modified-Since'] = pageData.last_modified;
-        }
+      // Use fast change detector if available for optimal performance
+      if (this.changeDetector) {
+        const conditionalHeaders = this.changeDetector.generateConditionalHeaders(normalizedUrl);
+        Object.assign(headers, conditionalHeaders);
       } else {
-        // Initialize page data if this is the first time crawling this URL
-        // Check if this is a new page or an existing one
-        const isNewPage = !pageData;
-        
-        // Store page data in crawl state
-        this.crawlStateService.upsertPage(urlString, {
-          url: urlString,
-          etag: null,
-          last_modified: null,
-          content_hash: null,
-          last_crawled: new Date().toISOString(),
-          status: 0,
-          title: null,
-          file_path: null
-        });
-        
-        // Track new pages for re-crawls - only if this is truly a new page
-        if (this.progressService && this.isReCrawl && isNewPage) {
-          this.progressService.stats.newPages++;
+        // Fallback to basic conditional headers
+        const pageData = existingPage;
+        if (pageData) {
+          logger.cache(`Found previous data for ${urlString}`);
+          
+          if (pageData.etag) {
+            logger.cache(`Using ETag: ${pageData.etag}`);
+            headers['If-None-Match'] = pageData.etag;
+          }
+          
+          if (pageData.last_modified) {
+            logger.cache(`Using Last-Modified: ${pageData.last_modified}`);
+            headers['If-Modified-Since'] = pageData.last_modified;
+          }
         }
       }
       
@@ -972,6 +978,38 @@ export class CrawlService {
       // Pass the normalized URL as the base URL for link resolution
       const markdown = this.markdownService.toMarkdown(main, normalizedUrl);
       
+      // Fast change detection - check if content has actually changed
+      if (this.changeDetector && this.isReCrawl) {
+        const changeResult = await this.changeDetector.checkForChanges(normalizedUrl, response, markdown);
+        
+        if (!changeResult.hasChanged) {
+          logger.info(`[FAST_CHANGE] Skipping ${normalizedUrl} - ${changeResult.reason}: ${changeResult.skipReason || changeResult.etag || changeResult.lastModified || changeResult.hash}`);
+          
+          // Update only the timestamp, preserving content_status to avoid AI re-processing
+          this.changeDetector.updateUnchangedPage(normalizedUrl);
+          
+          // Track as unchanged for statistics
+          if (this.progressService) {
+            this.progressService.stats.unchangedPages++;
+            this.progressService.stats.crawledUrls++;
+          }
+          
+          return; // Skip further processing - content hasn't changed
+        }
+        
+        // Content has changed - log the change type
+        logger.info(`[FAST_CHANGE] Processing ${normalizedUrl} - ${changeResult.reason}${changeResult.isNew ? ' (new)' : ' (updated)'}`);
+        
+        // Update statistics
+        if (this.progressService) {
+          if (changeResult.isNew) {
+            this.progressService.stats.newPages++;
+          } else {
+            this.progressService.stats.updatedPages++;
+          }
+        }
+      }
+      
       // Ensure meta is an object to prevent undefined errors
       const metaData = meta || {};
       
@@ -1068,23 +1106,32 @@ export class CrawlService {
       }
       
       // Update page data with response headers and content hash
-      // Use upsertPage instead of updateHeaders
-      const etag = response.headers.get('etag');
-      const lastModified = response.headers.get('last-modified');
-      
-      this.crawlStateService.upsertPage(normalizedUrl, {
-        etag: etag || null,
-        last_modified: lastModified || null,
-        content_hash: contentHash || null,
-        status: response.status,
-        last_crawled: new Date().toISOString()
-      });
-      
-      // Update page data with title and file path
-      this.crawlStateService.upsertPage(normalizedUrl, {
-        title: title || '',
-        file_path: filePath || null
-      });
+      // Save page data using FastChangeDetector for optimal hash storage
+      if (this.changeDetector) {
+        // Use FastChangeDetector to save page with extracted content hash
+        // Mark as new content so it gets 'raw' status for AI processing
+        this.changeDetector.updatePageData(normalizedUrl, response, markdown, filePath, true);
+        
+        // Update additional fields not handled by FastChangeDetector
+        this.crawlStateService.upsertPage(normalizedUrl, {
+          title: title || '',
+          file_path: filePath || null
+        });
+      } else {
+        // Fallback to basic page data saving
+        const etag = response.headers.get('etag');
+        const lastModified = response.headers.get('last-modified');
+        
+        this.crawlStateService.upsertPage(normalizedUrl, {
+          etag: etag || null,
+          last_modified: lastModified || null,
+          content_hash: contentHash || null,
+          status: response.status,
+          last_crawled: new Date().toISOString(),
+          title: title || '',
+          file_path: filePath || null
+        });
+      }
       
       // Store links for future reference
       let links_to_crawl = [];

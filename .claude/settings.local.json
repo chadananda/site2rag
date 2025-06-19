@@ -9,7 +9,8 @@
       "Bash(do mv \"$file\" \"$file//_/-\")",
       "Bash(done)",
       "Bash(git merge:*)",
-      "Bash(git branch:*)"
+      "Bash(git branch:*)",
+      "Bash(sqlite3:*)"
     ],
     "deny": []
   }

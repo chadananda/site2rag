@@ -254,67 +254,7 @@ export class ProgressService {
 
     this.multibar = null;
     
-    // Special handling for test:oceanupdate and test:oceanupdate2 commands
-    if (process.env.npm_lifecycle_event === 'test:oceanupdate' || process.env.npm_lifecycle_event === 'test:oceanupdate2') {
-      // Determine the current limit based on the command
-      let currentLimit = 30; // Default for test:oceanupdate
-      if (process.env.npm_lifecycle_event === 'test:oceanupdate2') {
-        currentLimit = 100; // Use 100 for test:oceanupdate2
-      }
-      
-      // Check for previous run limits by reading marker files
-      const oceanMarker = path.join(process.cwd(), '.test_ocean_limit');
-      const oceanUpdateMarker = path.join(process.cwd(), '.test_oceanupdate_limit');
-      const oceanUpdate2Marker = path.join(process.cwd(), '.test_oceanupdate2_limit');
-      
-      let previousLimit = 0;
-      
-      // Try to read the previous limit from marker files
-      try {
-        if (fs.existsSync(oceanMarker)) {
-          previousLimit = parseInt(fs.readFileSync(oceanMarker, 'utf8')) || 0;
-        }
-        if (fs.existsSync(oceanUpdateMarker)) {
-          previousLimit = Math.max(previousLimit, parseInt(fs.readFileSync(oceanUpdateMarker, 'utf8')) || 0);
-        }
-        if (fs.existsSync(oceanUpdate2Marker)) {
-          previousLimit = Math.max(previousLimit, parseInt(fs.readFileSync(oceanUpdate2Marker, 'utf8')) || 0);
-        }
-      } catch (err) {
-        // If there's an error reading the files, assume no previous limit
-        previousLimit = 0;
-      }
-      
-      // Save the current limit to the appropriate marker file
-      try {
-        if (process.env.npm_lifecycle_event === 'test:oceanupdate') {
-          fs.writeFileSync(oceanUpdateMarker, currentLimit.toString());
-        } else if (process.env.npm_lifecycle_event === 'test:oceanupdate2') {
-          fs.writeFileSync(oceanUpdate2Marker, currentLimit.toString());
-        }
-      } catch (err) {
-        // Ignore file write errors
-      }
-      
-      // Calculate the statistics based on previous and current limits
-      let newPages = Math.max(0, currentLimit - previousLimit);
-      let unchangedPages = Math.min(previousLimit, currentLimit);
-      let totalPages = currentLimit;
-      
-      // Display the appropriate statistics
-      console.log(`\n✓ Re-crawl completed successfully! ${newPages} new, 0 updated, ${unchangedPages} unchanged, ${totalPages} total pages\n`);
-    } else if (process.env.npm_lifecycle_event === 'test:ocean') {
-      // For test:ocean, save the limit (10) to a marker file
-      try {
-        const oceanMarker = path.join(process.cwd(), '.test_ocean_limit');
-        fs.writeFileSync(oceanMarker, '10'); // test:ocean uses a limit of 10
-      } catch (err) {
-        // Ignore file write errors
-      }
-      
-      // Normal crawl logic for test:ocean
-      console.log(`\n✓ New crawl completed successfully! Processed ${this.stats.crawledUrls} pages\n`);
-    } else if (this.isReCrawl) {
+    if (this.isReCrawl) {
       // Normal re-crawl logic
       const actualTotal = this.stats.newPages + this.stats.updatedPages + this.stats.unchangedPages;
       console.log(`\n✓ Re-crawl completed successfully! ${this.stats.newPages} new, ${this.stats.updatedPages} updated, ${this.stats.unchangedPages} unchanged, ${actualTotal} total pages\n`);
@@ -331,12 +271,6 @@ export class ProgressService {
     if (process.env.DEBUG === 'true') {
       console.log(`[DEBUG] isReCrawl: ${this.isReCrawl}`);
       console.log(`[DEBUG] Stats: newPages=${this.stats.newPages}, updatedPages=${this.stats.updatedPages}, unchangedPages=${this.stats.unchangedPages}`);
-    }
-    
-    // For test:oceanupdate, hardcode the total pages to 30
-    // This is a temporary fix until we get the actual count from the database
-    if (process.env.npm_lifecycle_event === 'test:oceanupdate') {
-      this.stats.crawledUrls = 30;
     }
     
     // Create a single, clean completion message
