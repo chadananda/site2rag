@@ -975,10 +975,19 @@ export class CrawlService {
       // Ensure meta is an object to prevent undefined errors
       const metaData = meta || {};
       
+      // Decode the URL for human-readable frontmatter
+      let decodedUrl = normalizedUrl;
+      try {
+        decodedUrl = decodeURIComponent(normalizedUrl);
+      } catch (e) {
+        // If decoding fails, use the original URL
+        logger.warn(`Failed to decode URL: ${normalizedUrl}`);
+      }
+      
       // Prepare comprehensive frontmatter with all available metadata
       const frontmatterData = {
         title: title || '',
-        url: normalizedUrl,
+        url: decodedUrl,
         crawled_at: new Date().toISOString(),
         // Safely access meta properties with fallbacks
         description: metaData.description || metaData.ogDescription || '',
