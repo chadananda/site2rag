@@ -9,7 +9,7 @@ import { SiteProcessor } from '../src/site_processor.js';
 import { DefaultCrawlState } from '../src/crawl_state.js';
 import { loadAIConfig } from '../src/ai_config_loader.js';
 import { settingsMenu, loadGlobalAISettings, promptForAISettings, saveGlobalAISettings } from '../src/cli_settings.js';
-import { OllamaService } from '../src/services/ollama_service.js';
+import { AIService } from '../src/services/ai_service.js';
 import fs from 'fs';
 import path from 'path';
 import { program } from 'commander';
@@ -28,14 +28,15 @@ async function displayHeader() {
   // Check AI status properly with async
   let aiStatus = '';
   try {
-    const ollama = new OllamaService();
-    if (await ollama.isAvailable()) {
+    const aiService = new AIService();
+    const availability = await aiService.checkAvailability();
+    if (availability.available) {
       aiStatus = chalk.cyan('🧠 AI Processing: qwen2.5:14b ready');
     } else {
-      aiStatus = chalk.yellow('⚠ AI Processing: ollama not available');
+      aiStatus = chalk.yellow('⚠ AI Processing: AI not available');
     }
   } catch (error) {
-    aiStatus = chalk.yellow('⚠ AI Processing: ollama not available');
+    aiStatus = chalk.yellow('⚠ AI Processing: AI not available');
   }
 
   // Use ANSI Shadow font with spaced text for better 2 visibility
