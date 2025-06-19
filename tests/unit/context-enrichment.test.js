@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { analyzeDocument, buildContextWindow, getPreviousContext, getFollowingContext, getEntityReference, optimizeForTokenLimit, DocumentAnalysisSchema } from '../src/context.js';
+import { analyzeDocument, buildContextWindow, getPreviousContext, getFollowingContext, getEntityReference, optimizeForTokenLimit, DocumentAnalysisSchema } from '../../src/context.js';
 import { z } from 'zod';
 import path from 'path';
 

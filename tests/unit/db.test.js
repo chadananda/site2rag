@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { CrawlDB } from '../src/db.js';
+import { CrawlDB } from '../../src/db.js';
 
 const TEST_DIR = path.join(process.cwd(), 'tests', 'tmpdb');
 const DB_PATH = path.join(TEST_DIR, 'test.db');

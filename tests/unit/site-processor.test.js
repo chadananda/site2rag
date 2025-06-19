@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from 'vitest';
 import fs from 'fs';
 import { join } from 'path';
-import { SiteProcessor } from '../src/site_processor.js';
-import { DefaultCrawlState } from '../src/crawl_state.js';
-import { CrawlDB } from '../src/db.js';
+import { SiteProcessor } from '../../src/site_processor.js';
+import { DefaultCrawlState } from '../../src/crawl_state.js';
+import { CrawlDB } from '../../src/db.js';
 
 // Use a real site but with a low --limit for polite, fast tests.
 const TEST_SITE = 'https://oceanoflights.org';
