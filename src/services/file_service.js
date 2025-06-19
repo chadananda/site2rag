@@ -13,6 +13,7 @@ export class FileService {
    */
   constructor(options = {}) {
     this.outputDir = options.outputDir || './output';
+    this.flat = options.flat || false;
   }
 
   /**
@@ -110,6 +111,22 @@ This file contains HTML blocks that were removed during content processing.
   }
 
   /**
+   * Generates a flat filename from a URL path for --flat mode
+   * @param {string} urlPath - URL path like '/docs/api/auth'
+   * @returns {string} - Flat filename like 'docs_api_auth.md'
+   */
+  generateFlatFilename(urlPath) {
+    // Remove leading slash and convert remaining slashes to underscores
+    const cleanPath = urlPath.replace(/^\/+/, '').replace(/\/+/g, '_');
+    // Handle root path
+    if (!cleanPath || cleanPath === '_') {
+      return 'index.md';
+    }
+    // Add .md extension if not present
+    return cleanPath.endsWith('.md') ? cleanPath : `${cleanPath}.md`;
+  }
+
+  /**
    * Gets the full path for a file in the output directory
    * @param {string} domain - Domain name 
    * @param {string} filename - Filename (typically generated from URL path)
@@ -123,7 +140,12 @@ This file contains HTML blocks that were removed during content processing.
       fs.mkdirSync(this.outputDir, { recursive: true });
     }
     
-    // Extract directory path from filename if it contains path separators
+    if (this.flat) {
+      // Flat mode: all files in top-level directory with path-derived names
+      return path.join(this.outputDir, this.generateFlatFilename(filename));
+    }
+    
+    // Hierarchical mode: preserve directory structure
     let outputPath;
     if (filename.includes('/')) {
       // Split the filename into directory path and actual filename
