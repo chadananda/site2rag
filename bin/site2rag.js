@@ -17,7 +17,95 @@ import figlet from 'figlet';
 import boxen from 'boxen';
 import chalk from 'chalk';
 
+/**
+ * Detect whether input is a file path or URL
+ * @param {string} input - User input string
+ * @returns {string} 'file' or 'url'
+ */
+function detectInputType(input) {
+  if (!input) return 'url';
+  
+  // Explicit URL protocols
+  if (input.startsWith('http://') || input.startsWith('https://')) {
+    return 'url';
+  }
+  
+  // Check if file exists
+  if (fs.existsSync(input)) {
+    return 'file';
+  }
+  
+  // Check for common file extensions even if file doesn't exist
+  const fileExtensions = ['.md', '.markdown', '.mdoc', '.txt', '.rst', '.adoc', '.textile'];
+  if (fileExtensions.some(ext => input.toLowerCase().endsWith(ext))) {
+    return 'file';
+  }
+  
+  // Default to URL mode
+  return 'url';
+}
 
+/**
+ * Handle file processing operations
+ * @param {string} filePath - Path to the file to process
+ * @param {Object} options - CLI options
+ */
+async function handleFileProcessing(filePath, options) {
+  try {
+    // Import file processor (we'll create this)
+    const { processFile } = await import('../src/cli/file_processor.js');
+    
+    logger.info(`Processing file: ${filePath}`);
+    
+    // Handle special operations first
+    if (options.extractGraph !== undefined) {
+      const outputPath = options.extractGraph === true ? null : options.extractGraph;
+      await extractKnowledgeGraphFromFile(filePath, outputPath);
+      return;
+    }
+    
+    if (options.validateGraph) {
+      await validateKnowledgeGraph(options.validateGraph);
+      return;
+    }
+    
+    if (options.mergeGraphs) {
+      await mergeKnowledgeGraphs(options.mergeGraphs, options.output);
+      return;
+    }
+    
+    // Standard file processing
+    await processFile(filePath, options);
+    
+  } catch (error) {
+    logger.error(`File processing failed: ${error.message}`);
+    process.exit(1);
+  }
+}
+
+/**
+ * Extract knowledge graph from file
+ */
+async function extractKnowledgeGraphFromFile(filePath, outputPath) {
+  const { extractGraph } = await import('../src/file/knowledge_graph.js');
+  await extractGraph([filePath], outputPath);
+}
+
+/**
+ * Validate knowledge graph file
+ */
+async function validateKnowledgeGraph(graphPath) {
+  const { validateGraph } = await import('../src/file/knowledge_graph.js');
+  await validateGraph(graphPath);
+}
+
+/**
+ * Merge multiple knowledge graph files
+ */
+async function mergeKnowledgeGraphs(graphPaths, outputPath) {
+  const { mergeGraphs } = await import('../src/file/knowledge_graph.js');
+  await mergeGraphs(graphPaths, outputPath);
+}
 
 // Use ~/.site2rag/config.json as the default global config path
 const homeDir = process.env.HOME || process.env.USERPROFILE;
@@ -113,9 +201,9 @@ program
   .version('0.1.0')
 
 program
-  .argument('[url]', 'The URL to crawl (required unless using --status or --clean)')
-  .option('-o, --output <dir>', 'Output directory (default: ./<domain>)')
-  .option('--limit <num>', 'Limit the number of pages downloaded', null)
+  .argument('[input]', 'URL to crawl or file path to process (e.g., document.md, https://example.com)')
+  .option('-o, --output <path>', 'Output directory for URLs or file path for files')
+  .option('--limit <num>', 'Limit the number of pages downloaded (URL mode only)', null)
   .option('--update', 'Update existing crawl (only changed content)')
   .option('-s, --status', 'Show status for a previous crawl')
   .option('-c, --clean', 'Clean crawl state before starting')
@@ -124,13 +212,29 @@ program
   .option('-d, --debug', 'Enable debug mode to save removed content blocks')
   .option('--test', 'Enable test mode with detailed skip/download decision logging')
   .option('--flat', 'Store all files in top-level folder with path-derived names')
-  .action(async (url, options, command) => {
+  .option('--knowledge-graph <file>', 'External knowledge graph file to use for context enhancement')
+  .option('--extract-graph [file]', 'Extract knowledge graph to file or stdout')
+  .option('--merge-graphs <files...>', 'Merge multiple knowledge graph files')
+  .option('--validate-graph <file>', 'Validate knowledge graph format')
+  .option('--cache-context', 'Use cache-optimized processing for enhanced performance')
+  .option('--no-enhancement', 'Extract entities only, do not enhance text content')
+  .action(async (input, options, command) => {
     // Display header when running with no arguments (for testing)
     if (process.argv.length === 2) {
       await displayHeader();
     }
     
-    // Add https:// prefix if missing
+    // Determine input type: file or URL
+    const inputType = detectInputType(input);
+    
+    if (inputType === 'file') {
+      // Handle file processing mode
+      await handleFileProcessing(input, options);
+      return;
+    }
+    
+    // Handle URL processing mode (existing logic)
+    let url = input;
     if (url && !url.startsWith('http://') && !url.startsWith('https://')) {
       url = 'https://' + url;
       logger.info(`Adding https:// prefix to URL: ${url}`);
