@@ -7,7 +7,7 @@
 import { getDB } from './db.js';
 // All DB access must use getDB() from src/db.js. Never instantiate CrawlDB directly.
 import { z } from 'zod';
-import { callAI } from './call_ai.js';
+import { callAI, getAISession, closeAISession } from './call_ai.js';
 import fs from 'fs';
 
 // Zod schema for document analysis
@@ -548,6 +548,161 @@ export function buildEntityContext(relevantEntities, maxBudget) {
   // Truncate if too long
   if (context.length > maxBudget) {
     context = context.slice(0, maxBudget - 3) + '...';
+  }
+  
+  return context;
+}
+
+/**
+ * Build cached context for session-based processing
+ * @param {Object} entityGraph - Complete entity graph
+ * @param {Object} metadata - Document metadata
+ * @returns {string} Cached context template
+ */
+export function buildCachedContext(entityGraph, metadata) {
+  const entityContext = buildEntityContext(entityGraph, 2000);
+  
+  return `# DOCUMENT DISAMBIGUATION SESSION
+## Document Metadata
+Title: ${metadata.title || 'Unknown'}
+URL: ${metadata.url || 'Unknown'}
+Description: ${metadata.description || 'None'}
+
+## Entity Graph Context
+${entityContext}
+
+## Enhanced Disambiguation Rules
+1. **Document-Only Context**: Only add context that appears elsewhere in this document
+2. **Pronoun Clarification**: "he" → "he (Chad Jones)", "they" → "they (US Publishing Trust)"
+3. **Technical Terms**: Add context from document - "Ocean" → "Ocean (Bahá'í literature search software)"
+4. **Products/Projects**: Use full names found in document - "Sifter" → "Sifter - Star of the West"
+5. **Temporal Context**: Add time context from document - "back then" → "in the 1990s"
+6. **Geographic Specificity**: Add location context - "India" → "India (where author learned programming)"
+7. **Roles/Relationships**: Clarify from document - "Mr. Shah" → "Mr. Shah (project supporter)"
+8. **Acronym Expansion**: Use document context - "US" → "United States", "PC" → "personal computer"
+9. **Cross-References**: Clarify references - "this mailing" → "the global CD distribution"
+10. **Parenthetical Style**: Use brief parenthetical clarifications to preserve flow
+11. **No Repetition**: Don't repeat information already clear in the current sentence
+12. **Preserve Meaning**: Maintain original meaning and flow exactly
+13. **JSON Format**: Always return valid JSON with "contexted_markdown" and "context_summary" fields
+
+IMPORTANT: All context additions must be justified by information found elsewhere in this same document. Do not add external knowledge.`;
+}
+
+/**
+ * Cache-optimized PASS 2: Enhance content blocks using AI session for context caching
+ * @param {Array} blocks - Document blocks
+ * @param {Object} entityGraph - Complete entity graph from Pass 1
+ * @param {Object} metadata - Document metadata
+ * @param {Object} aiConfig - AI configuration
+ * @param {Function} callAIImpl - Optional AI call implementation for testing
+ * @returns {Promise<Array>} Enhanced blocks with cache metrics
+ */
+export async function enhanceBlocksWithCaching(blocks, entityGraph, metadata, aiConfig, callAIImpl = callAI) {
+  console.log(`[DISAMBIGUATION] Cache-optimized Pass 2: Enhancing ${blocks.length} blocks`);
+  
+  const sessionId = `disambiguation-${Date.now()}`;
+  const session = getAISession(sessionId, aiConfig);
+  const cachedContext = buildCachedContext(entityGraph, metadata);
+  
+  session.setCachedContext(cachedContext);
+  console.log(`[CACHE] Session ${sessionId} created with ${cachedContext.length} chars cached context`);
+  
+  const processedBlocks = [];
+  const startTime = Date.now();
+  
+  try {
+    for (let i = 0; i < blocks.length; i++) {
+      console.log(`[DISAMBIGUATION] Processing block ${i + 1}/${blocks.length}`);
+      
+      const contextWindow = buildMinimalContextWindow(i, blocks, processedBlocks);
+      const originalEscaped = JSON.stringify(blocks[i].text);
+      
+      const blockPrompt = `## Current Block to Enhance
+${contextWindow}
+
+## Task
+Add disambiguating context to the current block text using the cached rules and entity context above.
+
+## Response Format
+Return exactly this JSON structure:
+{
+  "contexted_markdown": ${originalEscaped},
+  "context_summary": "brief summary of changes made"
+}
+
+Replace the content inside contexted_markdown with your enhanced version. Original text: ${originalEscaped}
+
+Apply disambiguation rules from the cached context. Return valid JSON only.`;
+
+      try {
+        let contextedResult;
+        if (callAIImpl !== callAI) {
+          // Use custom AI implementation (e.g., for testing)
+          const fullPrompt = session.cachedContext ? `${session.cachedContext}\n\n${blockPrompt}` : blockPrompt;
+          contextedResult = await callAIImpl(fullPrompt, ContextedDocSchema, aiConfig);
+          // Track cache metrics manually for custom AI
+          if (session.cachedContext) session.cacheMetrics.hits++;
+        } else {
+          // Use session for real AI calls
+          contextedResult = await session.call(blockPrompt, ContextedDocSchema);
+        }
+        
+        if (contextedResult && contextedResult.contexted_markdown) {
+          processedBlocks.push({
+            original: blocks[i].text,
+            contexted: contextedResult.contexted_markdown
+          });
+        } else {
+          processedBlocks.push({
+            original: blocks[i].text,
+            contexted: blocks[i].text
+          });
+        }
+      } catch (err) {
+        console.log(`[DISAMBIGUATION] Failed to enhance block ${i + 1}: ${err.message}`);
+        processedBlocks.push({
+          original: blocks[i].text,
+          contexted: blocks[i].text
+        });
+        if (session.cachedContext) session.cacheMetrics.misses++;
+      }
+    }
+  } finally {
+    const metrics = closeAISession(sessionId);
+    const duration = Date.now() - startTime;
+    
+    console.log(`[CACHE] Session completed in ${duration}ms`);
+    console.log(`[CACHE] Metrics: ${metrics?.hitRate || 0}% hit rate, ${metrics?.conversationLength || 0} calls`);
+    
+    return {
+      blocks: processedBlocks,
+      cacheMetrics: metrics,
+      duration
+    };
+  }
+}
+
+/**
+ * Build minimal context window for cached session (previous approach with full context)
+ * @param {number} blockIndex - Current block index
+ * @param {Array} allBlocks - All document blocks
+ * @param {Array} processedBlocks - Previously processed blocks
+ * @returns {string} Minimal context window
+ */
+export function buildMinimalContextWindow(blockIndex, allBlocks, processedBlocks) {
+  const currentBlock = allBlocks[blockIndex].text;
+  const prevContext = getPreviousContext(processedBlocks, 1000);
+  const nextContext = getFollowingContext(allBlocks, blockIndex, 500);
+  
+  let context = `**Current Block:**\n${currentBlock}`;
+  
+  if (prevContext) {
+    context = `**Previous Context:**\n${prevContext}\n\n${context}`;
+  }
+  
+  if (nextContext) {
+    context += `\n\n**Following Context:**\n${nextContext}`;
   }
   
   return context;
