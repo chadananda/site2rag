@@ -5,6 +5,7 @@ import {CrawlLimitReached} from '../utils/errors.js';
 
 import logger from './logger_service.js';
 import ProgressService from '../utils/progress.js';
+import {SitemapService} from './sitemap_service.js';
 
 // === Fast Change Detection (merged from fast_change_detector.js) ===
 
@@ -405,6 +406,7 @@ export class CrawlService {
     this.contentService = options.contentService;
     this.markdownService = options.markdownService;
     this.crawlStateService = options.crawlStateService;
+    this.sitemapService = new SitemapService(this.fetchService);
 
     // Efficient URL tracking to minimize redundant processing
     this.visitedUrls = new Set(); // URLs already processed in this session
@@ -1957,12 +1959,25 @@ ${markdownContent}`;
    */
   async processSitemaps(domain) {
     logger.info(`Processing sitemaps for ${domain}`);
-    // This is a placeholder implementation
-    // In a real implementation, this would fetch and parse sitemap.xml files
-    // and add the URLs to the queue
-
-    // For now, we'll just return an empty array
-    return [];
+    try {
+      const sitemapUrls = await this.sitemapService.getAllSitemapUrls(domain);
+      if (sitemapUrls.length > 0) {
+        logger.info(`Found ${sitemapUrls.length} URLs in sitemaps`);
+        // Add sitemap URLs to the queue for priority crawling
+        for (const url of sitemapUrls) {
+          if (!this.visitedUrls.has(url) && !this.queuedUrls.has(url)) {
+            this.queuedUrls.add(url);
+          }
+        }
+        return sitemapUrls;
+      } else {
+        logger.info('No sitemap URLs found');
+        return [];
+      }
+    } catch (error) {
+      logger.warn(`Error processing sitemaps for ${domain}: ${error.message}`);
+      return [];
+    }
   }
 }
 
