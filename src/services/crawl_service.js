@@ -645,7 +645,17 @@ export class CrawlService {
         }
       }
 
-      logger.info('Starting recursive crawl...');
+      // Phase 1: Mapping - Discover and store all sitemap URLs with language metadata
+      if (this.sitemapService && this.contentService?.db) {
+        logger.info('Phase 1: Mapping - Discovering sitemap URLs...');
+        const urlStorageHandler = (urlMetadata) => {
+          this.contentService.db.upsertSitemapUrl(urlMetadata);
+        };
+        const totalDiscovered = await this.sitemapService.discoverAndStoreSitemapUrls(url, urlStorageHandler);
+        logger.info(`Mapping complete: ${totalDiscovered} URLs discovered and stored`);
+      }
+      
+      logger.info('Phase 2: Crawling - Starting selective crawl...');
       await this.crawl(url, 0);
       logger.info(`Crawl completed with ${this.foundUrls.length} URLs found`);
 
@@ -770,15 +780,108 @@ export class CrawlService {
   }
 
   /**
+   * Crawl URLs from sitemap database with language pre-filtering
+   * @param {string} startUrl - Starting URL (used for home page)
+   */
+  async crawlFromSitemap(startUrl) {
+    logger.info(`Using sitemap-first crawling with language filter: ${this.urlFilter.includeLanguage}`);
+    
+    // Always crawl the home page first
+    await this.crawlSingleUrl(startUrl, 0);
+    
+    // Get ALL unprocessed URLs from sitemap database (we'll filter them ourselves)
+    const filters = {
+      language: this.urlFilter.includeLanguage,
+      unprocessedOnly: true,
+      limit: 1000 // Get enough URLs to account for heavy filtering
+    };
+    
+    const allSitemapUrls = this.contentService.db.getFilteredSitemapUrls(filters);
+    logger.info(`Found ${allSitemapUrls.length} language-filtered URLs from sitemap database`);
+    
+    // Filter URLs that pass path/pattern filters and count them
+    const validUrls = allSitemapUrls.filter(sitemapUrl => this.urlFilter.shouldCrawlUrl(sitemapUrl.url));
+    logger.info(`After path/pattern filtering: ${validUrls.length} valid URLs to crawl`);
+    
+    // Crawl each valid URL
+    for (const sitemapUrl of validUrls) {
+      if (this.foundUrls.length >= this.maxPages) {
+        logger.info(`Reached page limit of ${this.maxPages}`);
+        break;
+      }
+      
+      // Crawl the URL
+      await this.crawlSingleUrl(sitemapUrl.url, 1);
+      
+      // Mark as processed in sitemap database
+      this.contentService.db.markSitemapUrlProcessed(sitemapUrl.url);
+    }
+    
+    // Mark remaining invalid URLs as processed so they don't get checked again
+    const invalidUrls = allSitemapUrls.filter(sitemapUrl => !this.urlFilter.shouldCrawlUrl(sitemapUrl.url));
+    for (const sitemapUrl of invalidUrls) {
+      this.contentService.db.markSitemapUrlProcessed(sitemapUrl.url);
+    }
+    logger.info(`Marked ${invalidUrls.length} filtered URLs as processed`)
+  }
+  
+  /**
+   * Crawl a single URL without recursive link following
+   * @param {string} url - URL to crawl
+   * @param {number} depth - Current crawl depth
+   */
+  async crawlSingleUrl(url, depth = 0) {
+    // Normalize URL
+    let normalizedUrl = url;
+    if (this.urlService && this.urlService.normalizeUrl) {
+      normalizedUrl = this.urlService.normalizeUrl(url);
+    }
+
+    // Skip if this URL has already been visited
+    if (this.visitedUrls.has(normalizedUrl)) {
+      return;
+    }
+
+    // Mark as visited to prevent duplicate processing
+    this.visitedUrls.add(normalizedUrl);
+
+    // Temporarily disable link following and sitemap-first mode for single URL processing
+    const originalMaxDepth = this.maxDepth;
+    const originalSitemapFirst = this._sitemapFirstMode;
+    this.maxDepth = depth; // Set maxDepth to current depth to prevent following links
+    this._sitemapFirstMode = false; // Disable sitemap-first to prevent infinite recursion
+    
+    try {
+      // Process the URL using existing crawl logic but without following links
+      await this.crawl(normalizedUrl, depth);
+    } finally {
+      // Restore original settings
+      this.maxDepth = originalMaxDepth;
+      this._sitemapFirstMode = originalSitemapFirst;
+    }
+  }
+
+  /**
    * Crawls a URL and processes its content
    * @param {string} url - URL to crawl
    * @param {number} depth - Current crawl depth
    */
   async crawl(url, depth = 0) {
+    // For depth 0 (starting URL), use sitemap-first approach if language filtering is enabled
+    if (depth === 0 && this.urlFilter?.includeLanguage && this.contentService?.db && this._sitemapFirstMode !== false) {
+      this._sitemapFirstMode = true; // Mark that we're in sitemap-first mode
+      return await this.crawlFromSitemap(url);
+    }
+    
     // Normalize URL
     let normalizedUrl = url;
     if (this.urlService && this.urlService.normalizeUrl) {
       normalizedUrl = this.urlService.normalizeUrl(url);
+    }
+
+    // Apply URL filtering rules (paths, patterns) - critical for excluding unwanted URLs
+    if (!this.urlFilter.shouldCrawlUrl(normalizedUrl)) {
+      return; // URL filtering already logs the reason
     }
 
     // Skip if this URL has already been visited - no need to log for in-memory checks
@@ -816,10 +919,8 @@ export class CrawlService {
 
     // Domain filtering is now handled at the beginning of the crawl method
 
-    // Skip if this URL is already in the queue - no need to log for in-memory checks
-    if (this.queuedUrls.has(normalizedUrl)) {
-      return;
-    }
+    // Note: We don't skip URLs that are in the queue since they may be from sitemaps
+    // and need to be processed. The visitedUrls check above prevents duplicate processing.
 
     // Mark as queued immediately to prevent duplicate processing
     this.queuedUrls.add(normalizedUrl);
@@ -1101,6 +1202,12 @@ export class CrawlService {
       }
     } catch (e) {
       logger.error(`Error parsing URL ${normalizedUrl}: ${e.message}`);
+      return;
+    }
+
+    // Check robots.txt to ensure we're allowed to crawl this URL
+    if (this.fetchService && !this.fetchService.canCrawl(normalizedUrl)) {
+      logger.info(`Robots.txt disallows crawling: ${normalizedUrl}`);
       return;
     }
 

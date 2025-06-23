@@ -84,7 +84,9 @@
       "Bash(npx eslint:*)",
       "Bash(npm run quality:check:*)",
       "Bash(npm run cleanup:debug:*)",
-      "Bash(npm run fix:lint)"
+      "Bash(npm run fix:lint)",
+      "Bash(curl:*)",
+      "WebFetch(domain:bahai-education.org)"
     ],
     "deny": []
   }

@@ -89,11 +89,12 @@ export class SitemapService {
     return sitemapUrls;
   }
   /**
-   * Parse a sitemap XML and extract URLs
+   * Parse a sitemap XML and extract URLs with metadata
    * @param {string} sitemapUrl - URL of the sitemap to parse
+   * @param {Function} urlHandler - Optional callback to handle each URL with metadata
    * @returns {Promise<string[]>} Array of URLs found in sitemap
    */
-  async parseSitemap(sitemapUrl) {
+  async parseSitemap(sitemapUrl, urlHandler = null) {
     try {
       logger.info(`Parsing sitemap: ${sitemapUrl}`);
       const response = await this.fetchService.fetchUrl(sitemapUrl);
@@ -112,10 +113,10 @@ export class SitemapService {
         logger.warn(`Sitemap ${sitemapUrl} content too large (${xmlContent.length} bytes), skipping`);
         return [];
       }
-      // Parse XML content
+      // Parse XML content with attributes preserved for hreflang extraction
       const result = await xml2js.parseStringPromise(xmlContent, {
         explicitArray: false,
-        ignoreAttrs: true,
+        ignoreAttrs: false,
         trim: true
       });
       const urls = [];
@@ -126,7 +127,7 @@ export class SitemapService {
           : [result.sitemapindex.sitemap];
         for (const sitemap of sitemaps) {
           if (sitemap.loc && urls.length < this.maxUrls) {
-            const nestedUrls = await this.parseSitemap(sitemap.loc);
+            const nestedUrls = await this.parseSitemap(sitemap.loc, urlHandler);
             urls.push(...nestedUrls.slice(0, this.maxUrls - urls.length));
           }
         }
@@ -138,6 +139,11 @@ export class SitemapService {
           : [result.urlset.url];
         for (const urlEntry of urlEntries) {
           if (urlEntry.loc && urls.length < this.maxUrls) {
+            const urlMetadata = this.extractUrlMetadata(urlEntry, sitemapUrl);
+            // Call urlHandler if provided for database storage
+            if (urlHandler) {
+              urlHandler(urlMetadata);
+            }
             urls.push(urlEntry.loc);
           }
         }
@@ -180,5 +186,96 @@ export class SitemapService {
     });
     logger.info(`Sitemap discovery complete: ${filteredUrls.length} unique URLs found`);
     return filteredUrls.slice(0, this.maxUrls);
+  }
+  /**
+   * Extract metadata from a sitemap URL entry
+   * @param {Object} urlEntry - URL entry from sitemap XML
+   * @param {string} sitemapUrl - Source sitemap URL
+   * @returns {Object} - URL metadata including language from hreflang
+   */
+  extractUrlMetadata(urlEntry, sitemapUrl) {
+    const metadata = {
+      url: urlEntry.loc,
+      language: null,
+      priority: urlEntry.priority ? parseFloat(urlEntry.priority) : null,
+      lastmod: urlEntry.lastmod || null,
+      changefreq: urlEntry.changefreq || null,
+      discovered_from_sitemap: sitemapUrl,
+      processed: 0
+    };
+    // Extract language from hreflang link elements
+    // First check if this URL explicitly references itself with hreflang
+    let foundSelfReference = false;
+    
+    if (urlEntry.link) {
+      const links = Array.isArray(urlEntry.link) ? urlEntry.link : [urlEntry.link];
+      for (const link of links) {
+        if (link.$ && link.$.hreflang && link.$.href === urlEntry.loc) {
+          metadata.language = link.$.hreflang;
+          foundSelfReference = true;
+          break;
+        }
+      }
+    }
+    
+    // Also check for xhtml:link elements (common in some sitemaps)
+    if (!foundSelfReference && urlEntry['xhtml:link']) {
+      const xhtmlLinks = Array.isArray(urlEntry['xhtml:link']) ? urlEntry['xhtml:link'] : [urlEntry['xhtml:link']];
+      for (const link of xhtmlLinks) {
+        if (link.$ && link.$.hreflang && link.$.href === urlEntry.loc) {
+          metadata.language = link.$.hreflang;
+          foundSelfReference = true;
+          break;
+        }
+      }
+    }
+    
+    // If no self-reference found but has alternate language links, this is likely the canonical English version
+    if (!foundSelfReference && urlEntry['xhtml:link']) {
+      const hasAlternateLanguages = Array.isArray(urlEntry['xhtml:link']) ? 
+        urlEntry['xhtml:link'].length > 0 : 
+        urlEntry['xhtml:link'];
+      
+      if (hasAlternateLanguages) {
+        // This is the canonical version with alternates, so it's likely English
+        metadata.language = 'en';
+      }
+    }
+    
+    // Final fallback: detect language from URL structure
+    if (!metadata.language) {
+      const urlObj = new URL(urlEntry.loc);
+      const pathSegments = urlObj.pathname.split('/').filter(Boolean);
+      
+      // If URL has no language indicators and looks like English content, assume 'en'
+      if (pathSegments.length > 0 && 
+          !pathSegments[0].match(/^(ar|bn|de|es|fa|fr|he|hi|id|it|ja|mr|pt|ro|ru|sw|tr|ur|zh)$/) &&
+          urlEntry.loc.match(/^https?:\/\/[^\/]+\/[a-z0-9\-]+/)) {
+        metadata.language = 'en';
+      }
+    }
+    return metadata;
+  }
+  /**
+   * Parse all sitemaps and store URLs with metadata in database
+   * @param {string} baseUrl - Base URL of the site
+   * @param {Function} urlStorageHandler - Function to store URL metadata
+   * @returns {Promise<number>} - Number of URLs discovered and stored
+   */
+  async discoverAndStoreSitemapUrls(baseUrl, urlStorageHandler) {
+    const sitemapUrls = await this.discoverSitemapUrls(baseUrl);
+    if (sitemapUrls.length === 0) {
+      logger.info('No sitemaps found for site');
+      return 0;
+    }
+    logger.info(`Processing ${sitemapUrls.length} discovered sitemaps for URL storage`);
+    let totalUrls = 0;
+    for (const sitemapUrl of sitemapUrls) {
+      const urls = await this.parseSitemap(sitemapUrl, urlStorageHandler);
+      totalUrls += urls.length;
+      if (totalUrls >= this.maxUrls) break;
+    }
+    logger.info(`Sitemap discovery and storage complete: ${totalUrls} URLs stored`);
+    return totalUrls;
   }
 }

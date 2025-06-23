@@ -77,6 +77,15 @@ export function initDbSchema(db) {
       pages_crawled INTEGER,
       notes TEXT
     );
+    CREATE TABLE IF NOT EXISTS sitemap_urls (
+      url TEXT PRIMARY KEY,
+      language TEXT,
+      priority REAL,
+      lastmod TEXT,
+      changefreq TEXT,
+      discovered_from_sitemap TEXT,
+      processed INTEGER DEFAULT 0
+    );
   `);
 
   // Add context tracking columns to existing databases
@@ -88,6 +97,14 @@ export function initDbSchema(db) {
     `);
   } catch {
     // Columns already exist, which is fine
+  }
+  // Add language column to pages table for consistency
+  try {
+    db.exec(`
+      ALTER TABLE pages ADD COLUMN language TEXT DEFAULT NULL;
+    `);
+  } catch {
+    // Column already exists, which is fine
   }
 }
 
@@ -338,6 +355,71 @@ export class CrawlDB {
     `);
 
     stmt.run(session);
+  }
+
+  /**
+   * Insert or update a sitemap URL with language metadata
+   * @param {Object} sitemapUrl - Sitemap URL data
+   */
+  upsertSitemapUrl(sitemapUrl) {
+    const stmt = this.db.prepare(`
+      INSERT INTO sitemap_urls (url, language, priority, lastmod, changefreq, discovered_from_sitemap, processed)
+      VALUES (@url, @language, @priority, @lastmod, @changefreq, @discovered_from_sitemap, @processed)
+      ON CONFLICT(url) DO UPDATE SET
+        language=excluded.language,
+        priority=excluded.priority,
+        lastmod=excluded.lastmod,
+        changefreq=excluded.changefreq,
+        discovered_from_sitemap=excluded.discovered_from_sitemap,
+        processed=excluded.processed;
+    `);
+    stmt.run(sitemapUrl);
+  }
+
+  /**
+   * Get filtered sitemap URLs based on language and processing status
+   * @param {Object} filters - Filter criteria
+   * @param {string} filters.language - Language to filter by
+   * @param {boolean} filters.unprocessedOnly - Only return unprocessed URLs
+   * @param {number} filters.limit - Maximum number of URLs to return
+   * @returns {Array} - Array of sitemap URL objects
+   */
+  getFilteredSitemapUrls(filters = {}) {
+    let query = 'SELECT * FROM sitemap_urls';
+    const conditions = [];
+    const params = {};
+    
+    if (filters.language) {
+      conditions.push('language = @language');
+      params.language = filters.language;
+    }
+    
+    if (filters.unprocessedOnly) {
+      conditions.push('processed = 0');
+    }
+    
+    if (conditions.length > 0) {
+      query += ' WHERE ' + conditions.join(' AND ');
+    }
+    
+    query += ' ORDER BY priority DESC, lastmod DESC';
+    
+    if (filters.limit) {
+      query += ' LIMIT @limit';
+      params.limit = filters.limit;
+    }
+    
+    const stmt = this.db.prepare(query);
+    return stmt.all(params);
+  }
+
+  /**
+   * Mark sitemap URL as processed
+   * @param {string} url - URL to mark as processed
+   */
+  markSitemapUrlProcessed(url) {
+    const stmt = this.db.prepare('UPDATE sitemap_urls SET processed = 1 WHERE url = ?');
+    stmt.run(url);
   }
 
   /**
