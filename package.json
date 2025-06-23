@@ -1,6 +1,6 @@
 {
   "name": "site2rag",
-  "version": "0.1.3",
+  "version": "0.1.4",
   "description": "CLI tool to convert websites into RAG-ready local markdown knowledge bases with AI-powered content improvement.",
   "main": "index.js",
   "bin": {
@@ -24,7 +24,16 @@
     "test:oceanupdate2": "rm -rf ./tests/tmp/sites/oceanoflights && node ./bin/site2rag.js oceanoflights.org --limit 100 --output ./tests/tmp/sites/oceanoflights",
     "test:pdf": "node ./scripts/test-pdf-links.js",
     "test:domain": "node ./scripts/test-domain-filtering.js",
-    "test:bahai": "rm -rf ./tests/tmp/sites/bahai-education && node ./bin/site2rag.js bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-education --flat"
+    "test:bahai": "rm -rf ./tests/tmp/sites/bahai-education && node ./bin/site2rag.js bahai-education.org --limit 30 --output ./tests/tmp/sites/bahai-education --flat --test --auto-fallback",
+    "test:bahai-opus4": "rm -rf ./tests/tmp/sites/bahai-education && node ./bin/site2rag.js bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-education --flat --test --use_opus4",
+    "test:bahai-haiku": "rm -rf ./tests/tmp/sites/bahai-education && node ./bin/site2rag.js bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-education --flat --test --use_haiku",
+    "test:bahai-gpt4o": "rm -rf ./tests/tmp/sites/bahai-education && node ./bin/site2rag.js bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-education --flat --test --use_gpt4o",
+    "test:bahai-gpt4o-mini": "rm -rf ./tests/tmp/sites/bahai-education && node ./bin/site2rag.js bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-education --flat --test --use_gpt4o_mini",
+    "test:bahai-gpt4turbo": "rm -rf ./tests/tmp/sites/bahai-education && node ./bin/site2rag.js bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-education --flat --test --use_gpt4_turbo",
+    "test:bahai-mistral": "rm -rf ./tests/tmp/sites/bahai-education && node ./bin/site2rag.js bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-education --flat --test --use_mistral_large",
+    "test:bahai-perplexity": "rm -rf ./tests/tmp/sites/bahai-education && node ./bin/site2rag.js bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-education --flat --test --use_perplexity",
+    "test:bahai-auto-fallback": "rm -rf ./tests/tmp/sites/bahai-education && node ./bin/site2rag.js bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-education --flat --test --auto-fallback",
+    "test:bahai-custom-fallback": "rm -rf ./tests/tmp/sites/bahai-education && node ./bin/site2rag.js bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-education --flat --test --auto-fallback --fallback-order gpt4o-mini,ollama"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
@@ -33,6 +42,7 @@
     "cheerio": "^1.0.0-rc.12",
     "cli-progress": "^3.12.0",
     "commander": "^14.0.0",
+    "dotenv": "^16.5.0",
     "figlet": "^1.7.0",
     "figures": "^5.0.0",
     "gray-matter": "^4.0.3",
