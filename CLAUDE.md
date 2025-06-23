@@ -227,3 +227,9 @@ Watch for these and stop immediately:
 - **Use Context7 MCP server for latest docs** - research current library/framework documentation during planning
 - **Check latest API changes** - use Context7 to verify current syntax and best practices
 - **Research before implementing** - avoid outdated patterns by checking latest documentation first
+
+## Version Management Guidelines
+
+- When committing fixes to git, update the version with a minor update
+- When merging a feature branch, increment a major update (in the package.json)
+- Publish to NPM on major changes (npm publish)

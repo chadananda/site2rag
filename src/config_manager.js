@@ -12,6 +12,12 @@ const DEFAULT_CONFIG = {
   crawlPatterns: ['/*'],
   politeDelay: 300,
   userAgent: 'site2rag-crawler/1.0',
+  filtering: {
+    excludePaths: [],
+    excludePatterns: [],
+    includeLanguage: null,
+    includePatterns: []
+  },
   markdown: {
     frontmatter: true,
     contentDensity: 0.2

@@ -1,6 +1,6 @@
 {
   "name": "site2rag",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "CLI tool to convert websites into RAG-ready local markdown knowledge bases with AI-powered content improvement.",
   "main": "index.js",
   "bin": {

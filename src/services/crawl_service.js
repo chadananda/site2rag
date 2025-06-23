@@ -6,6 +6,7 @@ import {CrawlLimitReached} from '../utils/errors.js';
 import logger from './logger_service.js';
 import ProgressService from '../utils/progress.js';
 import {SitemapService} from './sitemap_service.js';
+import {UrlFilterService} from './url_filter_service.js';
 
 // === Fast Change Detection (merged from fast_change_detector.js) ===
 
@@ -407,6 +408,7 @@ export class CrawlService {
     this.markdownService = options.markdownService;
     this.crawlStateService = options.crawlStateService;
     this.sitemapService = new SitemapService(this.fetchService);
+    this.urlFilter = new UrlFilterService(options.filtering || {});
 
     // Efficient URL tracking to minimize redundant processing
     this.visitedUrls = new Set(); // URLs already processed in this session
@@ -753,6 +755,11 @@ export class CrawlService {
       logger.warn(`[DOMAIN_FILTER] Error checking domain for ${normalizedUrl}: ${err.message}`);
       // Skip URLs that cause errors in domain checking
       return;
+    }
+
+    // Apply URL filtering rules (paths, patterns)
+    if (!this.urlFilter.shouldCrawlUrl(normalizedUrl)) {
+      return; // URL filtering already logs the reason
     }
 
     // Add to queue
@@ -1295,6 +1302,13 @@ ${markdownContent}`;
 
       // Get HTML content from response
       const html = await response.text();
+
+      // Apply content-based filtering (language detection)
+      if (!this.urlFilter.shouldProcessContent(html, normalizedUrl)) {
+        // Content filtered out - remove from queue and return
+        this.queuedUrls.delete(normalizedUrl);
+        return;
+      }
 
       // Calculate content hash for change detection
       const contentHash = this.calculateContentHash(html);

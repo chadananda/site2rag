@@ -251,6 +251,10 @@ program
     '--fallback-order <sequence>',
     'Custom fallback order (comma-separated): gpt4o,gpt4o-mini,opus4,gpt4-turbo,ollama'
   )
+  .option('--exclude-paths <paths>', 'Exclude URL paths (comma-separated): /terms,/privacy,/blog')
+  .option('--exclude-patterns <patterns>', 'Exclude URLs matching regex patterns (comma-separated)')
+  .option('--include-language <lang>', 'Only crawl pages with specific language (e.g., en, es, fr)')
+  .option('--include-patterns <patterns>', 'Only include URLs matching regex patterns (comma-separated)')
   .action(async (input, options, command) => {
     // Display header when running with no arguments (for testing)
     if (process.argv.length === 2) {
@@ -398,12 +402,21 @@ program
       }
     }
 
+    // Parse CLI filtering options
+    const filtering = {
+      excludePaths: options.excludePaths ? options.excludePaths.split(',').map(p => p.trim()) : existingConfig.filtering?.excludePaths || [],
+      excludePatterns: options.excludePatterns ? options.excludePatterns.split(',').map(p => p.trim()) : existingConfig.filtering?.excludePatterns || [],
+      includeLanguage: options.includeLanguage || existingConfig.filtering?.includeLanguage || null,
+      includePatterns: options.includePatterns ? options.includePatterns.split(',').map(p => p.trim()) : existingConfig.filtering?.includePatterns || []
+    };
+
     // Update config with current run settings
     const updatedConfig = {
       ...existingConfig,
       domain: url,
       maxPages: options.limit || existingConfig.maxPages || null,
       flat: options.flat !== undefined ? options.flat : existingConfig.flat || false,
+      filtering: filtering,
       lastCrawl: new Date().toISOString(),
       crawlSettings: {
         politeWaitMs: 1000,
@@ -495,7 +508,8 @@ program
       aiConfig: aiConfig,
       update: options.update || false, // Pass the update flag to SiteProcessor
       flat: useFlat, // Use config value unless overridden by CLI flag
-      enhancement: !options.noEnhancement && options.enhancement !== false // Enable enhancement unless explicitly disabled
+      enhancement: !options.noEnhancement && options.enhancement !== false, // Enable enhancement unless explicitly disabled
+      filtering: filtering // Pass filtering configuration
     });
     // Set up verbose logging if requested
     const verbose = options.verbose;

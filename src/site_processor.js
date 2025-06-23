@@ -53,7 +53,8 @@ export class SiteProcessor {
       enhancement: options.enhancement !== undefined ? options.enhancement : true, // Enable enhancement by default
       test: options.test || false, // Test mode for insertion tracking
       // Explicitly set sameDomain to true by default unless explicitly disabled
-      sameDomain: options.sameDomain !== false
+      sameDomain: options.sameDomain !== false,
+      filtering: options.filtering || {}
     };
 
     // Configure logger based on debug option
