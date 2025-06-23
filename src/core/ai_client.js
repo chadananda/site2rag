@@ -1,7 +1,7 @@
 // call_ai.js
 // Centralized AI call abstraction for site2rag
 // Accepts a prompt, a Zod schema, and aiConfig; returns validated JSON result.
-import {z} from 'zod';
+// Removed unused zod import
 import fetch from 'node-fetch';
 import pLimit from 'p-limit';
 import logger from '../services/logger_service.js';
@@ -395,7 +395,7 @@ export async function callAI(prompt, schema, aiConfig) {
         const parsed = JSON.parse(jsonText);
         return schema.parse(parsed);
       } catch (e) {
-        lastError = e;
+        // lastError = e; // Removed unused variable
         if (attempt < 3) {
           console.log(`[AI] Call attempt ${attempt} failed: ${e.message}, retrying...`);
           await delay(1000 * attempt); // Exponential backoff

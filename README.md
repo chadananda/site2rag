@@ -42,7 +42,7 @@ See [html-preprocessing.md](./html-preprocessing.md) for technical details.
 
 **The Solution**: `site2rag` intelligently converts entire websites into maintained, AI-optimized knowledge bases that stay fresh automatically.
 
-```
+```text
 Website                    site2rag                 RAG-Ready Knowledge Base
 ┌─────────────┐           ┌─────────────┐           ┌─────────────────────────┐
 │ 🌐 Raw HTML │  ────────▶ │ 🧠 AI Magic │  ────────▶ │ 📚 Clean Markdown       │
@@ -190,7 +190,7 @@ All disambiguation context is derived **only** from information found elsewhere 
 
 ### Hierarchical Structure (Default)
 
-```
+```text
 ./docs.example.com/
 ├── .site2rag/              # 🗄️ Smart change tracking & config
 │   ├── crawl.db           # SQLite database
@@ -210,7 +210,7 @@ All disambiguation context is derived **only** from information found elsewhere 
 
 ### Flat Structure (--flat, Perfect for RAG)
 
-```
+```text
 ./docs.example.com/
 ├── .site2rag/              # 🗄️ Smart change tracking & config
 │   ├── crawl.db           # SQLite database

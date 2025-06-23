@@ -37,7 +37,7 @@ export async function processFile(filePath, options) {
     // Knowledge graph extraction has been removed - focusing on context disambiguation only
 
     // Determine output path
-    const outputPath = determineOutputPath(filePath, options.output, parsed.originalFormat);
+    const outputPath = determineOutputPath(filePath, options.output);
 
     if (options.noEnhancement || options.enhancement === false) {
       console.log(`[FILE_PROCESSOR] No enhancement requested - outputting original content`);
@@ -135,10 +135,9 @@ async function enhanceContent(blocks, metadata, aiConfig, options) {
  * Determine output file path
  * @param {string} inputPath - Input file path
  * @param {string|undefined} outputOption - CLI output option
- * @param {string} originalFormat - Original file format
  * @returns {string} Output file path
  */
-function determineOutputPath(inputPath, outputOption, originalFormat) {
+function determineOutputPath(inputPath, outputOption) {
   if (outputOption) {
     return outputOption;
   }

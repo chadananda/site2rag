@@ -157,13 +157,13 @@ describe('SiteProcessor Core', () => {
       });
 
       // Mock the crawling to return more URLs than the limit
-      const mockUrls = [
-        'https://example.com/',
-        'https://example.com/page1',
-        'https://example.com/page2',
-        'https://example.com/page3',
-        'https://example.com/page4'
-      ];
+      // const mockUrls = [ // Temporarily unused
+      //   'https://example.com/',
+      //   'https://example.com/page1',
+      //   'https://example.com/page2',
+      //   'https://example.com/page3',
+      //   'https://example.com/page4'
+      // ];
 
       expect(siteProcessor.options.limit).toBe(3);
       // The actual limiting happens in the crawl process

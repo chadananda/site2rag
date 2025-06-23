@@ -7,10 +7,10 @@ import fs from 'fs';
 import path from 'path';
 import {parseFile, detectFormat, isFileSupported} from '../../src/file/parser.js';
 import {serializeGraph, parseGraph} from '../../src/file/knowledge_graph.js';
-import {processFile} from '../../src/cli/file_processor.js';
+// import {processFile} from '../../src/cli/file_processor.js'; // Currently unused
 
 const TEST_DIR = 'tests/tmp/file-processing';
-const FIXTURES_DIR = 'tests/fixtures';
+// const FIXTURES_DIR = 'tests/fixtures'; // Currently unused
 
 describe('File Processing', () => {
   beforeEach(() => {

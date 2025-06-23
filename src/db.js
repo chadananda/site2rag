@@ -86,7 +86,7 @@ export function initDbSchema(db) {
       ALTER TABLE pages ADD COLUMN last_context_attempt TEXT DEFAULT NULL;
       ALTER TABLE pages ADD COLUMN context_error TEXT DEFAULT NULL;
     `);
-  } catch (e) {
+  } catch {
     // Columns already exist, which is fine
   }
 }
@@ -94,10 +94,9 @@ export function initDbSchema(db) {
 /**
  * Get database instance with proper session management
  * @param {string} dbPath - Path to the database file
- * @param {Object} opts - Options
  * @returns {CrawlDB} - Database instance
  */
-export function getDB(dbPath, opts = {}) {
+export function getDB(dbPath) {
   // Ensure parent directory exists
   const dbDir = path.dirname(dbPath);
   if (!fs.existsSync(dbDir)) {
@@ -119,7 +118,9 @@ export function getDB(dbPath, opts = {}) {
   } else if (fs.existsSync(paths.session)) {
     try {
       fs.unlinkSync(paths.session);
-    } catch {}
+    } catch {
+      // File doesn't exist - that's okay
+    }
   }
 
   // Open session DB for writing, with recovery from previous if needed

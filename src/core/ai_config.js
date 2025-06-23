@@ -14,7 +14,9 @@ function loadJsonIfExists(file) {
     if (fs.existsSync(file)) {
       return JSON.parse(fs.readFileSync(file, 'utf8'));
     }
-  } catch (e) {}
+  } catch {
+    // File doesn't exist or isn't readable - return null
+  }
   return null;
 }
 

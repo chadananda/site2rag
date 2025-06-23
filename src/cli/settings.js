@@ -13,7 +13,9 @@ export async function promptForAISettings() {
   let ollamaAvailable = false;
   try {
     ollamaAvailable = await aiServiceAvailable({provider: 'ollama'});
-  } catch {}
+  } catch {
+    // Ollama not available - keep ollamaAvailable as false
+  }
 
   const response = await prompts([
     {

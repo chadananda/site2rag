@@ -1,7 +1,6 @@
 import {describe, it, expect, beforeEach} from 'vitest';
 import {SitemapService} from '../../src/services/sitemap_service.js';
 import {FetchService} from '../../src/services/fetch_service.js';
-import logger from '../../src/services/logger_service.js';
 
 describe('Real Site Sitemap Discovery', () => {
   let sitemapService;

@@ -38,7 +38,7 @@ describe('CrawlService', () => {
       fetchRobotsTxt: vi.fn().mockResolvedValue(undefined),
       canCrawl: vi.fn().mockResolvedValue(true),
       abortAll: vi.fn(),
-      fetchUrl: vi.fn().mockImplementation(async (url, etag, lastModified) => {
+      fetchUrl: vi.fn().mockImplementation(async () => {
         return {
           response: {
             ok: true,
@@ -50,8 +50,7 @@ describe('CrawlService', () => {
             text: async () => '<html><head><title>Test Page</title></head><body><main>Test content</main></body></html>'
           }
         };
-      }),
-      abortAll: vi.fn()
+      })
     };
 
     mockContentService = {
