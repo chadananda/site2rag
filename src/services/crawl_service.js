@@ -384,6 +384,7 @@ export class CrawlService {
    * @param {number} depth - Current crawl depth
    */
   async crawl(url, depth = 0) {
+    
     // Normalize URL
     let normalizedUrl = url;
     if (this.urlService && this.urlService.normalizeUrl) {
@@ -715,18 +716,10 @@ export class CrawlService {
     // Ensure URL is a string, not an object
     const urlString = typeof normalizedUrl === 'object' ? normalizedUrl.href : normalizedUrl;
     
-    // Mark URL as visited
+    // Mark URL as visited and remove from queue
     this.visitedUrls.add(normalizedUrl);
     this.queuedUrls.delete(normalizedUrl); // Remove from queue if it was there
-    this.foundUrls.push(normalizedUrl);
-    logger.crawl(`Added URL to found list: ${normalizedUrl} (${this.foundUrls.length}/${this.maxPages})`);
-    this.totalUrlsMapped++;
-    if (this.totalUrlsMapped % 100 === 0) {
-      logger.crawl(`Total URLs mapped so far: ${this.totalUrlsMapped}`);
-    }
-    
-    // Mark download as complete in progress service
-    this.progressService.completeUrl(normalizedUrl, 'success');
+    // Note: URL will be added to foundUrls only after successful processing
     
     // Update crawl stats
     this.progressService.updateStats({
@@ -816,14 +809,95 @@ export class CrawlService {
         return;
       }
       
-      // Skip non-OK responses
+      // Handle non-OK responses (like 404) - save content for analysis
       if (!response.ok) {
+        // Log actual errors only, not redirects (redirects are handled transparently)
         logger.error(`Error fetching ${normalizedUrl}: ${response.status} ${response.statusText}`);
-        // Update status in page data
-        this.crawlStateService.upsertPage(urlString, {
+        
+        // Get error page content to save it
+        const errorHtml = await response.text();
+        const contentHash = this.calculateContentHash(errorHtml);
+        
+        // Create error page metadata
+        const errorMetadata = {
           status: response.status,
-          last_crawled: new Date().toISOString()
-        });
+          statusText: response.statusText,
+          originalUrl: normalizedUrl,
+          finalUrl: response.url,
+          redirected: response.url !== normalizedUrl,
+          crawled_at: new Date().toISOString(),
+          error: true
+        };
+        
+        // Save error page content for debugging/analysis
+        try {
+          const markdownContent = this.markdownService.toMarkdown(errorHtml, normalizedUrl);
+          
+          // Add error metadata to markdown content
+          const metadataString = Object.entries(errorMetadata)
+            .map(([key, value]) => `${key}: ${JSON.stringify(value)}`)
+            .join('\n');
+          
+          const fullMarkdownContent = `---
+${metadataString}
+---
+
+${markdownContent}`;
+          
+          // Generate error filename based on URL
+          const urlObj = new URL(normalizedUrl);
+          const urlPath = urlObj.pathname || '/';
+          let filename;
+          
+          if (this.options.flat) {
+            filename = this.fileService.generateFlatFilename(urlPath);
+          } else {
+            filename = urlPath === '/' ? 'index.md' : `${urlPath.replace(/^\/+/, '').replace(/\/+/g, '/')}.md`;
+          }
+          
+          const errorFilename = filename.replace(/\.md$/, '.error.md');
+          
+          // Save error content to file directly
+          let filepath;
+          try {
+            const outputDir = this.options.outputDir || './output';
+            
+            // Ensure output directory exists
+            if (!fs.existsSync(outputDir)) {
+              fs.mkdirSync(outputDir, { recursive: true });
+            }
+            
+            filepath = path.join(outputDir, errorFilename);
+            await fs.promises.writeFile(filepath, fullMarkdownContent, 'utf8');
+          } catch (fsError) {
+            logger.error(`File system save failed: ${fsError.message}`);
+            throw fsError;
+          }
+          
+          logger.info(`Saved error page content to: ${errorFilename} (status: ${response.status})`);
+          
+          // Update database with error status and file path
+          this.crawlStateService.upsertPage(urlString, {
+            status: response.status,
+            final_url: response.url,
+            file_path: filepath,
+            content_hash: contentHash,
+            last_crawled: new Date().toISOString(),
+            error: true
+          });
+          
+        } catch (saveError) {
+          logger.error(`Failed to save error page content: ${saveError.message}`);
+          
+          // Update status in page data without file path
+          this.crawlStateService.upsertPage(urlString, {
+            status: response.status,
+            final_url: response.url,
+            last_crawled: new Date().toISOString(),
+            error: true
+          });
+        }
+        
         return;
       }
       
@@ -1132,6 +1206,50 @@ export class CrawlService {
           file_path: filePath || null
         });
       }
+      
+      // Successfully processed the page - add to found URLs list
+      this.foundUrls.push(normalizedUrl);
+      logger.crawl(`Added URL to found list: ${normalizedUrl} (${this.foundUrls.length}/${this.maxPages})`);
+      this.totalUrlsMapped++;
+      if (this.totalUrlsMapped % 100 === 0) {
+        logger.crawl(`Total URLs mapped so far: ${this.totalUrlsMapped}`);
+      }
+      
+      // Context enhancement integration - process in background (non-blocking)
+      if (this.options.aiConfig && filePath && title) {
+        // Track that AI enhancement is starting
+        this.progressService.trackAIEnhancement(normalizedUrl, 'pending');
+        
+        // Start AI enhancement in background - don't await!
+        import('../context.js').then(async ({ enhanceSinglePage }) => {
+          const db = this.contentService?.db;
+          
+          if (db && this.options.aiConfig.provider) {
+            try {
+              // Process enhancement asynchronously
+              const enhanceResult = await enhanceSinglePage(normalizedUrl, filePath, this.options.aiConfig, db);
+              
+              if (enhanceResult && enhanceResult.success !== false) {
+                logger.crawl(`[CONTEXT] ✓ Enhanced: ${normalizedUrl}`, true);
+                this.progressService.trackAIEnhancement(normalizedUrl, 'success');
+              } else {
+                logger.crawl(`[CONTEXT] ⚠️  Enhancement failed: ${normalizedUrl}`, true);
+                this.progressService.trackAIEnhancement(normalizedUrl, 'failed');
+              }
+            } catch (contextError) {
+              // Context enhancement failure should not break the crawl
+              logger.warn(`[CONTEXT] Enhancement failed for ${normalizedUrl}: ${contextError.message}`);
+              this.progressService.trackAIEnhancement(normalizedUrl, 'failed');
+            }
+          }
+        }).catch(importError => {
+          logger.warn(`[CONTEXT] Failed to import enhancement module: ${importError.message}`);
+          this.progressService.trackAIEnhancement(normalizedUrl, 'failed');
+        });
+      }
+      
+      // Mark download as complete in progress service
+      this.progressService.completeUrl(normalizedUrl, 'success');
       
       // Store links for future reference
       let links_to_crawl = [];

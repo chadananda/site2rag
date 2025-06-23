@@ -61,7 +61,10 @@ export function initDbSchema(db) {
       content_status TEXT DEFAULT 'raw',            -- 'raw', 'contexted', etc.
       is_pdf INTEGER DEFAULT 0,                     -- 1 if PDF, 0 otherwise
       pdf_conversion_status TEXT DEFAULT NULL,      -- 'pending', 'converted', 'failed'
-      pdf_md_path TEXT DEFAULT NULL                 -- path to converted markdown
+      pdf_md_path TEXT DEFAULT NULL,                -- path to converted markdown
+      context_attempts INTEGER DEFAULT 0,           -- number of context enhancement attempts
+      last_context_attempt TEXT DEFAULT NULL,       -- timestamp of last context attempt
+      context_error TEXT DEFAULT NULL               -- last context enhancement error
     );
     CREATE TABLE IF NOT EXISTS assets (
       url TEXT PRIMARY KEY,
@@ -77,6 +80,17 @@ export function initDbSchema(db) {
       notes TEXT
     );
   `);
+  
+  // Add context tracking columns to existing databases
+  try {
+    db.exec(`
+      ALTER TABLE pages ADD COLUMN context_attempts INTEGER DEFAULT 0;
+      ALTER TABLE pages ADD COLUMN last_context_attempt TEXT DEFAULT NULL;
+      ALTER TABLE pages ADD COLUMN context_error TEXT DEFAULT NULL;
+    `);
+  } catch (e) {
+    // Columns already exist, which is fine
+  }
 }
 
 /**
@@ -251,6 +265,7 @@ export class CrawlDB {
    * @param {Object} page - Page data
    */
   upsertPage(page) {
+    
     // Ensure optional fields are always present for SQL binding
     if (!('title' in page)) page.title = null;
     if (!('file_path' in page)) page.file_path = null;
@@ -273,9 +288,18 @@ export class CrawlDB {
         file_path=excluded.file_path;
     `);
     
-    stmt.run(page);
+    try {
+      const result = stmt.run(page);
+      // Only log results in test mode
+      if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+        console.log('[TRACE] SQL execution result:', result);
+      }
+    } catch (err) {
+      logger.error(`SQL execution error: ${err.message}`);
+      throw err;
+    }
     
-    // Debug: Confirm page is now in DB
+    // Debug: Confirm page is now in DB (test mode only)
     if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
       const check = this.getPage(page.url);
       logger.info('[DB][upsertPage] DB now has:', JSON.stringify(check));
@@ -337,6 +361,18 @@ export class CrawlDB {
     if (!sessionValid) {
       logger.error('[CrawlDB] Session DB is invalid, cannot finalize');
       return false;
+    }
+    
+    // Check content of session DB before finalization (test mode only)
+    if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
+      try {
+        const tempDb = new Database(this.paths.session);
+        const count = tempDb.prepare('SELECT COUNT(*) as count FROM pages').get();
+        console.log('[TRACE] Session DB page count before finalization:', count.count);
+        tempDb.close();
+      } catch (err) {
+        console.log('[TRACE] Error checking session DB content:', err.message);
+      }
     }
     
     // Ensure parent directory exists for all files
