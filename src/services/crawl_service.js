@@ -786,8 +786,8 @@ export class CrawlService {
   async crawlFromSitemap(startUrl) {
     logger.info(`Using sitemap-first crawling with language filter: ${this.urlFilter.includeLanguage}`);
     
-    // Always crawl the home page first
-    await this.crawlSingleUrl(startUrl, 0);
+    // Always process the home page first
+    await this.processUrlDirectly(startUrl);
     
     // Get ALL unprocessed URLs from sitemap database (we'll filter them ourselves)
     const filters = {
@@ -803,15 +803,15 @@ export class CrawlService {
     const validUrls = allSitemapUrls.filter(sitemapUrl => this.urlFilter.shouldCrawlUrl(sitemapUrl.url));
     logger.info(`After path/pattern filtering: ${validUrls.length} valid URLs to crawl`);
     
-    // Crawl each valid URL
+    // Process each valid URL directly
     for (const sitemapUrl of validUrls) {
       if (this.foundUrls.length >= this.maxPages) {
         logger.info(`Reached page limit of ${this.maxPages}`);
         break;
       }
       
-      // Crawl the URL
-      await this.crawlSingleUrl(sitemapUrl.url, 1);
+      // Process the URL directly
+      await this.processUrlDirectly(sitemapUrl.url);
       
       // Mark as processed in sitemap database
       this.contentService.db.markSitemapUrlProcessed(sitemapUrl.url);
@@ -826,11 +826,10 @@ export class CrawlService {
   }
   
   /**
-   * Crawl a single URL without recursive link following
-   * @param {string} url - URL to crawl
-   * @param {number} depth - Current crawl depth
+   * Process a single URL directly without crawl complexity
+   * @param {string} url - URL to process
    */
-  async crawlSingleUrl(url, depth = 0) {
+  async processUrlDirectly(url) {
     // Normalize URL
     let normalizedUrl = url;
     if (this.urlService && this.urlService.normalizeUrl) {
@@ -845,19 +844,134 @@ export class CrawlService {
     // Mark as visited to prevent duplicate processing
     this.visitedUrls.add(normalizedUrl);
 
-    // Temporarily disable link following and sitemap-first mode for single URL processing
-    const originalMaxDepth = this.maxDepth;
-    const originalSitemapFirst = this._sitemapFirstMode;
-    this.maxDepth = depth; // Set maxDepth to current depth to prevent following links
-    this._sitemapFirstMode = false; // Disable sitemap-first to prevent infinite recursion
-    
+    // Add to active downloads in progress service
+    this.progressService.addActiveUrl(normalizedUrl);
+
     try {
-      // Process the URL using existing crawl logic but without following links
-      await this.crawl(normalizedUrl, depth);
-    } finally {
-      // Restore original settings
-      this.maxDepth = originalMaxDepth;
-      this._sitemapFirstMode = originalSitemapFirst;
+      logger.crawl(`Processing URL directly: ${normalizedUrl}`);
+
+      // Check if we've reached the maximum number of pages
+      if (this.foundUrls.length >= this.maxPages) {
+        logger.crawl(`Reached max pages limit: ${this.foundUrls.length}/${this.maxPages}`, true);
+        return;
+      }
+
+      // Prepare headers for request
+      const headers = {'User-Agent': 'site2rag-crawler'};
+
+      // Fetch the URL
+      logger.crawl(`Fetching ${normalizedUrl}`);
+      const response = await this.fetchService.fetchUrl(normalizedUrl, headers);
+
+      // Handle non-OK responses
+      if (!response.ok) {
+        logger.error(`Error fetching ${normalizedUrl}: ${response.status} ${response.statusText}`);
+        this.progressService.completeUrl(normalizedUrl, 'error');
+        return;
+      }
+
+      // Get HTML content
+      const html = await response.text();
+
+      // Apply content-level filtering (language check)
+      if (!this.urlFilter.shouldProcessContent(html, normalizedUrl)) {
+        logger.info(`Content filtered out: ${normalizedUrl}`);
+        this.progressService.completeUrl(normalizedUrl, 'filtered');
+        return;
+      }
+
+      // Process HTML content
+      const {$, main, links: allLinks, removedBlocks} = await this.contentService.processHtml(html, normalizedUrl);
+
+      // Extract metadata from HTML
+      const metadata = this.contentService.extractMetadata($);
+      const title = metadata.title;
+
+      // Convert to markdown
+      const markdown = this.markdownService.toMarkdown(main, normalizedUrl);
+
+      // Create enhanced metadata with all available information
+      const enhancedMetadata = {
+        ...metadata,
+        url: normalizedUrl,
+        crawled_at: new Date().toISOString(),
+        language: this.urlFilter.includeLanguage || 'en'
+      };
+
+      // Generate frontmatter
+      const frontmatter = Object.entries(enhancedMetadata)
+        .filter(([key, value]) => value !== null && value !== undefined && value !== '')
+        .map(([key, value]) => `${key}: ${typeof value === 'string' ? JSON.stringify(value) : value}`)
+        .join('\n');
+
+      const fullMarkdown = `---\n${frontmatter}\n---\n\n${markdown}`;
+
+      // Save to file
+      const outputPath = this.options.outputPath || this.options.outputDir || './output';
+      let filePath;
+
+      if (this.options.flat) {
+        // Flat structure - all files in root
+        const urlObj = new URL(normalizedUrl);
+        const filename = urlObj.pathname === '/' ? 'index.md' : 
+          `${urlObj.pathname.split('/').filter(Boolean).join('-')}.md`;
+        filePath = path.join(outputPath, filename);
+      } else {
+        // Directory structure matching URL path
+        const urlObj = new URL(normalizedUrl);
+        const pathSegments = urlObj.pathname.split('/').filter(Boolean);
+        if (pathSegments.length === 0) {
+          filePath = path.join(outputPath, 'index.md');
+        } else {
+          const dirPath = path.join(outputPath, ...pathSegments.slice(0, -1));
+          const filename = `${pathSegments[pathSegments.length - 1]}.md`;
+          if (!fs.existsSync(dirPath)) {
+            fs.mkdirSync(dirPath, {recursive: true});
+          }
+          filePath = path.join(dirPath, filename);
+        }
+      }
+
+      // Ensure output directory exists
+      const dir = path.dirname(filePath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, {recursive: true});
+      }
+
+      // Write the markdown file
+      fs.writeFileSync(filePath, fullMarkdown, 'utf8');
+      logger.crawl(`Saved: ${filePath}`);
+
+      // Calculate content hash
+      const contentHash = this.calculateContentHash(markdown);
+
+      // Save page data to database
+      const pageData = {
+        url: normalizedUrl,
+        etag: response.headers.get('etag') || null,
+        last_modified: response.headers.get('last-modified') || null,
+        content_hash: contentHash,
+        status: response.status,
+        last_crawled: new Date().toISOString(),
+        title: title || '',
+        file_path: filePath,
+        language: this.urlFilter.includeLanguage || null
+      };
+
+      if (this.contentService?.db) {
+        this.contentService.db.upsertPage(pageData);
+      }
+
+      // Add to found URLs list
+      this.foundUrls.push(normalizedUrl);
+      logger.crawl(`Added URL to found list: ${normalizedUrl} (${this.foundUrls.length}/${this.maxPages})`);
+
+      // Mark download as complete
+      this.progressService.completeUrl(normalizedUrl, 'success');
+
+    } catch (err) {
+      logger.error(`Error processing ${normalizedUrl}: ${err.message}`);
+      this.progressService.completeUrl(normalizedUrl, 'error');
     }
   }
 

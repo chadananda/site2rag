@@ -86,7 +86,8 @@
       "Bash(npm run cleanup:debug:*)",
       "Bash(npm run fix:lint)",
       "Bash(curl:*)",
-      "WebFetch(domain:bahai-education.org)"
+      "WebFetch(domain:bahai-education.org)",
+      "Bash(echo)"
     ],
     "deny": []
   }
