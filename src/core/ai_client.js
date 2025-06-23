@@ -121,12 +121,10 @@ async function makeAICall(prompt, aiConfig) {
     const model = aiConfig.model || process.env.OLLAMA_MODEL || 'llama3.2:latest';
     const host = aiConfig.host || process.env.OLLAMA_HOST || 'http://localhost:11434';
 
-    if (process.env.NODE_ENV === 'test') {
-      console.log(`[AI DEBUG] Ollama - Model: ${model}, Host: ${host}`);
-    }
+    debugLogger.ai(`Ollama - Model: ${model}, Host: ${host}`);
 
     // Create timeout promise
-    const timeoutMs = aiConfig.timeout || 20000; // 20 second default timeout
+    const timeoutMs = aiConfig.timeout || 30000; // 30 second default timeout for Ollama
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error(`AI call timed out after ${timeoutMs}ms`)), timeoutMs);
     });
@@ -143,10 +141,8 @@ async function makeAICall(prompt, aiConfig) {
       }
     };
 
-    if (process.env.NODE_ENV === 'test') {
-      console.log(`[AI DEBUG] Ollama - Request URL: ${host}/api/generate`);
-      console.log(`[AI DEBUG] Ollama - Request body:`, JSON.stringify(requestBody, null, 2));
-    }
+    debugLogger.ai(`Ollama - Request URL: ${host}/api/generate`);
+    debugLogger.ai(`Ollama - Request body: ${JSON.stringify(requestBody, null, 2)}`);
 
     // Create the fetch promise
     const fetchPromise = fetch(`${host}/api/generate`, {
@@ -161,9 +157,7 @@ async function makeAICall(prompt, aiConfig) {
     // Race between fetch and timeout
     const response = await Promise.race([fetchPromise, timeoutPromise]);
 
-    if (process.env.NODE_ENV === 'test') {
-      console.log(`[AI DEBUG] Ollama - Response status: ${response.status}`);
-    }
+    debugLogger.ai(`Ollama - Response status: ${response.status}`);
 
     if (!response.ok) {
       const errorBody = await response.text();
@@ -173,10 +167,8 @@ async function makeAICall(prompt, aiConfig) {
     }
 
     const data = await response.json();
-    if (process.env.NODE_ENV === 'test') {
-      console.log(`[AI DEBUG] Ollama - Response data keys:`, Object.keys(data));
-      console.log(`[AI DEBUG] Ollama - Response length: ${(data.response || '').length}`);
-    }
+    debugLogger.ai(`Ollama - Response data keys: ${Object.keys(data).join(', ')}`);
+    debugLogger.ai(`Ollama - Response length: ${(data.response || '').length}`);
     
     if (!data.response) {
       console.error(`[AI ERROR] Ollama - No response field in data:`, data);
@@ -461,6 +453,7 @@ export async function callAI(prompt, schema, aiConfig) {
         
         if (e.message.includes('timed out')) {
           console.error(`[AI ERROR] Request timed out - check network/model availability`);
+          console.error(`[AI ERROR] Timeout occurred after ${aiConfig.timeout || 30000}ms for prompt of ${prompt.length} chars`);
         }
         
         if (e.message.includes('API request failed')) {
@@ -480,6 +473,7 @@ export async function callAI(prompt, schema, aiConfig) {
     }
     
     console.error(`[AI FATAL] Returning null after all attempts failed`);
+    console.error(`[AI FATAL] Last error was: ${lastError?.message || 'Unknown error'}`);
     return null;
   });
 }

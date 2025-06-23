@@ -1313,7 +1313,7 @@ export async function enhanceBlocksDirectly(blocks, metadata, aiConfig, options 
   const batches = createParagraphBatches(blockIndices, blocks);
   
   if (isTestMode) {
-    console.log(`[DIRECT_PROCESSING] Created ${batches.length} word-based batches for ${blocks.length} blocks`);
+    debugLogger.direct(`Created ${batches.length} word-based batches for ${blocks.length} blocks`);
   }
   
   const processedBlocks = new Array(blocks.length);
@@ -1355,15 +1355,15 @@ IMPORTANT: All context additions must be justified by information found in this 
   // Set cached context once for the entire session
   session.setCachedContext(staticContext);
   
-  console.log(`[DIRECT_PROCESSING] Set cached context: ${staticContext.length} chars`);
-  console.log(`[DIRECT_PROCESSING] Using session caching for ${batches.length} batches`);
+  debugLogger.direct(`Set cached context: ${staticContext.length} chars`);
+  debugLogger.direct(`Using session caching for ${batches.length} batches`);
 
   // Process each batch sequentially using cached session
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
     const batch = batches[batchIndex];
     
     if (isTestMode) {
-      console.log(`[DIRECT_PROCESSING] Processing batch ${batchIndex + 1}/${batches.length} (${batch.blocks.length} paragraphs, ~${batch.wordCount} words)`);
+      debugLogger.direct(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.blocks.length} paragraphs, ~${batch.wordCount} words)`);
     }
     
     try {
@@ -1429,7 +1429,7 @@ IMPORTANT: All context additions must be justified by information found in this 
   closeAISession(sessionId);
   
   if (isTestMode) {
-    console.log(`[DIRECT_PROCESSING] Completed processing, closed session ${sessionId}`);
+    debugLogger.direct(`Completed processing, closed session ${sessionId}`);
   }
   
   return processedBlocks.filter(block => block !== undefined);
@@ -1461,14 +1461,14 @@ export async function enhanceBlocksWithCaching(blocks, metadata, aiConfig, optio
   
   // Check if entire document fits in context window (with 80% safety margin)
   const safeWindowSize = windowSize * 0.8;
-  console.log(`[CONTEXT] Document size: ${totalWords} words, Safe window: ${safeWindowSize} words`);
+  debugLogger.context(`Document size: ${totalWords} words, Safe window: ${safeWindowSize} words`);
   
   if (totalWords < safeWindowSize) {
-    console.log(`[CONTEXT] Document fits entirely in context window - using DIRECT processing with caching`);
+    debugLogger.context(`Document fits entirely in context window - using DIRECT processing with caching`);
     return await enhanceBlocksDirectly(blocks, metadata, aiConfig, options, callAIImpl);
   }
   
-  console.log(`[CONTEXT] Document too large - using sliding window processing`);
+  debugLogger.context(`Document too large - using sliding window processing`);
   
   if (isTestMode) {
     console.log(`[SLIDING_CACHE] Processing ${blocks.length} blocks with optimal sliding cached context windows`);
@@ -2081,12 +2081,35 @@ export function optimizeForTokenLimit(components, tokenLimit) {
 }
 
 /**
+ * Create a batch-specific prompt for keyed blocks (without full context)
+ * @param {Object} keyedBlocks - Keyed blocks to process
+ * @returns {string} Batch prompt
+ */
+function createKeyedBatchPrompt(keyedBlocks) {
+  const blockEntries = Object.entries(keyedBlocks);
+  
+  return `## Blocks to Enhance
+${blockEntries.map(([key, text]) => `**${key}:**\n${text}`).join('\n\n')}
+
+## Response Format
+Return exactly this JSON structure with same keys:
+{
+  "enhanced_blocks": {
+    "${blockEntries[0][0]}": "enhanced text with [[context]] insertions",
+    ...
+  }
+}
+
+Enhance each block using the document context. Focus on factual clarifications like vague references ("this", "that", "we") that need disambiguation.`;
+}
+
+/**
  * Create keyed object mapping for blocks with minimum character filtering
  * @param {Array} blocks - All blocks with {text, originalIndex}
  * @param {number} minCharacters - Minimum characters for inclusion
  * @returns {Object} Keyed object with index -> text mapping
  */
-function createKeyedBlockMapping(blocks, minCharacters = 80) {
+function createKeyedBlockMapping(blocks, minCharacters = 100) {
   const keyedBlocks = {};
   const indexMapping = {}; // track original indices
 
@@ -2198,6 +2221,37 @@ async function enhanceKeyedBlocksWithContext(keyedBlocks, indexMapping, metadata
   const batches = createOptimalBatches(keyedBlocks, aiConfig);
   debugLogger.keyed(`Split into ${batches.length} batches for processing`);
 
+  // Create AI session for caching
+  const sessionId = `keyed-enhancement-${Date.now()}`;
+  const session = getAISession(sessionId, aiConfig);
+  
+  // Set cached context with full document and instructions
+  const fullContext = Object.values(keyedBlocks).join('\n\n');
+  const cachedContext = `# KEYED CONTEXT DISAMBIGUATION
+
+## Document Metadata
+Title: ${metadata.title || 'Unknown'}
+URL: ${metadata.url || 'Unknown'}
+
+## Full Document Context
+${fullContext}
+
+## Task
+Enhance each block below by adding factual context clarifications using ONLY information found in the document context above.
+
+## Important Guidelines
+1. **Document-Only Context**: Only add context that appears elsewhere in this document
+2. **Factual Focus**: Prioritize factual disambiguation over grammatical clarifications  
+3. **Avoid Redundancy**: Don't repeat information already clear in the block
+4. **[[...]] Format**: Use [[...]] delimiters for all context additions
+5. **Preserve Original**: Keep all original text exactly as is, only add [[...]] insertions
+6. **No Parentheses**: Never use parentheses for clarifications - only [[...]]
+
+`;
+  
+  session.setCachedContext(cachedContext);
+  debugLogger.keyed(`Set cached context: ${cachedContext.length} chars`);
+
   const allEnhancedBlocks = {};
 
   try {
@@ -2206,11 +2260,11 @@ async function enhanceKeyedBlocksWithContext(keyedBlocks, indexMapping, metadata
       const batch = batches[i];
       debugLogger.keyed(`Processing batch ${i + 1}/${batches.length} (${batch.wordCount} words, ${batch.blockCount} blocks)`);
 
-      // Create keyed enhancement prompt for this batch
-      const keyedPrompt = createKeyedEnhancementPrompt(batch.blocks, metadata);
+      // Create batch-specific prompt (only the blocks to process)
+      const batchPrompt = createKeyedBatchPrompt(batch.blocks);
 
-      // Call AI to enhance this batch
-      const result = await callAI(keyedPrompt, KeyedEnhancementSchema, aiConfig);
+      // Use session to call AI with cached context
+      const result = await session.call(batchPrompt, KeyedEnhancementSchema);
 
       if (result && result.enhanced_blocks) {
         Object.assign(allEnhancedBlocks, result.enhanced_blocks);
@@ -2228,22 +2282,30 @@ async function enhanceKeyedBlocksWithContext(keyedBlocks, indexMapping, metadata
 
       for (const [key, enhancedText] of Object.entries(result.enhanced_blocks)) {
         if (keyedBlocks[key]) {
-          // Validate word-for-word match after removing [[...]] insertions
-          if (validateWordForWordMatch(keyedBlocks[key], enhancedText)) {
-            validatedBlocks[key] = enhancedText;
+          // Check if the block has any context insertions
+          const hasInsertions = enhancedText.includes('[[') && enhancedText.includes(']]');
+          
+          if (hasInsertions) {
+            // Only validate blocks with context insertions
+            if (validateWordForWordMatch(keyedBlocks[key], enhancedText)) {
+              validatedBlocks[key] = enhancedText;
 
-            // Log insertions in test mode
-            if (options.test) {
-              const insertions = extractContextInsertions(enhancedText);
-              if (insertions.length > 0) {
-                console.log(`[TEST_INSERTIONS] ${key} received ${insertions.length} context insertions:`);
-                insertions.forEach((insertion, idx) => {
-                  console.log(`  ${idx + 1}. [[${insertion}]]`);
-                });
+              // Log insertions in test mode
+              if (options.test) {
+                const insertions = extractContextInsertions(enhancedText);
+                if (insertions.length > 0) {
+                  console.log(`[TEST_INSERTIONS] ${key} received ${insertions.length} context insertions:`);
+                  insertions.forEach((insertion, idx) => {
+                    console.log(`  ${idx + 1}. [[${insertion}]]`);
+                  });
+                }
               }
+            } else {
+              debugLogger.validation(`${key} failed word-for-word validation, using original`);
+              validatedBlocks[key] = keyedBlocks[key];
             }
           } else {
-            console.log(`[VALIDATION] ${key} failed word-for-word validation, using original`);
+            // No insertions, use original block (no need to validate)
             validatedBlocks[key] = keyedBlocks[key];
           }
         }
@@ -2272,64 +2334,24 @@ async function enhanceKeyedBlocksWithContext(keyedBlocks, indexMapping, metadata
       };
     }
   } catch (error) {
-    if (process.env.NODE_ENV === 'test') {
-      console.log(`[KEYED] Error processing blocks: ${error.message}`);
-    }
+    debugLogger.keyed(`Error processing blocks: ${error.message}`);
     return {
       enhancedBlocks: keyedBlocks,
       indexMapping: indexMapping,
       processingTime: 0
     };
+  } finally {
+    // Always close the session to clean up
+    if (session) {
+      const metrics = closeAISession(sessionId);
+      if (metrics) {
+        debugLogger.keyed(`Session closed. Cache hit rate: ${metrics.hitRate}%`);
+      }
+    }
   }
 }
 
-/**
- * Create enhancement prompt for keyed blocks
- * @param {Object} keyedBlocks - Keyed block mapping
- * @param {Object} metadata - Page metadata
- * @returns {string} AI prompt for keyed enhancement
- */
-function createKeyedEnhancementPrompt(keyedBlocks, metadata) {
-  // Create full document context from all blocks
-  const fullContext = Object.values(keyedBlocks).join('\n\n');
-
-  return `# KEYED CONTEXT DISAMBIGUATION
-
-## Document Metadata
-Title: ${metadata.title || 'Unknown'}
-URL: ${metadata.url || 'Unknown'}
-
-## Full Document Context
-${fullContext}
-
-## Task
-Enhance each block below by adding factual context clarifications using ONLY information found in the document context above.
-
-## Important Guidelines
-1. **Document-Only Context**: Only add context that appears elsewhere in this document
-2. **Factual Focus**: Prioritize factual disambiguation over grammatical clarifications  
-3. **Avoid Redundancy**: Don't repeat information already clear in the block
-4. **[[...]] Format**: Use [[...]] delimiters for all context additions
-5. **Preserve Original**: Keep all original text exactly as is, only add [[...]] insertions
-6. **No Parentheses**: Never use parentheses for clarifications - only [[...]]
-
-## Blocks to Enhance
-${Object.entries(keyedBlocks)
-  .map(([key, text]) => `**${key}:**\n${text}`)
-  .join('\n\n')}
-
-## Response Format
-Return exactly this JSON structure with same keys:
-{
-  "enhanced_blocks": {
-${Object.keys(keyedBlocks)
-  .map(key => `    "${key}": "enhanced text with [[context]] insertions"`)
-  .join(',\n')}
-  }
-}
-
-Enhance each block using the document context. Focus on factual clarifications like vague references ("this", "that", "we") that need disambiguation.`;
-}
+// Function removed - now using session caching approach in enhanceKeyedBlocksWithContext
 
 /**
  * Validate that enhanced text matches original word-for-word after removing [[...]] insertions
@@ -2425,25 +2447,25 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
       .map((text, index) => ({text, originalIndex: index}))
       .filter(block => block.text.trim());
 
-    // Filter out blocks with less than 80 characters of significant content
+    // Filter out blocks with less than 100 characters of significant content
     const significantBlocks = allBlocks.filter(block => {
       const textContent = block.text.replace(/[#*`\[\]()\-_]/g, '').trim();
-      return textContent.length >= 80;
+      return textContent.length >= 100;
     });
 
     debugLogger.batching(`Original blocks: ${allBlocks.length}, Significant blocks: ${significantBlocks.length}`);
 
     if (significantBlocks.length === 0) {
-      throw new Error('No significant content blocks found (all blocks < 80 characters)');
+      throw new Error('No significant content blocks found (all blocks < 100 characters)');
     }
 
     // Create keyed object mapping for significant blocks
-    const {keyedBlocks, indexMapping} = createKeyedBlockMapping(significantBlocks, 80);
+    const {keyedBlocks, indexMapping} = createKeyedBlockMapping(significantBlocks, 100);
 
     debugLogger.keyed(`Created keyed mapping for ${Object.keys(keyedBlocks).length} blocks from ${significantBlocks.length} significant blocks`);
 
     if (Object.keys(keyedBlocks).length === 0) {
-      throw new Error('No blocks meet the minimum character requirement (80 chars)');
+      throw new Error('No blocks meet the minimum character requirement (100 chars)');
     }
 
     // Get page metadata from database
