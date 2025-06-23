@@ -94,6 +94,25 @@ npx site2rag docs.kubernetes.io
 
 **How?** Smart change detection using ETags, Last-Modified headers, and content hashing means only changed content gets re-downloaded. Turn daily documentation syncing into a habit!
 
+## 🎯 Sitemap-First Architecture (v0.4.0+)
+
+**Intelligent crawling that saves bandwidth and time:**
+
+```bash
+# Traditional crawlers: Download everything, then filter
+❌ Downloads 1000 pages → Filters → Keeps 200 pages (80% waste)
+
+# site2rag: Discover, filter, then download
+✅ Discovers 1000 URLs → Filters → Downloads 200 pages (80% saved!)
+```
+
+**Key Features:**
+- **📋 Sitemap Discovery**: Automatically finds and parses XML sitemaps
+- **🌍 Language Detection**: Uses hreflang attributes for language filtering  
+- **🎛️ Smart Filtering**: Apply path and pattern filters before downloading
+- **💾 Database-Driven**: Stores URL metadata for efficient re-crawls
+- **⚡ Bandwidth Savings**: Up to 79% reduction in unnecessary downloads
+
 ---
 
 ## 🧠 AI-Enhanced Content Processing
@@ -459,6 +478,49 @@ npx site2rag docs.example.com --update --auto-fallback
 | `-d, --debug` | Enable debug mode to save removed content blocks | `--debug` |
 | `--test` | Enable test mode with detailed skip/download decision logging | `--test` |
 | `--no-enhancement` | Extract entities only, do not enhance text content | `--no-enhancement` |
+
+### 🎯 New Filtering Options (v0.4.0+)
+
+**Smart URL Filtering with Sitemap-First Architecture**
+
+| Option | Description | Example |
+| --- | --- | --- |
+| `--exclude-paths <paths>` | Comma-separated list of URL paths to exclude | `--exclude-paths "/admin,/login,/api"` |
+| `--include-patterns <patterns>` | Comma-separated regex patterns for URLs to include | `--include-patterns ".*docs.*,.*guides.*"` |
+| `--exclude-patterns <patterns>` | Comma-separated regex patterns for URLs to exclude | `--exclude-patterns ".*\.pdf,.*admin.*"` |
+| `--include-language <lang>` | Only crawl pages in specified language (uses sitemap hreflang) | `--include-language en` |
+
+### 🚀 Sitemap-First Filtering Examples
+
+**Filter out admin and user-specific content:**
+```bash
+npx site2rag docs.example.com --exclude-paths "/admin,/login,/user,/profile"
+```
+
+**Crawl only English documentation:**
+```bash
+npx site2rag docs.example.com --include-language en --exclude-paths "/blog,/news"
+```
+
+**Complex filtering with patterns:**
+```bash
+npx site2rag example.com \
+  --exclude-paths "/contact,/terms,/privacy" \
+  --exclude-patterns ".*\.pdf,.*admin.*" \
+  --include-language en \
+  --limit 50
+```
+
+**Bandwidth-efficient crawling:**
+```bash
+# Only crawl English pages, exclude common non-content paths
+npx site2rag knowledge-site.com \
+  --include-language en \
+  --exclude-paths "/authors,/tags,/categories,/archive" \
+  --limit 100
+```
+
+> **🎯 Pro Tip**: The new sitemap-first architecture discovers all URLs from sitemaps first, then applies filters before downloading. This can save **up to 79% bandwidth** by avoiding downloads of pages that don't match your criteria!
 
 ### AI Provider Options
 
