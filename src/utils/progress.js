@@ -1,10 +1,10 @@
 import cliProgress from 'cli-progress';
 import boxen from 'boxen';
 import chalk from 'chalk';
-import figures from 'figures';
 import figlet from 'figlet';
-import path from 'path';
-import fs from 'fs';
+import {readFileSync} from 'fs';
+import {join, dirname} from 'path';
+import {fileURLToPath} from 'url';
 
 /**
  * Service for displaying crawl progress in the CLI
@@ -12,6 +12,8 @@ import fs from 'fs';
 export class ProgressService {
   constructor(options = {}) {
     this.options = options;
+    // Get package version
+    this.version = this.getPackageVersion();
     this.stats = {
       totalUrls: 0,
       crawledUrls: 0,
@@ -95,6 +97,22 @@ export class ProgressService {
   }
 
   /**
+   * Get package version from package.json
+   * @returns {string} Package version
+   */
+  getPackageVersion() {
+    try {
+      const __filename = fileURLToPath(import.meta.url);
+      const __dirname = dirname(__filename);
+      const packagePath = join(__dirname, '../../package.json');
+      const packageJson = JSON.parse(readFileSync(packagePath, 'utf8'));
+      return packageJson.version;
+    } catch {
+      return '0.4.0'; // fallback version
+    }
+  }
+
+  /**
    * Start the progress display
    * @param {Object} initialStats - Initial statistics
    */
@@ -149,7 +167,8 @@ export class ProgressService {
     );
 
     // Start the progress bar
-    const total = this.stats.totalUrls || 100;
+    // For unlimited crawls (totalUrls <= 0), start with 1 to avoid division errors
+    const total = this.stats.totalUrls > 0 ? this.stats.totalUrls : 1;
     this.multibar.start(total, 0);
 
     // Start the update interval to refresh the progress bar based on real progress
@@ -210,7 +229,7 @@ export class ProgressService {
         chalk.white('Converting web content to AI-ready markdown with intelligent crawling') +
         '\n' +
         chalk.hex('#FF8C00')(
-          `Version 0.1.${chalk.yellow('2')} | https://github.com/chadananda/site${chalk.yellow('2')}rag`
+          `Version ${this.version} | https://github.com/chadananda/site${chalk.yellow('2')}rag`
         ),
       {
         padding: 1,
@@ -226,6 +245,66 @@ export class ProgressService {
 
     // Display the header
     console.log(header);
+  }
+
+  /**
+   * Start AI processing progress bar (second phase)
+   * @param {number} totalDocuments - Total number of documents to process
+   */
+  startProcessing(totalDocuments) {
+    // Clean up download progress bar first
+    if (this.multibar) {
+      this.multibar.stop();
+      this.multibar = null;
+    }
+
+    console.log(chalk.blue(`\nProcessing content with AI enhancement:\n`));
+
+    // Create new progress bar for processing
+    const terminalWidth = process.stdout.columns || 80;
+    const barSize = Math.max(40, terminalWidth - 25);
+
+    this.multibar = new cliProgress.SingleBar(
+      {
+        clearOnComplete: false,
+        hideCursor: true,
+        format: `${chalk.magenta.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}${chalk.gray('/')}${chalk.yellow.bold('{total}')} ${chalk.cyan('{url}')}`,
+        barCompleteChar: '\u2588',
+        barIncompleteChar: '\u2591',
+        barsize: barSize,
+        stopOnComplete: false,
+        forceRedraw: true
+      },
+      cliProgress.Presets.shades_classic
+    );
+
+    this.multibar.start(totalDocuments, 0, { url: 'Starting...' });
+  }
+
+  /**
+   * Update processing progress
+   * @param {number} current - Current document being processed
+   * @param {number} total - Total documents
+   * @param {string} url - Current URL being processed
+   */
+  updateProcessing(current, total, url) {
+    if (this.multibar) {
+      // Truncate long URLs for display
+      const displayUrl = url.length > 50 ? url.substring(0, 47) + '...' : url;
+      this.multibar.update(current, { url: displayUrl });
+    }
+  }
+
+  /**
+   * Complete processing phase
+   */
+  completeProcessing() {
+    if (this.multibar) {
+      this.multibar.stop();
+      this.multibar = null;
+    }
+    
+    console.log(`\n${chalk.green('✓')} ${chalk.green('AI processing completed successfully!')}\n`);
   }
 
   /**
@@ -254,6 +333,12 @@ export class ProgressService {
     }
     if (this.multibar) {
       try {
+        // Update total to match actual crawled count for final display
+        if (this.stats.crawledUrls > 0 && this.stats.totalUrls !== this.stats.crawledUrls) {
+          this.multibar.setTotal ? this.multibar.setTotal(this.stats.crawledUrls) : 
+            this.multibar.total = this.stats.crawledUrls;
+          this.multibar.update(this.stats.crawledUrls);
+        }
         this.multibar.stop();
         if (process.stdout.isTTY) {
           if (process.stdout.clearLine && process.stdout.cursorTo) {
@@ -277,7 +362,7 @@ export class ProgressService {
         `\n✓ Re-crawl completed successfully! ${this.stats.newPages} new, ${this.stats.updatedPages} updated, ${this.stats.unchangedPages} unchanged, ${actualTotal} total pages\n`
       );
     } else {
-      console.log(`\n✓ New crawl completed successfully! Processed ${this.stats.crawledUrls} pages\n`);
+      console.log(`\n✓ Download completed successfully! Downloaded ${this.stats.crawledUrls} pages\n`);
     }
   }
 
@@ -306,7 +391,7 @@ export class ProgressService {
       message = `${checkmark} ${chalk.blue('Re-crawl completed successfully!')} ${newPages}, ${updatedPages}, ${unchangedPages}, ${totalPages} pages`;
     } else {
       const checkmark = chalk.green('✓');
-      message = `${checkmark} ${chalk.green('New crawl completed successfully!')} Processed ${chalk.bold(this.stats.crawledUrls)} pages`;
+      message = `${checkmark} ${chalk.green('Download completed successfully!')} Downloaded ${chalk.bold(this.stats.crawledUrls)} pages`;
     }
 
     // Ensure we're at the start of a clean line
@@ -325,6 +410,7 @@ export class ProgressService {
    */
   updateStats(stats) {
     // Update stats with new values
+    const oldTotalUrls = this.stats.totalUrls;
     if (stats.totalUrls !== undefined) this.stats.totalUrls = stats.totalUrls;
     if (stats.crawledUrls !== undefined) this.stats.crawledUrls = stats.crawledUrls;
     if (stats.queuedUrls !== undefined) this.stats.queuedUrls = stats.queuedUrls;
@@ -357,7 +443,14 @@ export class ProgressService {
     if (stats.aiRateLimited !== undefined) this.stats.aiRateLimited = stats.aiRateLimited;
     if (stats.aiFailed !== undefined) this.stats.aiFailed = stats.aiFailed;
 
-    // Update total progress bar if it exists
+    // Update progress bar total if it changed and we have an active progress bar
+    if (this.multibar && this.stats.totalUrls !== oldTotalUrls && this.stats.totalUrls > 0) {
+      // For SingleBar, we need to update the total differently
+      this.multibar.setTotal ? this.multibar.setTotal(this.stats.totalUrls) : 
+        this.multibar.total = this.stats.totalUrls;
+    }
+    
+    // Update total progress bar if it exists (legacy)
     if (this.totalProgress) {
       this.totalProgress.setTotal(this.stats.totalUrls || 100);
       this.totalProgress.update(this.stats.crawledUrls);
@@ -397,7 +490,7 @@ export class ProgressService {
   simulateUrlProgress(url) {
     if (!this.isActive || !this.activeDownloads.has(url)) return;
 
-    const download = this.activeDownloads.get(url);
+    this.activeDownloads.get(url);
     let progress = 0;
 
     // Create a random interval between 100-300ms for progress updates
@@ -556,7 +649,7 @@ export class ProgressService {
         return `...${path.slice(-37)}`;
       }
       return path || '/';
-    } catch (e) {
+    } catch {
       return url;
     }
   }
@@ -626,7 +719,6 @@ export class ProgressService {
 
     // Calculate AI enhancement percentage
     const aiPercentage = this.getAIProgress();
-    const totalAIProcessed = this.stats.aiEnhanced + this.stats.aiRateLimited + this.stats.aiFailed;
 
     // Build the summary content
     let summaryContent =

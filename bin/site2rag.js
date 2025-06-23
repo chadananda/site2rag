@@ -19,6 +19,7 @@ import {program} from 'commander';
 import figlet from 'figlet';
 import boxen from 'boxen';
 import chalk from 'chalk';
+import packageJson from '../package.json' with { type: 'json' };
 
 /**
  * Detect whether input is a file path or URL
@@ -196,7 +197,7 @@ async function displayHeader() {
     '',
     chalk.red('🔥 ') + chalk.cyan.bold('Website to RAG Knowledge Base Converter ') + chalk.red('🔥'),
     chalk.white('Converting web content to AI-ready markdown with intelligent crawling'),
-    chalk.yellow('Version 0.1.3') + chalk.white(' | ') + chalk.cyan('https://github.com/chadananda/site2rag'),
+    chalk.yellow(`Version ${packageJson.version}`) + chalk.white(' | ') + chalk.cyan('https://github.com/chadananda/site2rag'),
     '',
     aiStatus,
     ''
@@ -449,7 +450,7 @@ program
     const crawlDb = getDB(process.env.SITE2RAG_DB_PATH || dbPath);
     const crawlState = new DefaultCrawlState(crawlDb);
     // Use config settings, allowing CLI flags to override
-    const limit = options.limit ? parseInt(options.limit) : updatedConfig.maxPages || 10;
+    const limit = options.limit ? parseInt(options.limit) : updatedConfig.maxPages || null;
     const useFlat = options.flat !== undefined ? options.flat : updatedConfig.flat;
 
     logger.info(`Creating SiteProcessor with limit=${limit}, flat=${useFlat}`);

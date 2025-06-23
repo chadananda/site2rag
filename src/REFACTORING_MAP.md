@@ -3,9 +3,9 @@
 > **Purpose**: Help Claude Code safely refactor the codebase by understanding dependencies, safety levels, and consolidation opportunities.
 
 ## 📊 Project Stats
-- **Total Files**: 78 JS files
-- **Source Files**: 28 files in `/src`
-- **Current Services**: 7 core services
+- **Total Files**: 79 JS files
+- **Source Files**: 29 files in `/src`
+- **Current Services**: 8 core services
 - **Entry Points**: 2 main entry points
 
 ---
@@ -47,6 +47,11 @@ services/markdown_service.js
 
 services/logger_service.js  
 └── logger.info/error/debug/etc                     [Global logging state]
+
+services/debug_logger.js  
+├── debugLogger.debug(category, message)            [Test/debug mode logging]
+├── debugLogger.batching/keyed/ai/etc(message)      [Category shortcuts]
+└── debugLogger.info/warn/error/success()           [Level-based logging]
 
 utils/ai_utils.js
 ├── aiServiceAvailable() → boolean                  [Network check]

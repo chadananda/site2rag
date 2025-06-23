@@ -589,9 +589,9 @@ export class CrawlService {
 
     // Start progress display
     if (this.progressService) {
-      // Use maxPages (which comes from options.limit in the constructor) as the total
-      // This ensures the progress bar shows the correct limit
-      const totalUrls = this.maxPages;
+      // For limited crawls, use maxPages as total
+      // For unlimited crawls, start with 0 and update dynamically
+      const totalUrls = (this.maxPages > 0) ? this.maxPages : 0;
 
       this.progressService.start({
         totalUrls: totalUrls,
@@ -774,6 +774,14 @@ export class CrawlService {
 
     // Add to queue
     this.queuedUrls.add(normalizedUrl);
+
+    // Update progress bar total for unlimited crawls as URLs are discovered
+    if (this.progressService && (this.maxPages <= 0 || this.maxPages === null)) {
+      const totalDiscovered = this.visitedUrls.size + this.queuedUrls.size;
+      this.progressService.updateStats({
+        totalUrls: totalDiscovered
+      });
+    }
 
     // Recursively crawl this URL
     await this.crawl(normalizedUrl, depth + 1);
@@ -1851,6 +1859,23 @@ ${markdownContent}`;
       this.totalUrlsMapped++;
       if (this.totalUrlsMapped % 100 === 0) {
         logger.crawl(`Total URLs mapped so far: ${this.totalUrlsMapped}`);
+      }
+
+      // Update progress bar for dynamic crawls
+      if (this.progressService) {
+        // For unlimited crawls, update total to reflect all discovered URLs
+        if (this.maxPages <= 0 || this.maxPages === null) {
+          const totalDiscovered = this.visitedUrls.size + this.queuedUrls.size;
+          this.progressService.updateStats({
+            totalUrls: totalDiscovered,
+            crawledUrls: this.foundUrls.length
+          });
+        } else {
+          // For limited crawls, just update crawled count
+          this.progressService.updateStats({
+            crawledUrls: this.foundUrls.length
+          });
+        }
       }
 
       // Context enhancement integration - process in background (non-blocking)

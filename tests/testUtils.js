@@ -1,5 +1,5 @@
 // tests/testUtils.js
-import {getDB} from '../src/db.js';
+import {getDB as getDbInstance} from '../src/db.js';
 // All DB access must use getDB() from src/db.js. Never instantiate CrawlDB directly.
 import fs from 'fs';
 
@@ -14,7 +14,7 @@ export function getDB(dbPath = ':memory:') {
   if (dbPath !== ':memory:' && fs.existsSync(dbPath)) {
     fs.unlinkSync(dbPath);
   }
-  const db = new CrawlDB(dbPath);
-  // CrawlDB constructor already calls initSchema()
+  const db = getDbInstance(dbPath);
+  // getDbInstance already calls initSchema()
   return db;
 }

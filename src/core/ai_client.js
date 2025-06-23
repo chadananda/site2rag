@@ -5,6 +5,7 @@
 import fetch from 'node-fetch';
 import pLimit from 'p-limit';
 import logger from '../services/logger_service.js';
+import debugLogger from '../services/debug_logger.js';
 
 // Global limiter: only 3 concurrent AI calls at a time
 export const aiLimiter = pLimit(3);
@@ -113,10 +114,16 @@ export function cleanupInactiveSessions() {
  */
 async function makeAICall(prompt, aiConfig) {
   const provider = aiConfig.provider || 'ollama';
+  
+  debugLogger.ai(`makeAICall - Provider: ${provider}`);
 
   if (provider === 'ollama') {
     const model = aiConfig.model || process.env.OLLAMA_MODEL || 'llama3.2:latest';
     const host = aiConfig.host || process.env.OLLAMA_HOST || 'http://localhost:11434';
+
+    if (process.env.NODE_ENV === 'test') {
+      console.log(`[AI DEBUG] Ollama - Model: ${model}, Host: ${host}`);
+    }
 
     // Create timeout promise
     const timeoutMs = aiConfig.timeout || 20000; // 20 second default timeout
@@ -124,32 +131,59 @@ async function makeAICall(prompt, aiConfig) {
       setTimeout(() => reject(new Error(`AI call timed out after ${timeoutMs}ms`)), timeoutMs);
     });
 
+    const requestBody = {
+      model,
+      prompt,
+      stream: false,
+      format: 'json', // Request JSON format
+      options: {
+        temperature: 0.1, // Lower temperature for more structured output
+        top_p: 0.9,
+        repeat_penalty: 1.1
+      }
+    };
+
+    if (process.env.NODE_ENV === 'test') {
+      console.log(`[AI DEBUG] Ollama - Request URL: ${host}/api/generate`);
+      console.log(`[AI DEBUG] Ollama - Request body:`, JSON.stringify(requestBody, null, 2));
+    }
+
     // Create the fetch promise
     const fetchPromise = fetch(`${host}/api/generate`, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        model,
-        prompt,
-        stream: false,
-        format: 'json', // Request JSON format
-        options: {
-          temperature: 0.1, // Lower temperature for more structured output
-          top_p: 0.9,
-          repeat_penalty: 1.1
-        }
-      })
+      body: JSON.stringify(requestBody)
+    }).catch(fetchError => {
+      console.error(`[AI ERROR] Ollama - Network error:`, fetchError);
+      throw new Error(`Ollama network error: ${fetchError.message}`);
     });
 
     // Race between fetch and timeout
     const response = await Promise.race([fetchPromise, timeoutPromise]);
 
+    if (process.env.NODE_ENV === 'test') {
+      console.log(`[AI DEBUG] Ollama - Response status: ${response.status}`);
+    }
+
     if (!response.ok) {
-      throw new Error(`AI request failed: ${response.status} ${response.statusText}`);
+      const errorBody = await response.text();
+      console.error(`[AI ERROR] Ollama - API error: ${response.status} ${response.statusText}`);
+      console.error(`[AI ERROR] Ollama - Error body:`, errorBody);
+      throw new Error(`Ollama AI request failed: ${response.status} ${response.statusText} - ${errorBody}`);
     }
 
     const data = await response.json();
-    return data.response || '';
+    if (process.env.NODE_ENV === 'test') {
+      console.log(`[AI DEBUG] Ollama - Response data keys:`, Object.keys(data));
+      console.log(`[AI DEBUG] Ollama - Response length: ${(data.response || '').length}`);
+    }
+    
+    if (!data.response) {
+      console.error(`[AI ERROR] Ollama - No response field in data:`, data);
+      throw new Error(`Ollama response missing 'response' field`);
+    }
+    
+    return data.response;
   }
 
   if (provider === 'anthropic') {
@@ -369,10 +403,19 @@ async function makeAICall(prompt, aiConfig) {
 export async function callAI(prompt, schema, aiConfig) {
   return aiLimiter(async () => {
     let lastError = null;
+    
+    debugLogger.ai(`Starting AI call with provider: ${aiConfig.provider || 'ollama'}`);
+    debugLogger.ai(`Model: ${aiConfig.model || 'default'}`);
+    debugLogger.ai(`Host: ${aiConfig.host || 'default'}`);
+    debugLogger.ai(`Prompt length: ${prompt.length} characters`);
+    
     for (let attempt = 1; attempt <= 3; attempt++) {
       await delay(300); // Spread out requests to avoid throttling
       try {
+        debugLogger.ai(`Attempt ${attempt}: Making AI call...`);
         const responseText = await makeAICall(prompt, aiConfig);
+        debugLogger.ai(`Attempt ${attempt}: Received response, length: ${responseText.length}`);
+        debugLogger.ai(`Raw response (first 200 chars): ${responseText.substring(0, 200)}...`);
 
         // Try to extract JSON from the response
         let jsonText = responseText.trim();
@@ -380,30 +423,63 @@ export async function callAI(prompt, schema, aiConfig) {
         // Handle cases where AI returns JSON wrapped in markdown code blocks
         const codeBlockMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
         if (codeBlockMatch) {
+          debugLogger.ai(`Found JSON in code blocks`);
           jsonText = codeBlockMatch[1].trim();
         }
 
         // Try to find JSON object in the response
         const jsonMatch = jsonText.match(/\{[\s\S]*\}/);
         if (jsonMatch) {
+          debugLogger.ai(`Extracted JSON object`);
           jsonText = jsonMatch[0];
         }
 
         // Basic cleanup for control characters only
         jsonText = jsonText.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+        
+        debugLogger.ai(`Final JSON text (first 200 chars): ${jsonText.substring(0, 200)}...`);
 
         const parsed = JSON.parse(jsonText);
-        return schema.parse(parsed);
+        debugLogger.ai(`JSON parsed successfully`);
+        
+        const validated = schema.parse(parsed);
+        debugLogger.ai(`Schema validation successful`);
+        return validated;
       } catch (e) {
-        // lastError = e; // Removed unused variable
+        lastError = e;
+        console.error(`[AI ERROR] Attempt ${attempt} failed:`);
+        console.error(`[AI ERROR] Error type: ${e.constructor.name}`);
+        console.error(`[AI ERROR] Error message: ${e.message}`);
+        
+        if (e.name === 'ZodError') {
+          console.error(`[AI ERROR] Zod validation error details:`, JSON.stringify(e.errors, null, 2));
+        }
+        
+        if (e.message.includes('Unexpected token')) {
+          console.error(`[AI ERROR] JSON parsing failed - likely malformed JSON response`);
+        }
+        
+        if (e.message.includes('timed out')) {
+          console.error(`[AI ERROR] Request timed out - check network/model availability`);
+        }
+        
+        if (e.message.includes('API request failed')) {
+          console.error(`[AI ERROR] API request failed - check provider configuration`);
+        }
+        
+        console.error(`[AI ERROR] Full error stack:`, e.stack);
+        
         if (attempt < 3) {
-          console.log(`[AI] Call attempt ${attempt} failed: ${e.message}, retrying...`);
+          console.error(`[AI] Retrying in ${1000 * attempt}ms...`);
           await delay(1000 * attempt); // Exponential backoff
         } else {
+          console.error(`[AI FATAL] All 3 attempts failed. Unable to get valid AI response.`);
           logger.error(`AI response validation failed after 3 attempts: ${e.message}`);
         }
       }
     }
+    
+    console.error(`[AI FATAL] Returning null after all attempts failed`);
     return null;
   });
 }

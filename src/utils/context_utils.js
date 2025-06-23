@@ -146,7 +146,7 @@ CRITICAL: Preserve markdown syntax perfectly. Only enhance readable text content
  * @param {number} overlapSize - Overlap words between windows (50%)
  * @returns {Array} Array of sliding windows with paragraph mappings
  */
-export function createOptimizedSlidingWindows(blocks, windowSize, overlapSize) {
+export function createOptimizedSlidingWindows(blocks, windowSize, overlapSize, isTestMode = false) {
   const windows = [];
 
   // Convert blocks to text with paragraph boundaries preserved
@@ -158,9 +158,11 @@ export function createOptimizedSlidingWindows(blocks, windowSize, overlapSize) {
   const words = fullText.split(/\s+/).filter(w => w.length > 0);
   const stepSize = windowSize - overlapSize; // Move window by 50%
 
-  console.log(
-    `[SLIDING_WINDOWS] Total: ${words.length} words, Window: ${windowSize} words, Step: ${stepSize} words (50% overlap)`
-  );
+  if (isTestMode) {
+    console.log(
+      `[SLIDING_WINDOWS] Total: ${words.length} words, Window: ${windowSize} words, Step: ${stepSize} words (50% overlap)`
+    );
+  }
 
   // Create sliding windows with 50% overlap
   for (let start = 0; start < words.length; start += stepSize) {
@@ -195,32 +197,69 @@ export function createOptimizedSlidingWindows(blocks, windowSize, overlapSize) {
     });
   }
 
-  console.log(`[SLIDING_WINDOWS] Created ${windows.length} sliding windows with 50% overlap`);
+  if (isTestMode) {
+    console.log(`[SLIDING_WINDOWS] Created ${windows.length} sliding windows with 50% overlap`);
+  }
   return windows;
 }
 
 /**
  * Create paragraph batches within a window for efficient processing
+ * Uses word-based batching (target ~500 words per batch) instead of fixed paragraph count
  * @param {Array} blockIndices - Block indices covered by window
  * @param {Array} allBlocks - All document blocks
  * @returns {Array} Array of paragraph batches for this window
  */
 export function createParagraphBatches(blockIndices, allBlocks) {
   const batches = [];
-  const maxBatchSize = 5; // Process 5 paragraphs at a time
-
-  for (let i = 0; i < blockIndices.length; i += maxBatchSize) {
-    const batchIndices = blockIndices.slice(i, i + maxBatchSize);
-    const batchBlocks = batchIndices.map(idx => ({
+  const targetBatchWords = 500; // Target ~500 words per batch
+  
+  let currentBatch = [];
+  let currentWordCount = 0;
+  
+  for (const blockIndex of blockIndices) {
+    const blockText = allBlocks[blockIndex].text || allBlocks[blockIndex].content || allBlocks[blockIndex].original;
+    const blockWords = blockText.split(/\s+/).filter(w => w.length > 0).length;
+    
+    // If adding this block would exceed target AND we already have blocks, create batch
+    if (currentWordCount + blockWords > targetBatchWords && currentBatch.length > 0) {
+      // Create batch with current blocks
+      const batchBlocks = currentBatch.map(idx => ({
+        originalIndex: idx,
+        originalText: allBlocks[idx].text || allBlocks[idx].content || allBlocks[idx].original,
+        escapedText: JSON.stringify(allBlocks[idx].text || allBlocks[idx].content || allBlocks[idx].original)
+      }));
+      
+      batches.push({
+        batchIndex: batches.length,
+        blockIndices: [...currentBatch],
+        blocks: batchBlocks,
+        wordCount: currentWordCount
+      });
+      
+      // Start new batch with current block
+      currentBatch = [blockIndex];
+      currentWordCount = blockWords;
+    } else {
+      // Add block to current batch
+      currentBatch.push(blockIndex);
+      currentWordCount += blockWords;
+    }
+  }
+  
+  // Create final batch if there are remaining blocks
+  if (currentBatch.length > 0) {
+    const batchBlocks = currentBatch.map(idx => ({
       originalIndex: idx,
       originalText: allBlocks[idx].text || allBlocks[idx].content || allBlocks[idx].original,
       escapedText: JSON.stringify(allBlocks[idx].text || allBlocks[idx].content || allBlocks[idx].original)
     }));
-
+    
     batches.push({
       batchIndex: batches.length,
-      blockIndices: batchIndices,
-      blocks: batchBlocks
+      blockIndices: [...currentBatch],
+      blocks: batchBlocks,
+      wordCount: currentWordCount
     });
   }
 
@@ -312,9 +351,12 @@ export function validateEnhancement(original, enhanced) {
   const isValid = normalizedOriginal === normalizedEnhanced;
 
   if (!isValid) {
-    console.log(`[VALIDATION] Failed - Enhanced text doesn't match original after removing [[...]] insertions`);
-    console.log(`[VALIDATION] Original: "${normalizedOriginal}"`);
-    console.log(`[VALIDATION] Enhanced (no [[...]]): "${normalizedEnhanced}"`);
+    // Only show validation details in test mode
+    if (process.env.NODE_ENV === 'test') {
+      console.log(`[VALIDATION] Failed - Enhanced text doesn't match original after removing [[...]] insertions`);
+      console.log(`[VALIDATION] Original: "${normalizedOriginal}"`);
+      console.log(`[VALIDATION] Enhanced (no [[...]]): "${normalizedEnhanced}"`);
+    }
   }
 
   return isValid;

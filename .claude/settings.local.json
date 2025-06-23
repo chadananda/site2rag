@@ -87,7 +87,10 @@
       "Bash(npm run fix:lint)",
       "Bash(curl:*)",
       "WebFetch(domain:bahai-education.org)",
-      "Bash(echo)"
+      "Bash(echo)",
+      "Bash(NODE_ENV=test node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/debug-test-3 --flat)",
+      "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/debug-test-6 --flat)",
+      "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/debug-test-prompt-size --flat 2 >& 1)"
     ],
     "deny": []
   }

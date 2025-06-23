@@ -8,6 +8,7 @@ import {getDB} from '../db.js';
 // All DB access must use getDB() from src/db.js. Never instantiate CrawlDB directly.
 import {z} from 'zod';
 import {callAI, getAISession, closeAISession} from './ai_client.js';
+import debugLogger from '../services/debug_logger.js';
 import fs from 'fs';
 import {
   buildSlidingCacheInstructions,
@@ -610,9 +611,10 @@ Be strict and conservative - only extract explicit information.`;
 /**
  * Calculate optimal context capacity (80% of AI model limits) for sliding windows
  * @param {Object} aiConfig - AI configuration with provider and model info
+ * @param {boolean} isTestMode - Whether to show detailed logs
  * @returns {Object} - { capacity, windowSize, overlapSize }
  */
-function getOptimalContextCapacity(aiConfig) {
+function getOptimalContextCapacity(aiConfig, isTestMode = false) {
   const provider = aiConfig.provider?.toLowerCase() || 'ollama';
   const model = aiConfig.model?.toLowerCase() || '';
 
@@ -672,9 +674,11 @@ function getOptimalContextCapacity(aiConfig) {
   const windowSize = Math.max(500, maxContextWords); // Minimum 500 words
   const overlapSize = Math.floor(windowSize * 0.5); // 50% overlap
 
-  console.log(
-    `[CAPACITY] Model: ${model || 'default'}, Capacity: ${capacity} tokens (80% of ${modelConfig.contextTokens}), Context Window: ${windowSize} words`
-  );
+  if (isTestMode) {
+    console.log(
+      `[CAPACITY] Model: ${model || 'default'}, Capacity: ${capacity} tokens (80% of ${modelConfig.contextTokens}), Context Window: ${windowSize} words`
+    );
+  }
 
   return {capacity, windowSize, overlapSize, availableForContext};
 }
@@ -1287,6 +1291,151 @@ IMPORTANT: All context additions must be justified by information found elsewher
 }
 
 /**
+ * Enhanced content blocks directly without sliding windows (for small documents)
+ * @param {Array} blocks - Document blocks
+ * @param {Object} metadata - Document metadata
+ * @param {Object} aiConfig - AI configuration
+ * @param {Object} options - Processing options
+ * @param {Function} callAIImpl - Optional AI call implementation for testing
+ * @returns {Promise<Array>} Enhanced blocks
+ */
+export async function enhanceBlocksDirectly(blocks, metadata, aiConfig, options = {}, callAIImpl = callAI) {
+  const isTestMode = options.test || process.env.NODE_ENV === 'test';
+  
+  // Build full document context
+  const fullDocumentText = blocks
+    .map(block => block.text || block.content || block.original || block)
+    .filter(content => typeof content === 'string')
+    .join('\n\n');
+  
+  // Create word-based batches using the same logic as sliding windows
+  const blockIndices = blocks.map((_, index) => index);
+  const batches = createParagraphBatches(blockIndices, blocks);
+  
+  if (isTestMode) {
+    console.log(`[DIRECT_PROCESSING] Created ${batches.length} word-based batches for ${blocks.length} blocks`);
+  }
+  
+  const processedBlocks = new Array(blocks.length);
+  
+  // Use AI session caching for efficiency
+  const sessionId = `direct-cache-${Date.now()}`;
+  const session = getAISession(sessionId, aiConfig);
+  
+  // Build static cached context (instructions + metadata + document context)
+  const staticContext = `# DOCUMENT CONTEXT DISAMBIGUATION
+## Document Metadata
+Title: ${metadata.title || 'Unknown'}
+URL: ${metadata.url || 'Unknown'}
+Description: ${metadata.description || 'None'}
+
+## Full Document Context
+${fullDocumentText}
+
+## Enhancement Instructions
+You will enhance the following paragraphs using the full document context above.
+
+### Guidelines
+1. **Document-Only Context**: Only add context that appears in the provided document
+2. **Pronoun Clarification**: "he" → "he (John Smith)", "they" → "they (the organization)"
+3. **Unclear References**: Clarify pronouns and vague references using document context
+4. **Temporal Context**: Add time context when clear from document
+5. **Geographic Specificity**: Add location context when mentioned in document
+6. **Roles/Relationships**: Clarify relationships using document context
+7. **Acronym Expansion**: Expand acronyms using full forms found in document
+8. **Cross-References**: Clarify "this", "that", "these" references from context
+9. **Context Delimiter Style**: Use [[...]] delimiters for context clarifications
+10. **No Repetition**: Don't repeat information already clear in the current sentence
+11. **Preserve Meaning**: Maintain original meaning and flow exactly
+
+IMPORTANT: All context additions must be justified by information found in this document.
+
+`;
+
+  // Set cached context once for the entire session
+  session.setCachedContext(staticContext);
+  
+  console.log(`[DIRECT_PROCESSING] Set cached context: ${staticContext.length} chars`);
+  console.log(`[DIRECT_PROCESSING] Using session caching for ${batches.length} batches`);
+
+  // Process each batch sequentially using cached session
+  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
+    const batch = batches[batchIndex];
+    
+    if (isTestMode) {
+      console.log(`[DIRECT_PROCESSING] Processing batch ${batchIndex + 1}/${batches.length} (${batch.blocks.length} paragraphs, ~${batch.wordCount} words)`);
+    }
+    
+    try {
+      const batchPrompt = createBatchProcessingPrompt(batch);
+      const boundSessionCall = session.call.bind(session);
+      boundSessionCall.session = session; // Add session reference for fallback detection
+      const result = await executeWithFallback(boundSessionCall, aiConfig, batchPrompt, BatchEnhancementSchema);
+      
+      if (result && result.enhanced_paragraphs && result.enhanced_paragraphs.length === batch.blocks.length) {
+        for (let i = 0; i < batch.blocks.length; i++) {
+          const blockIndex = batch.blocks[i].originalIndex;
+          const originalText = batch.blocks[i].originalText;
+          const enhancedText = result.enhanced_paragraphs[i].text;
+          
+          if (validateEnhancement(originalText, enhancedText)) {
+            processedBlocks[blockIndex] = {
+              original: originalText,
+              contexted: enhancedText
+            };
+            
+            if (isTestMode) {
+              const insertions = extractContextInsertions(enhancedText);
+              if (insertions.length > 0) {
+                console.log(`[TEST_INSERTIONS] Paragraph ${blockIndex + 1} received ${insertions.length} context insertions`);
+              }
+            }
+          } else {
+            // Fallback to original text if validation fails
+            processedBlocks[blockIndex] = {
+              original: originalText,
+              contexted: originalText
+            };
+          }
+        }
+      } else {
+        // Fallback to original text if response format is invalid
+        for (let i = 0; i < batch.blocks.length; i++) {
+          const blockIndex = batch.blocks[i].originalIndex;
+          const originalText = batch.blocks[i].originalText;
+          processedBlocks[blockIndex] = {
+            original: originalText,
+            contexted: originalText
+          };
+        }
+      }
+    } catch (error) {
+      if (isTestMode) {
+        console.error(`[DIRECT_PROCESSING] Error processing batch ${batchIndex + 1}: ${error.message}`);
+      }
+      // Fallback to original text for this batch
+      for (let i = 0; i < batch.blocks.length; i++) {
+        const blockIndex = batch.blocks[i].originalIndex;
+        const originalText = batch.blocks[i].originalText;
+        processedBlocks[blockIndex] = {
+          original: originalText,
+          contexted: originalText
+        };
+      }
+    }
+  }
+  
+  // Close the AI session
+  closeAISession(sessionId);
+  
+  if (isTestMode) {
+    console.log(`[DIRECT_PROCESSING] Completed processing, closed session ${sessionId}`);
+  }
+  
+  return processedBlocks.filter(block => block !== undefined);
+}
+
+/**
  * Context-optimized enhancement: Enhance content blocks using maximum-sized sliding cached context windows
  * @param {Array} blocks - Document blocks
  * @param {Object} metadata - Document metadata
@@ -1295,20 +1444,49 @@ IMPORTANT: All context additions must be justified by information found elsewher
  * @returns {Promise<Array>} Enhanced blocks with cache metrics
  */
 export async function enhanceBlocksWithCaching(blocks, metadata, aiConfig, options = {}, callAIImpl = callAI) {
-  console.log(`[SLIDING_CACHE] Processing ${blocks.length} blocks with optimal sliding cached context windows`);
+  const isTestMode = options.test || process.env.NODE_ENV === 'test';
+  
+  // Calculate total document size
+  const totalText = blocks
+    .map(block => block.text || block.content || block.original || block)
+    .filter(content => typeof content === 'string')
+    .join(' ');
+  const totalWords = totalText.split(/\s+/).filter(w => w.length > 0).length;
+  
+  const {capacity, windowSize, overlapSize} = getOptimalContextCapacity(aiConfig, isTestMode);
+  
+  if (isTestMode) {
+    console.log(`[CONTEXT] Processing document with ${totalWords} words (context capacity: ${Math.floor(windowSize)} words)`);
+  }
+  
+  // Check if entire document fits in context window (with 80% safety margin)
+  const safeWindowSize = windowSize * 0.8;
+  console.log(`[CONTEXT] Document size: ${totalWords} words, Safe window: ${safeWindowSize} words`);
+  
+  if (totalWords < safeWindowSize) {
+    console.log(`[CONTEXT] Document fits entirely in context window - using DIRECT processing with caching`);
+    return await enhanceBlocksDirectly(blocks, metadata, aiConfig, options, callAIImpl);
+  }
+  
+  console.log(`[CONTEXT] Document too large - using sliding window processing`);
+  
+  if (isTestMode) {
+    console.log(`[SLIDING_CACHE] Processing ${blocks.length} blocks with optimal sliding cached context windows`);
+  }
 
   const sessionId = `sliding-cache-${Date.now()}`;
   const session = getAISession(sessionId, aiConfig);
-  const {capacity, windowSize, overlapSize} = getOptimalContextCapacity(aiConfig);
 
   // Build static cached context (instructions + metadata)
   const staticCachedContext = buildSlidingCacheInstructions(metadata);
   const staticTokens = Math.ceil(staticCachedContext.length / 3); // ~3 chars per token
 
-  console.log(`[CACHE] Static context: ${staticTokens} tokens (${staticCachedContext.length} chars)`);
+  if (isTestMode) {
+    console.log(`[CACHE] Static context: ${staticTokens} tokens (${staticCachedContext.length} chars)`);
+  }
 
   // Create sliding windows with 50% overlap
-  const slidingWindows = createOptimizedSlidingWindows(blocks, windowSize, overlapSize);
+  const slidingWindows = createOptimizedSlidingWindows(blocks, windowSize, overlapSize, isTestMode);
 
   const processedBlocks = new Array(blocks.length); // Pre-allocate for proper ordering
   const startTime = Date.now();
@@ -1318,9 +1496,11 @@ export async function enhanceBlocksWithCaching(blocks, metadata, aiConfig, optio
     // Process each sliding window
     for (let windowIndex = 0; windowIndex < slidingWindows.length; windowIndex++) {
       const window = slidingWindows[windowIndex];
-      console.log(
-        `[SLIDING_CACHE] Processing window ${windowIndex + 1}/${slidingWindows.length} (${window.actualWordCount} words, ${window.coveredBlocks.length} blocks)`
-      );
+      if (isTestMode) {
+        console.log(
+          `[SLIDING_CACHE] Processing window ${windowIndex + 1}/${slidingWindows.length} (${window.actualWordCount} words, ${window.coveredBlocks.length} blocks)`
+        );
+      }
 
       // Set cached context for this window (instructions + metadata + document context)
       const fullCachedContext = `${staticCachedContext}
@@ -1330,14 +1510,18 @@ ${window.contextText}`;
       session.setCachedContext(fullCachedContext);
       cacheRefreshCount++;
 
-      console.log(`[CACHE] Refresh ${cacheRefreshCount}: ${Math.ceil(fullCachedContext.length / 3)} tokens cached`);
+      if (isTestMode) {
+        console.log(`[CACHE] Refresh ${cacheRefreshCount}: ${Math.ceil(fullCachedContext.length / 3)} tokens cached`);
+      }
 
       // Process paragraphs in batches for efficiency
       for (let batchIndex = 0; batchIndex < window.paragraphBatches.length; batchIndex++) {
         const batch = window.paragraphBatches[batchIndex];
-        console.log(
-          `[BATCH] Processing batch ${batchIndex + 1}/${window.paragraphBatches.length} (${batch.blocks.length} paragraphs) in window ${windowIndex + 1}`
-        );
+        if (isTestMode) {
+          console.log(
+            `[BATCH] Processing batch ${batchIndex + 1}/${window.paragraphBatches.length} (${batch.blocks.length} paragraphs) in window ${windowIndex + 1}`
+          );
+        }
 
         try {
           // Create batch processing prompt
@@ -1367,7 +1551,7 @@ ${window.contextText}`;
                 };
 
                 // Log context insertions in test mode
-                if (options.test) {
+                if (isTestMode) {
                   const insertions = extractContextInsertions(enhancedText);
                   if (insertions.length > 0) {
                     console.log(
@@ -1963,9 +2147,7 @@ function createOptimalBatches(keyedBlocks, aiConfig) {
   const batches = [];
   let currentBatch = {blocks: {}, wordCount: 0, blockCount: 0};
 
-  console.log(
-    `[BATCHING] Target: ${targetWords} words per batch (max ${maxBlocksPerBatch} blocks) for ${aiConfig.provider}/${aiConfig.model}`
-  );
+  debugLogger.batching(`Target: ${targetWords} words per batch (max ${maxBlocksPerBatch} blocks) for ${aiConfig.provider}/${aiConfig.model}`);
 
   for (const [key, text] of Object.entries(keyedBlocks)) {
     const blockWords = text.split(/\s+/).length;
@@ -1976,9 +2158,7 @@ function createOptimalBatches(keyedBlocks, aiConfig) {
       (currentBatch.wordCount + blockWords > targetWords || currentBatch.blockCount >= maxBlocksPerBatch)
     ) {
       const efficiency = Math.round((currentBatch.wordCount / targetWords) * 100);
-      console.log(
-        `[BATCHING] Batch ${batches.length + 1}: ${currentBatch.wordCount} words, ${currentBatch.blockCount} blocks (${efficiency}% of target)`
-      );
+      debugLogger.batching(`Batch ${batches.length + 1}: ${currentBatch.wordCount} words, ${currentBatch.blockCount} blocks (${efficiency}% of target)`);
 
       batches.push(currentBatch);
       currentBatch = {blocks: {}, wordCount: 0, blockCount: 0};
@@ -1993,13 +2173,11 @@ function createOptimalBatches(keyedBlocks, aiConfig) {
   // Add final batch if it has content
   if (currentBatch.blockCount > 0) {
     const efficiency = Math.round((currentBatch.wordCount / targetWords) * 100);
-    console.log(
-      `[BATCHING] Batch ${batches.length + 1}: ${currentBatch.wordCount} words, ${currentBatch.blockCount} blocks (${efficiency}% of target)`
-    );
+    debugLogger.batching(`Batch ${batches.length + 1}: ${currentBatch.wordCount} words, ${currentBatch.blockCount} blocks (${efficiency}% of target)`);
     batches.push(currentBatch);
   }
 
-  console.log(`[BATCHING] Created ${batches.length} optimized batches with block integrity preserved`);
+  debugLogger.batching(`Created ${batches.length} optimized batches with block integrity preserved`);
   return batches;
 }
 
@@ -2014,11 +2192,11 @@ function createOptimalBatches(keyedBlocks, aiConfig) {
  */
 async function enhanceKeyedBlocksWithContext(keyedBlocks, indexMapping, metadata, aiConfig, options = {}) {
   const blockKeys = Object.keys(keyedBlocks);
-  console.log(`[KEYED] Processing ${blockKeys.length} blocks with keyed object approach`);
+  debugLogger.keyed(`Processing ${blockKeys.length} blocks with keyed object approach`);
 
   // Create provider-optimized batches with block integrity preserved
   const batches = createOptimalBatches(keyedBlocks, aiConfig);
-  console.log(`[KEYED] Split into ${batches.length} batches for processing`);
+  debugLogger.keyed(`Split into ${batches.length} batches for processing`);
 
   const allEnhancedBlocks = {};
 
@@ -2026,9 +2204,7 @@ async function enhanceKeyedBlocksWithContext(keyedBlocks, indexMapping, metadata
     // Process each batch separately
     for (let i = 0; i < batches.length; i++) {
       const batch = batches[i];
-      console.log(
-        `[KEYED] Processing batch ${i + 1}/${batches.length} (${batch.wordCount} words, ${batch.blockCount} blocks)`
-      );
+      debugLogger.keyed(`Processing batch ${i + 1}/${batches.length} (${batch.wordCount} words, ${batch.blockCount} blocks)`);
 
       // Create keyed enhancement prompt for this batch
       const keyedPrompt = createKeyedEnhancementPrompt(batch.blocks, metadata);
@@ -2038,9 +2214,9 @@ async function enhanceKeyedBlocksWithContext(keyedBlocks, indexMapping, metadata
 
       if (result && result.enhanced_blocks) {
         Object.assign(allEnhancedBlocks, result.enhanced_blocks);
-        console.log(`[KEYED] Batch ${i + 1} completed: ${Object.keys(result.enhanced_blocks).length} blocks enhanced`);
+        debugLogger.keyed(`Batch ${i + 1} completed: ${Object.keys(result.enhanced_blocks).length} blocks enhanced`);
       } else {
-        console.log(`[KEYED] Batch ${i + 1} failed: no enhanced blocks returned`);
+        debugLogger.keyed(`Batch ${i + 1} failed: no enhanced blocks returned`);
       }
     }
 
@@ -2086,7 +2262,9 @@ async function enhanceKeyedBlocksWithContext(keyedBlocks, indexMapping, metadata
         processingTime: 0
       };
     } else {
-      console.log(`[KEYED] Enhancement failed, using original content`);
+      if (process.env.NODE_ENV === 'test') {
+        console.log(`[KEYED] Enhancement failed, using original content`);
+      }
       return {
         enhancedBlocks: keyedBlocks,
         indexMapping: indexMapping,
@@ -2094,7 +2272,9 @@ async function enhanceKeyedBlocksWithContext(keyedBlocks, indexMapping, metadata
       };
     }
   } catch (error) {
-    console.log(`[KEYED] Error processing blocks: ${error.message}`);
+    if (process.env.NODE_ENV === 'test') {
+      console.log(`[KEYED] Error processing blocks: ${error.message}`);
+    }
     return {
       enhancedBlocks: keyedBlocks,
       indexMapping: indexMapping,
@@ -2251,7 +2431,7 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
       return textContent.length >= 80;
     });
 
-    console.log(`[BATCHING] Original blocks: ${allBlocks.length}, Significant blocks: ${significantBlocks.length}`);
+    debugLogger.batching(`Original blocks: ${allBlocks.length}, Significant blocks: ${significantBlocks.length}`);
 
     if (significantBlocks.length === 0) {
       throw new Error('No significant content blocks found (all blocks < 80 characters)');
@@ -2260,9 +2440,7 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
     // Create keyed object mapping for significant blocks
     const {keyedBlocks, indexMapping} = createKeyedBlockMapping(significantBlocks, 80);
 
-    console.log(
-      `[KEYED] Created keyed mapping for ${Object.keys(keyedBlocks).length} blocks from ${significantBlocks.length} significant blocks`
-    );
+    debugLogger.keyed(`Created keyed mapping for ${Object.keys(keyedBlocks).length} blocks from ${significantBlocks.length} significant blocks`);
 
     if (Object.keys(keyedBlocks).length === 0) {
       throw new Error('No blocks meet the minimum character requirement (80 chars)');
@@ -2323,7 +2501,9 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
       insertionTracker.trackFile(filePath, allInsertions, enhancedBlocksForTracking);
 
       if (allInsertions.length > 0) {
-        console.log(`[INSERTIONS] ${fileName}: ${allInsertions.length} insertions added`);
+        if (process.env.NODE_ENV === 'test') {
+          console.log(`[INSERTIONS] ${fileName}: ${allInsertions.length} insertions added`);
+        }
       }
     }
 
@@ -2352,7 +2532,10 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
     updateSuccessStmt.run(url);
 
     const duration = Date.now() - startTime;
-    console.log(`[CONTEXT] ✓ Enhanced: ${url} (${duration}ms)`);
+    // Only show success logs in test mode
+    if (process.env.NODE_ENV === 'test') {
+      console.log(`[CONTEXT] ✓ Enhanced: ${url} (${duration}ms)`);
+    }
 
     return {
       success: true,
@@ -2369,13 +2552,22 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
 
     if (error.message.includes('rate limit') || error.message.includes('429')) {
       contextStatus = 'rate_limited';
-      console.log(`[CONTEXT] ⚠️  Rate limited: ${url} - will retry later`);
+      // Only show rate limit logs in test mode
+      if (process.env.NODE_ENV === 'test') {
+        console.log(`[CONTEXT] ⚠️  Rate limited: ${url} - will retry later`);
+      }
     } else if (error.message.includes('timed out')) {
       contextStatus = 'timeout';
-      console.log(`[CONTEXT] ⚠️  Timeout: ${url} - will retry later`);
+      // Only show timeout logs in test mode
+      if (process.env.NODE_ENV === 'test') {
+        console.log(`[CONTEXT] ⚠️  Timeout: ${url} - will retry later`);
+      }
     } else {
       contextStatus = 'failed';
-      console.log(`[CONTEXT] ❌ Failed: ${url} - ${error.message}`);
+      // Only show failure details in test mode (errors still go to console.error)
+      if (process.env.NODE_ENV === 'test') {
+        console.log(`[CONTEXT] ❌ Failed: ${url} - ${error.message}`);
+      }
     }
 
     // Update database: error
@@ -2403,8 +2595,9 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
  * Pass 2: Enhance content blocks using complete entity knowledge
  * @param {string} dbPath - Path to crawl DB
  * @param {object} aiConfig - AI config (provider, host, model, etc)
+ * @param {function} progressCallback - Optional callback for progress updates (index, total)
  */
-export async function runContextEnrichment(dbOrPath, aiConfig) {
+export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback = null) {
   // Accept either a db instance (CrawlDB) or a path
   let db,
     shouldClose = false;
@@ -2416,15 +2609,24 @@ export async function runContextEnrichment(dbOrPath, aiConfig) {
   }
 
   const rawDocs = db.db.prepare("SELECT url, file_path, title FROM pages WHERE content_status = 'raw'").all();
-  console.log(`[CONTEXT] Starting optimized context enhancement for ${rawDocs.length} documents`);
+  // Only show in test mode
+  if (process.env.NODE_ENV === 'test') {
+    console.log(`[CONTEXT] Starting optimized context enhancement for ${rawDocs.length} documents`);
+  }
 
   for (let docIndex = 0; docIndex < rawDocs.length; docIndex++) {
     const doc = rawDocs[docIndex];
     try {
-      console.log(`[CONTEXT] Processing document ${docIndex + 1}/${rawDocs.length}: ${doc.url}`);
+      // Only show in test mode
+      if (process.env.NODE_ENV === 'test') {
+        console.log(`[CONTEXT] Processing document ${docIndex + 1}/${rawDocs.length}: ${doc.url}`);
+      }
 
       if (!doc.file_path || !fs.existsSync(doc.file_path)) {
-        console.log(`[CONTEXT] Skipping ${doc.url} - no file path or file doesn't exist`);
+        // Only show skip logs in test mode
+        if (process.env.NODE_ENV === 'test') {
+          console.log(`[CONTEXT] Skipping ${doc.url} - no file path or file doesn't exist`);
+        }
         continue;
       }
 
@@ -2446,7 +2648,10 @@ export async function runContextEnrichment(dbOrPath, aiConfig) {
         .filter(block => block.text.trim());
 
       if (blocks.length === 0) {
-        console.log(`[CONTEXT] Skipping ${doc.url} - no content blocks`);
+        // Only show skip logs in test mode
+        if (process.env.NODE_ENV === 'test') {
+          console.log(`[CONTEXT] Skipping ${doc.url} - no content blocks`);
+        }
         continue;
       }
 
@@ -2459,7 +2664,10 @@ export async function runContextEnrichment(dbOrPath, aiConfig) {
       }
 
       // OPTIMIZED: Skip entity extraction - go directly to context enhancement
-      console.log(`[CONTEXT] Context enhancement for ${doc.url} (${blocks.length} blocks) - OPTIMIZED MODE`);
+      // Only show in test mode
+      if (process.env.NODE_ENV === 'test') {
+        console.log(`[CONTEXT] Context enhancement for ${doc.url} (${blocks.length} blocks) - OPTIMIZED MODE`);
+      }
 
       let result;
       try {
@@ -2472,7 +2680,10 @@ export async function runContextEnrichment(dbOrPath, aiConfig) {
         result = await Promise.race([enhancementPromise, timeoutPromise]);
       } catch (timeoutError) {
         if (timeoutError.message.includes('timed out')) {
-          console.log(`[CONTEXT] ⚠️  Context enhancement timed out for ${doc.url} - leaving raw for retry later`);
+          // Only show timeout details in test mode
+          if (process.env.NODE_ENV === 'test') {
+            console.log(`[CONTEXT] ⚠️  Context enhancement timed out for ${doc.url} - leaving raw for retry later`);
+          }
           // Leave the document raw (don't update database status) so it can be retried later
           continue;
         } else {
@@ -2481,7 +2692,10 @@ export async function runContextEnrichment(dbOrPath, aiConfig) {
       }
 
       if (!result || !result.blocks) {
-        console.log(`[CONTEXT] Skipping ${doc.url} - context enhancement failed`);
+        // Only show skip logs in test mode
+        if (process.env.NODE_ENV === 'test') {
+          console.log(`[CONTEXT] Skipping ${doc.url} - context enhancement failed`);
+        }
         continue;
       }
 
@@ -2501,7 +2715,10 @@ export async function runContextEnrichment(dbOrPath, aiConfig) {
 
       // Debug: Check if any insertions were made
       const insertionsCount = contextedMarkdown.match(/\[\[.*?\]\]/g)?.length || 0;
-      console.log(`[CONTEXT] Document ${doc.url}: Found ${insertionsCount} context insertions in final markdown`);
+      // Only show insertion count in test mode
+      if (process.env.NODE_ENV === 'test') {
+        console.log(`[CONTEXT] Document ${doc.url}: Found ${insertionsCount} context insertions in final markdown`);
+      }
 
       // Preserve frontmatter if present
       let finalMarkdown = contextedMarkdown;
@@ -2514,17 +2731,29 @@ export async function runContextEnrichment(dbOrPath, aiConfig) {
       }
 
       // Write the enriched content back to the file
-      console.log(`[CONTEXT] Writing enhanced content to file: ${doc.file_path}`);
+      // Only show file write details in test mode
+      if (process.env.NODE_ENV === 'test') {
+        console.log(`[CONTEXT] Writing enhanced content to file: ${doc.file_path}`);
+      }
       await fs.promises.writeFile(doc.file_path, finalMarkdown, 'utf8');
-      console.log(`[CONTEXT] File written successfully`);
+      // Only show file write success in test mode
+      if (process.env.NODE_ENV === 'test') {
+        console.log(`[CONTEXT] File written successfully`);
+      }
 
       // Update the database to mark as processed
-      console.log(`[CONTEXT] Updating database status for ${doc.url} to 'contexted'`);
+      // Only show database update details in test mode
+      if (process.env.NODE_ENV === 'test') {
+        console.log(`[CONTEXT] Updating database status for ${doc.url} to 'contexted'`);
+      }
       try {
         const updateResult = db.db
           .prepare('UPDATE pages SET content_status = ? WHERE url = ?')
           .run('contexted', doc.url);
-        console.log(`[CONTEXT] Database update result:`, updateResult);
+        // Only show database update results in test mode
+        if (process.env.NODE_ENV === 'test') {
+          console.log(`[CONTEXT] Database update result:`, updateResult);
+        }
         if (updateResult.changes === 0) {
           throw new Error(`No rows updated - URL ${doc.url} not found in database`);
         }
@@ -2533,15 +2762,26 @@ export async function runContextEnrichment(dbOrPath, aiConfig) {
         throw dbError; // Re-throw to trigger the catch block above
       }
 
-      console.log(`[CONTEXT] ✓ Completed optimized context enhancement for: ${doc.url}`);
-      console.log(
-        `[CONTEXT] Processing time: ${result.processingTime}ms, Cache hit rate: ${result.cacheMetrics.hitRate}%`
-      );
+      // Only show completion details in test mode
+      if (process.env.NODE_ENV === 'test') {
+        console.log(`[CONTEXT] ✓ Completed optimized context enhancement for: ${doc.url}`);
+      }
+      // Only show processing metrics in test mode
+      if (process.env.NODE_ENV === 'test') {
+        console.log(
+          `[CONTEXT] Processing time: ${result.processingTime}ms, Cache hit rate: ${result.cacheMetrics.hitRate}%`
+        );
+      }
     } catch (err) {
       console.error(`[CONTEXT] Failed processing doc with url=${doc.url}:`, err.message);
       console.error(`[CONTEXT] Full error:`, err);
       console.error(`[CONTEXT] Stack trace:`, err.stack);
       // Continue with next document instead of failing completely
+    }
+    
+    // Update progress callback if provided
+    if (progressCallback) {
+      progressCallback(docIndex + 1, rawDocs.length, doc.url);
     }
   }
 

@@ -232,15 +232,34 @@ export class SiteProcessor {
             logger.info(`Started LLM enhancement session: ${trackingConfig.provider}/${trackingConfig.model}`);
           }
 
-          // Run the main context enrichment for all raw pages
-          if (this.options.aiConfig.type === 'fallback') {
-            // For fallback config, use the first available LLM
-            const firstLLM = this.options.aiConfig.availableLLMs[0];
-            console.log(`[CONTEXT] Using first fallback LLM: ${firstLLM.fallbackName}`);
-            await runContextEnrichment(dbInstance, firstLLM);
-          } else {
-            // Regular AI config
-            await runContextEnrichment(dbInstance, this.options.aiConfig);
+          // Check how many documents need processing
+          const rawDocs = dbInstance.db.prepare("SELECT url FROM pages WHERE content_status = 'raw'").all();
+          
+          if (rawDocs.length > 0) {
+            // Start processing progress bar
+            this.crawlService.progressService.startProcessing(rawDocs.length);
+            
+            // Create progress callback
+            const progressCallback = (current, total, url) => {
+              this.crawlService.progressService.updateProcessing(current, total, url);
+            };
+            
+            // Run the main context enrichment for all raw pages
+            if (this.options.aiConfig.type === 'fallback') {
+              // For fallback config, use the first available LLM
+              const firstLLM = this.options.aiConfig.availableLLMs[0];
+              // Only show in test mode
+              if (process.env.NODE_ENV === 'test') {
+                console.log(`[CONTEXT] Using first fallback LLM: ${firstLLM.fallbackName}`);
+              }
+              await runContextEnrichment(dbInstance, firstLLM, progressCallback);
+            } else {
+              // Regular AI config
+              await runContextEnrichment(dbInstance, this.options.aiConfig, progressCallback);
+            }
+            
+            // Complete processing progress
+            this.crawlService.progressService.completeProcessing();
           }
 
           // Log insertion tracking summary if test mode was enabled
