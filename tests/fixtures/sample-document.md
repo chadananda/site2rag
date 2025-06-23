@@ -1,8 +1,8 @@
 ---
-title: "The Ocean Adventure Story"
-author: "Chad Jones"
-date: "2024-01-19"
-description: "A tale of creating Ocean search software"
+title: 'The Ocean Adventure Story'
+author: 'Chad Jones'
+date: '2024-01-19'
+description: 'A tale of creating Ocean search software'
 ---
 
 # The Ocean Adventure

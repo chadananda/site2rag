@@ -1,4 +1,4 @@
-import { URL } from 'url';
+import {URL} from 'url';
 import logger from './logger_service.js';
 
 /**
@@ -34,18 +34,18 @@ export class UrlService {
   safeFilename(url) {
     try {
       const urlObj = new URL(url);
-      const { pathname } = urlObj;
+      const {pathname} = urlObj;
       let file = pathname.replace(/\/+$/, '') || 'index';
-      
+
       // If it's the root path, return 'index'
       if (file === '/') return 'index';
-      
+
       // Remove leading slash
       file = file.replace(/^\//, '');
-      
+
       // Split the path into segments
       const segments = file.split('/');
-      
+
       // Process each segment to make it safe
       const safeSegments = segments.map(segment => {
         // For non-ASCII paths, use a more readable approach
@@ -55,19 +55,19 @@ export class UrlService {
         } catch (e) {
           // If decoding fails, use the original segment
         }
-        
+
         // Replace special characters with underscores, but preserve alphanumeric in any language
         // This allows Arabic, Chinese, etc. characters to remain intact
         let safeSegment = segment.replace(/[\/?*:|"<>\\]+/g, '_');
-        
+
         // Remove any existing extension from the last segment
         if (segment === segments[segments.length - 1]) {
           safeSegment = safeSegment.replace(/\.[^.]+$/, '');
         }
-        
+
         return safeSegment;
       });
-      
+
       // Join the segments back together with path separators
       return safeSegments.join('/');
     } catch (e) {
@@ -85,13 +85,13 @@ export class UrlService {
   matchGlob(pattern, path) {
     // Special case: '/**' matches everything including '/'
     if (pattern === '/**') return true;
-    
+
     // Special case for patterns ending with /** to match all subpaths
     if (pattern.endsWith('/**')) {
       const prefix = pattern.slice(0, -3);
       return path === prefix || path.startsWith(prefix + '/');
     }
-    
+
     // Escape regex special chars except *
     let regex = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&');
     regex = regex.replace(/\*\*/g, '.*'); // ** => .*
@@ -107,24 +107,22 @@ export class UrlService {
    */
   matchesPatterns(url, patterns) {
     if (!patterns || !patterns.length) return true;
-    
+
     try {
-      const { pathname } = new URL(url);
-      
+      const {pathname} = new URL(url);
+
       // Handle include/exclude patterns (patterns starting with ! are exclusions)
       const includes = patterns.filter(p => !p.startsWith('!'));
-      const excludes = patterns
-        .filter(p => p.startsWith('!'))
-        .map(p => p.substring(1));
-      
+      const excludes = patterns.filter(p => p.startsWith('!')).map(p => p.substring(1));
+
       // Check exclusions first - if any match, skip this URL
       if (excludes.some(pattern => this.matchGlob(pattern, pathname))) {
         return false;
       }
-      
+
       // If no includes specified, allow all non-excluded
       if (!includes.length) return true;
-      
+
       // Otherwise, must match at least one include pattern
       return includes.some(pattern => this.matchGlob(pattern, pathname));
     } catch (e) {
@@ -145,27 +143,29 @@ export class UrlService {
   shouldSkip(url, depth, maxDepth, visited, previouslyCrawled = false) {
     // Ensure URL is a string, not an object
     const urlString = typeof url === 'object' ? url.href : url;
-    
-    logger.info(`shouldSkip check for ${urlString}: depth=${depth}, maxDepth=${maxDepth}, visited=${visited.has(urlString)}, previouslyCrawled=${previouslyCrawled}`);
-    
+
+    logger.info(
+      `shouldSkip check for ${urlString}: depth=${depth}, maxDepth=${maxDepth}, visited=${visited.has(urlString)}, previouslyCrawled=${previouslyCrawled}`
+    );
+
     // Skip if we've already visited this URL in the current session
     if (visited.has(urlString)) {
       return true;
     }
-    
+
     // Skip if this URL was crawled in a previous session
     if (previouslyCrawled) {
       return true;
     }
-    
+
     // Skip if we're beyond the max depth (but allow if maxDepth is -1, which means no limit)
     if (maxDepth >= 0 && depth > maxDepth) {
       return true;
     }
-    
+
     return false;
   }
-  
+
   /**
    * Checks if a URL belongs to the same domain as the base domain
    * @param {string} url - URL to check
@@ -177,23 +177,23 @@ export class UrlService {
       // Ensure URL is a string, not an object
       const urlString = typeof url === 'object' ? url.href : url;
       const urlObj = new URL(urlString);
-      
+
       // Extract hostname from the URL
       const hostname = urlObj.hostname;
-      
+
       // Exact match
       if (hostname === baseDomain) {
         return true;
       }
-      
+
       // Check for subdomains (must end with .baseDomain)
       if (hostname.endsWith('.' + baseDomain)) {
         return true;
       }
-      
+
       // Log domains that don't match for debugging
       logger.info(`[DOMAIN CHECK] ${hostname} is not part of ${baseDomain} - skipping`);
-      
+
       return false;
     } catch (e) {
       logger.error(`Error checking domain for ${url}:`, e.message);
@@ -203,6 +203,6 @@ export class UrlService {
 }
 
 // Export standalone functions for backward compatibility and testing
-export const normalizeUrl = (url) => new UrlService().normalizeUrl(url);
-export const safeFilename = (url) => new UrlService().safeFilename(url);
+export const normalizeUrl = url => new UrlService().normalizeUrl(url);
+export const safeFilename = url => new UrlService().safeFilename(url);
 export const matchGlob = (pattern, path) => new UrlService().matchGlob(pattern, path);

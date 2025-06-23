@@ -9,7 +9,7 @@ const DEFAULT_CONFIG = {
   maxDepth: 5,
   include: [],
   exclude: [],
-  crawlPatterns: ["/*"],
+  crawlPatterns: ['/*'],
   politeDelay: 300,
   userAgent: 'site2rag-crawler/1.0',
   markdown: {
@@ -20,25 +20,25 @@ const DEFAULT_CONFIG = {
 
 export class ConfigManager {
   constructor() {
-    this.config = { ...DEFAULT_CONFIG };
+    this.config = {...DEFAULT_CONFIG};
   }
 
   loadDefaults() {
-    this.config = { ...DEFAULT_CONFIG };
+    this.config = {...DEFAULT_CONFIG};
     return this.config;
   }
 
   loadFromFile(configPath = 'crawl.json') {
     if (fs.existsSync(configPath)) {
       const fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-      this.config = { ...this.config, ...fileConfig };
+      this.config = {...this.config, ...fileConfig};
     }
     return this.config;
   }
 
   mergeWithCli(cliOptions = {}) {
     // Merge CLI options (flat structure)
-    this.config = { ...this.config, ...cliOptions };
+    this.config = {...this.config, ...cliOptions};
     return this.config;
   }
 
@@ -73,10 +73,10 @@ export class ConfigManager {
       // Ensure the directory exists
       const dirPath = path.dirname(configPath);
       if (!fs.existsSync(dirPath)) {
-        fs.mkdirSync(dirPath, { recursive: true });
+        fs.mkdirSync(dirPath, {recursive: true});
         logger.info(`Created directory: ${dirPath}`);
       }
-      
+
       // Write the config file
       fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
       logger.info(`Created config file: ${configPath}`);
@@ -85,4 +85,3 @@ export class ConfigManager {
     return false;
   }
 }
-

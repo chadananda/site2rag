@@ -17,7 +17,7 @@ export class MarkdownService {
       codeBlockStyle: 'fenced',
       ...options
     });
-    
+
     // Add custom rules
     this.addCustomRules();
   }
@@ -34,7 +34,7 @@ export class MarkdownService {
         // Get the href attribute
         const href = node.getAttribute('href');
         if (!href) return content;
-        
+
         // Decode percent-encoded URLs for better readability
         let decodedHref = href;
         try {
@@ -43,13 +43,13 @@ export class MarkdownService {
           // If decoding fails, use the original href
           decodedHref = href;
         }
-        
+
         // Check if this is a PDF or DOCX link
         const isPdfOrDocx = decodedHref.toLowerCase().endsWith('.pdf') || decodedHref.toLowerCase().endsWith('.docx');
-        
+
         // Get the title attribute
         const title = node.title ? ` "${node.title}"` : '';
-        
+
         // If it's a PDF or DOCX and it's a relative link, keep it relative
         // Otherwise, make sure it's an absolute URL
         if (isPdfOrDocx && !decodedHref.startsWith('http') && !decodedHref.startsWith('//')) {
@@ -60,7 +60,7 @@ export class MarkdownService {
         } else {
           // For all other links, ensure they are absolute
           let absoluteUrl = decodedHref;
-          
+
           // If we have a baseUrl in the context, use it to resolve relative URLs
           if (this.baseUrl && !decodedHref.startsWith('http') && !decodedHref.startsWith('//')) {
             try {
@@ -76,37 +76,37 @@ export class MarkdownService {
               absoluteUrl = decodedHref; // Fallback to decoded href
             }
           }
-          
+
           return `[${content}](${absoluteUrl}${title})`;
         }
       }
     });
-    
+
     // Preserve tables
     this.turndownService.addRule('tables', {
       filter: ['table'],
-      replacement: function(content, node) {
+      replacement: function (content, node) {
         // Simple table handling - could be improved for complex tables
         const rows = node.querySelectorAll('tr');
         if (!rows.length) return '';
-        
+
         let markdown = '\n\n';
-        
+
         // Process each row
         Array.from(rows).forEach((row, rowIndex) => {
           const cells = row.querySelectorAll('th, td');
-          
+
           // Process each cell in the row
           Array.from(cells).forEach((cell, cellIndex) => {
             const cellContent = cell.textContent.trim();
             markdown += `| ${cellContent} `;
-            
+
             // Add trailing pipe at end of row
             if (cellIndex === cells.length - 1) {
               markdown += '|\n';
             }
           });
-          
+
           // Add header separator row
           if (rowIndex === 0 && row.querySelectorAll('th').length) {
             Array.from(cells).forEach(() => {
@@ -115,26 +115,26 @@ export class MarkdownService {
             markdown += '|\n';
           }
         });
-        
+
         return markdown + '\n\n';
       }
     });
-    
+
     // Better code block handling
     this.turndownService.addRule('codeBlocks', {
       filter: ['pre'],
-      replacement: function(content, node) {
+      replacement: function (content, node) {
         const code = node.querySelector('code');
         const language = code ? (code.className.match(/language-(\w+)/) || [])[1] || '' : '';
         const codeContent = code ? code.textContent : node.textContent;
-        
+
         return `\n\n\`\`\`${language}\n${codeContent.trim()}\n\`\`\`\n\n`;
       }
     });
     // Remove script and style elements completely during markdown conversion
     this.turndownService.addRule('removeScripts', {
       filter: ['script', 'style', 'noscript'],
-      replacement: function() {
+      replacement: function () {
         return '';
       }
     });
@@ -150,14 +150,14 @@ export class MarkdownService {
     try {
       // Store the base URL for link resolution in our custom rules
       this.baseUrl = baseUrl;
-      
+
       // Handle both string and cheerio element
       const content = typeof html === 'string' ? html : html.html();
       const markdown = this.turndownService.turndown(content);
-      
+
       // Clear the baseUrl after conversion
       this.baseUrl = null;
-      
+
       return markdown;
     } catch (e) {
       logger.info(`[MARKDOWN] Error converting to markdown: ${e.message}`);
@@ -173,17 +173,15 @@ export class MarkdownService {
    */
   addFrontmatter(markdown, metadata = {}) {
     // Filter out undefined values
-    const filteredMeta = Object.fromEntries(
-      Object.entries(metadata).filter(([_, v]) => v !== undefined)
-    );
-    
+    const filteredMeta = Object.fromEntries(Object.entries(metadata).filter(([_, v]) => v !== undefined));
+
     if (Object.keys(filteredMeta).length === 0) {
       return markdown;
     }
-    
+
     // Format frontmatter
     let frontmatter = '---\n';
-    
+
     for (const [key, value] of Object.entries(filteredMeta)) {
       // Format arrays as YAML arrays
       if (Array.isArray(value)) {
@@ -191,20 +189,20 @@ export class MarkdownService {
         value.forEach(item => {
           frontmatter += `  - ${item}\n`;
         });
-      } 
+      }
       // Format objects recursively
       else if (typeof value === 'object' && value !== null) {
         frontmatter += `${key}:\n`;
         for (const [subKey, subValue] of Object.entries(value)) {
           frontmatter += `  ${subKey}: ${this.formatYamlValue(subValue)}\n`;
         }
-      } 
+      }
       // Format strings and other primitives
       else {
         frontmatter += `${key}: ${this.formatYamlValue(value)}\n`;
       }
     }
-    
+
     frontmatter += '---\n\n';
     return frontmatter + markdown;
   }
@@ -218,18 +216,33 @@ export class MarkdownService {
   formatYamlValue(value) {
     if (typeof value === 'string') {
       // Escape special characters and wrap in quotes if needed
-      if (value.includes(':') || value.includes('#') || value.includes("'") || 
-          value.includes('"') || value.match(/^\s/) || value.match(/\s$/)) {
+      // YAML special characters that require quoting: : # ' " @ [ ] { } | > - leading/trailing spaces
+      if (
+        value.includes(':') ||
+        value.includes('#') ||
+        value.includes("'") ||
+        value.includes('"') ||
+        value.includes('@') ||
+        value.includes('[') ||
+        value.includes(']') ||
+        value.includes('{') ||
+        value.includes('}') ||
+        value.includes('|') ||
+        value.includes('>') ||
+        value.startsWith('-') ||
+        value.match(/^\s/) ||
+        value.match(/\s$/)
+      ) {
         // Use double quotes and escape internal double quotes
         return `"${value.replace(/"/g, '\\"')}"`;
       }
       return value;
     }
-    
+
     if (value === null || value === undefined) {
       return 'null';
     }
-    
+
     return String(value);
   }
 }

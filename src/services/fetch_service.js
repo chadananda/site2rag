@@ -1,6 +1,6 @@
 import fetch from 'node-fetch';
 import robotsParser from 'robots-parser';
-import { URL } from 'url';
+import {URL} from 'url';
 import logger from './logger_service.js';
 
 /**
@@ -44,11 +44,11 @@ export class FetchService {
   async fetchRobotsTxt(domain) {
     try {
       const robotsUrl = new URL('/robots.txt', domain).href;
-      const res = await fetch(robotsUrl, { 
-        headers: { 'User-Agent': this.userAgent },
+      const res = await fetch(robotsUrl, {
+        headers: {'User-Agent': this.userAgent},
         timeout: 5000
       });
-      
+
       if (res.ok) {
         const content = await res.text();
         this.robots = robotsParser(robotsUrl, content);
@@ -92,64 +92,66 @@ export class FetchService {
   async fetchUrl(url, options = {}) {
     logger.info(`FetchService.fetchUrl: Fetching ${url}`);
     await this.applyPoliteDelay();
-    
+
     const controller = this.createController();
     this.activeControllers.add(controller);
-    
+
     try {
       const headers = {
         'User-Agent': this.userAgent,
         ...options.headers
       };
-      
+
       // Only log headers in debug mode
       if (this.debug) {
         logger.log('DEBUG', `Fetch headers:`, headers);
       }
-      
+
       try {
         const fetchOptions = {
           headers,
           signal: controller.signal,
-          timeout: options.timeout || 30000
+          timeout: options.timeout || 30000,
+          redirect: 'follow', // Follow redirects like wget/curl
+          follow: 20 // Maximum number of redirects to follow
         };
-        
+
         // If onProgress callback is provided, use it to track download progress
         if (typeof options.onProgress === 'function') {
           const response = await fetch(url, fetchOptions);
-          
+
           // If the response is not ok, return it immediately
           if (!response.ok) {
             logger.info(`Fetch response for ${url}: status=${response.status}, ok=${response.ok}`);
             return response;
           }
-          
+
           // Get content length from headers if available
           const contentLength = parseInt(response.headers.get('content-length'), 10);
-          
+
           // Read the response body as a stream to track progress
           const reader = response.body.getReader();
           let receivedLength = 0;
           const chunks = [];
-          
+
           // Initial progress update
           options.onProgress(0, contentLength || 0);
-          
+
           // Process the stream chunks
           while (true) {
-            const { done, value } = await reader.read();
-            
+            const {done, value} = await reader.read();
+
             if (done) {
               break;
             }
-            
+
             chunks.push(value);
             receivedLength += value.length;
-            
+
             // Report progress
             options.onProgress(receivedLength, contentLength || receivedLength);
           }
-          
+
           // Concatenate chunks into a single Uint8Array
           const chunksAll = new Uint8Array(receivedLength);
           let position = 0;
@@ -157,17 +159,17 @@ export class FetchService {
             chunksAll.set(chunk, position);
             position += chunk.length;
           }
-          
+
           // Final progress update
           options.onProgress(receivedLength, receivedLength);
-          
+
           // Create a new response with the concatenated body
           const responseInit = {
             status: response.status,
             statusText: response.statusText,
             headers: response.headers
           };
-          
+
           return new Response(chunksAll, responseInit);
         } else {
           // Standard fetch without progress tracking
@@ -176,7 +178,14 @@ export class FetchService {
           return response;
         }
       } catch (error) {
-        logger.error(`Fetch error for ${url}:`, error.message);
+        // Provide better error messages for common redirect issues
+        if (error.message.includes('maximum redirect reached')) {
+          logger.error(`Too many redirects for ${url} (exceeded 20 redirects)`);
+        } else if (error.message.includes('redirect')) {
+          logger.error(`Redirect error for ${url}: ${error.message}`);
+        } else {
+          logger.error(`Fetch error for ${url}: ${error.message}`);
+        }
         throw error;
       }
     } finally {

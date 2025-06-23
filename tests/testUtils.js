@@ -1,5 +1,5 @@
 // tests/testUtils.js
-import { getDB } from '../src/db.js';
+import {getDB} from '../src/db.js';
 // All DB access must use getDB() from src/db.js. Never instantiate CrawlDB directly.
 import fs from 'fs';
 

@@ -15,11 +15,11 @@ export function parseFile(filePath) {
   if (!fs.existsSync(filePath)) {
     throw new Error(`File not found: ${filePath}`);
   }
-  
+
   const content = fs.readFileSync(filePath, 'utf8');
   const ext = path.extname(filePath).toLowerCase();
   const originalFormat = detectFormat(ext);
-  
+
   // Parse frontmatter if present
   const parsed = matter(content);
   const metadata = {
@@ -29,10 +29,10 @@ export function parseFile(filePath) {
     file_size: content.length,
     parsed_at: new Date().toISOString()
   };
-  
+
   // Split content into blocks based on format
   const blocks = splitIntoBlocks(parsed.content, originalFormat);
-  
+
   return {
     metadata,
     blocks,
@@ -48,17 +48,17 @@ export function parseFile(filePath) {
  */
 export function detectFormat(ext) {
   const cleanExt = ext.startsWith('.') ? ext.slice(1) : ext;
-  
+
   const formatMap = {
-    'md': 'markdown',
-    'markdown': 'markdown', 
-    'mdoc': 'markdown',
-    'txt': 'text',
-    'rst': 'restructuredtext',
-    'adoc': 'asciidoc',
-    'textile': 'textile'
+    md: 'markdown',
+    markdown: 'markdown',
+    mdoc: 'markdown',
+    txt: 'text',
+    rst: 'restructuredtext',
+    adoc: 'asciidoc',
+    textile: 'textile'
   };
-  
+
   return formatMap[cleanExt.toLowerCase()] || 'text';
 }
 
@@ -70,7 +70,7 @@ export function detectFormat(ext) {
  */
 export function splitIntoBlocks(content, format) {
   const blocks = [];
-  
+
   switch (format) {
     case 'markdown':
       return splitMarkdownBlocks(content);
@@ -96,10 +96,10 @@ function splitMarkdownBlocks(content) {
   const lines = content.split('\n');
   let currentBlock = '';
   let blockType = 'paragraph';
-  
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    
+
     // Headers
     if (line.match(/^#{1,6}\s/)) {
       // Save previous block
@@ -115,7 +115,7 @@ function splitMarkdownBlocks(content) {
       if (currentBlock.trim()) {
         blocks.push(createBlock(currentBlock.trim(), blockType));
       }
-      
+
       // Collect entire code block
       currentBlock = line + '\n';
       i++;
@@ -126,7 +126,7 @@ function splitMarkdownBlocks(content) {
       if (i < lines.length) {
         currentBlock += lines[i]; // Closing ```
       }
-      
+
       blocks.push(createBlock(currentBlock.trim(), 'code'));
       currentBlock = '';
       blockType = 'paragraph';
@@ -164,12 +164,12 @@ function splitMarkdownBlocks(content) {
       }
     }
   }
-  
+
   // Save final block
   if (currentBlock.trim()) {
     blocks.push(createBlock(currentBlock.trim(), blockType));
   }
-  
+
   return blocks.filter(block => block.text.trim().length > 0);
 }
 
@@ -183,11 +183,11 @@ function splitRstBlocks(content) {
   const lines = content.split('\n');
   let currentBlock = '';
   let blockType = 'paragraph';
-  
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const nextLine = i + 1 < lines.length ? lines[i + 1] : '';
-    
+
     // RST headers (next line is underline)
     if (nextLine && nextLine.match(/^[=\-`':."~^_*+#]{3,}$/)) {
       // Save previous block
@@ -225,12 +225,12 @@ function splitRstBlocks(content) {
       currentBlock += (currentBlock ? '\n' : '') + line;
     }
   }
-  
+
   // Save final block
   if (currentBlock.trim()) {
     blocks.push(createBlock(currentBlock.trim(), blockType));
   }
-  
+
   return blocks.filter(block => block.text.trim().length > 0);
 }
 
@@ -262,14 +262,14 @@ function splitTextileBlocks(content) {
 function splitTextBlocks(content) {
   const blocks = [];
   const paragraphs = content.split(/\n\s*\n/);
-  
+
   paragraphs.forEach(paragraph => {
     const trimmed = paragraph.trim();
     if (trimmed) {
       blocks.push(createBlock(trimmed, 'paragraph'));
     }
   });
-  
+
   return blocks;
 }
 

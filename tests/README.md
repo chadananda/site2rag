@@ -5,7 +5,7 @@
 `site2rag` follows a **comprehensive testing strategy** with clear separation of concerns:
 
 - **Unit Tests**: Fast, isolated tests for individual components
-- **Integration Tests**: End-to-end workflows with real components  
+- **Integration Tests**: End-to-end workflows with real components
 - **Manual Testing**: Real website downloads for validation
 - **Consistent Naming**: All test files use kebab-case convention
 
@@ -41,18 +41,21 @@ tests/
 ## Naming Conventions
 
 ### Test Files
+
 - **Format**: `{component-name}.test.js` (kebab-case)
-- **Examples**: 
+- **Examples**:
   - `site-processor.test.js`
   - `file-service.test.js`
   - `crawl-state-service.test.js`
 
 ### Test Descriptions
+
 - **Unit tests**: `describe('ComponentName', () => {})`
 - **Methods**: `describe('methodName', () => {})`
 - **Scenarios**: `it('should do something when condition', () => {})`
 
 ### Temporary Files
+
 - **Real sites**: `tests/tmp/sites/{domain}/`
 - **Test outputs**: `tests/tmp/output-{test-name}/`
 - **Test databases**: `tests/tmp/{test-name}.db`
@@ -62,6 +65,7 @@ tests/
 ### Unit Tests (`tests/unit/`)
 
 **Purpose**: Test individual components in isolation
+
 ```javascript
 // Example: tests/unit/services/file-service.test.js
 describe('FileService', () => {
@@ -74,6 +78,7 @@ describe('FileService', () => {
 ```
 
 **Characteristics**:
+
 - ⚡ **Fast execution** (< 100ms per test)
 - 🔒 **Isolated** - mock external dependencies
 - 🎯 **Focused** - test one function/method
@@ -82,6 +87,7 @@ describe('FileService', () => {
 ### Integration Tests (`tests/integration/`)
 
 **Purpose**: Test complete workflows end-to-end
+
 ```javascript
 // Example: tests/integration/crawl-markdown.test.js
 describe('Full Crawl Workflow', () => {
@@ -92,6 +98,7 @@ describe('Full Crawl Workflow', () => {
 ```
 
 **Characteristics**:
+
 - 🌐 **Real components** - no mocking of internal services
 - ⏱️ **Slower execution** (1-10 seconds per test)
 - 🔄 **End-to-end** - full user scenarios
@@ -100,6 +107,7 @@ describe('Full Crawl Workflow', () => {
 ### Test Data (`tests/fixtures/`)
 
 **Static test data** committed to repository:
+
 - **Mock HTML**: Realistic website content samples
 - **Expected outputs**: Reference markdown files
 - **Configurations**: Sample crawl configs
@@ -115,7 +123,7 @@ npm test
 npm run test:unit
 
 # Integration tests only
-npm run test:integration  
+npm run test:integration
 
 # Specific test file
 npm test -- file-service.test.js
@@ -130,6 +138,7 @@ npm run test:coverage
 ## Testing Real Websites
 
 ### Manual Testing Process
+
 For testing with real websites, use `tests/tmp/sites/`:
 
 ```bash
@@ -139,12 +148,14 @@ node ../../../bin/site2rag.js example.com --limit 10
 ```
 
 **Guidelines**:
+
 - ✅ **Use small limits** (--limit 10) to avoid overwhelming servers
-- ✅ **Choose stable sites** that won't change frequently  
+- ✅ **Choose stable sites** that won't change frequently
 - ✅ **Document test sites** in test comments
 - ✅ **Clean up** old downloads periodically
 
 ### Test Site Recommendations
+
 - **Documentation sites**: Usually stable, good structure
 - **Personal blogs**: Small, predictable content
 - **Educational sites**: Often well-structured HTML
@@ -192,6 +203,7 @@ it('should handle network errors gracefully', async () => {
 ## Continuous Integration
 
 Tests run automatically on:
+
 - **Pull Requests**: All tests must pass
 - **Main branch commits**: Full test suite + coverage
 - **Nightly builds**: Including integration tests with real sites
@@ -213,6 +225,7 @@ open coverage/index.html
 ## Best Practices
 
 ### ✅ Do
+
 - Use **descriptive test names** that read like specifications
 - **Mock external dependencies** in unit tests
 - **Clean up** temporary files in test teardown
@@ -220,6 +233,7 @@ open coverage/index.html
 - **Use fixtures** for reusable test data
 
 ### ❌ Don't
+
 - Mix **temporary files** with committed test data
 - Use **snake_case** or **camelCase** for test files (use kebab-case)
 - Create **large test downloads** that slow CI
@@ -228,4 +242,4 @@ open coverage/index.html
 
 ---
 
-*This testing strategy ensures reliable, maintainable tests that provide confidence in site2rag's functionality across diverse websites and use cases.*
+_This testing strategy ensures reliable, maintainable tests that provide confidence in site2rag's functionality across diverse websites and use cases._

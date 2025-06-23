@@ -8,8 +8,6 @@ import logger from './services/logger_service.js';
  * Handles database connections, integrity checks, and session management
  */
 
-
-
 /**
  * Get paths for all database files based on a normalized base path
  * @param {string} dbDir - The database directory path
@@ -31,10 +29,10 @@ export function getDbPaths(dbDir) {
  */
 export function checkDbIntegrity(dbPath) {
   if (!fs.existsSync(dbPath)) return false;
-  
+
   try {
     const db = new Database(dbPath);
-    const res = db.pragma('integrity_check', { simple: true });
+    const res = db.pragma('integrity_check', {simple: true});
     db.close();
     return res === 'ok';
   } catch (e) {
@@ -80,7 +78,7 @@ export function initDbSchema(db) {
       notes TEXT
     );
   `);
-  
+
   // Add context tracking columns to existing databases
   try {
     db.exec(`
@@ -104,67 +102,73 @@ export function getDB(dbPath, opts = {}) {
   const dbDir = path.dirname(dbPath);
   if (!fs.existsSync(dbDir)) {
     logger.info(`Creating database directory: ${dbDir}`);
-    fs.mkdirSync(dbDir, { recursive: true });
+    fs.mkdirSync(dbDir, {recursive: true});
   }
-  
+
   // Use the normalized directory path to get fixed database paths
   // This prevents creating deeply nested directories with absolute paths
   const normalizedDir = path.normalize(dbDir);
   const paths = getDbPaths(normalizedDir);
-  
+
   logger.info(`Database paths:\n- Main: ${paths.main}\n- Session: ${paths.session}\n- Previous: ${paths.prev}`);
-  
+
   // Check if main DB is valid and copy to session DB if it is
   const mainValid = checkDbIntegrity(paths.main);
   if (mainValid) {
     fs.copyFileSync(paths.main, paths.session);
   } else if (fs.existsSync(paths.session)) {
-    try { fs.unlinkSync(paths.session); } catch {}
+    try {
+      fs.unlinkSync(paths.session);
+    } catch {}
   }
-  
+
   // Open session DB for writing, with recovery from previous if needed
   let dbInstance;
   let dbReady = false;
-  
+
   while (!dbReady) {
     try {
       // Explicitly open the database with write permissions
-      dbInstance = new Database(paths.session, { readonly: false });
-      const res = dbInstance.pragma('integrity_check', { simple: true });
-      
+      dbInstance = new Database(paths.session, {readonly: false});
+      const res = dbInstance.pragma('integrity_check', {simple: true});
+
       if (res !== 'ok') {
         logger.error('[DB] Corruption detected in session DB - attempting recovery...');
         dbInstance.close();
-        
+
         // Try to recover from previous DB
         if (recoverFromPrevDb(paths.prev, paths.session)) {
           continue;
         }
-        
+
         // If recovery failed, create new DB
-        try { fs.unlinkSync(paths.session); } catch {}
+        try {
+          fs.unlinkSync(paths.session);
+        } catch {}
         logger.warn('[DB] Created new session DB after corruption.');
         continue;
       }
-      
+
       dbReady = true;
     } catch (err) {
       logger.error('[DB] Error opening session DB:', err);
-      
+
       // Try to recover from previous DB
       if (recoverFromPrevDb(paths.prev, paths.session)) {
         continue;
       }
-      
+
       // If recovery failed, create new DB
-      try { fs.unlinkSync(paths.session); } catch {}
+      try {
+        fs.unlinkSync(paths.session);
+      } catch {}
       logger.warn('[DB] Created new session DB after error.');
     }
   }
-  
+
   // Initialize schema
   initDbSchema(dbInstance);
-  
+
   // Create CrawlDB instance
   return new CrawlDB(paths, dbInstance);
 }
@@ -179,23 +183,27 @@ export function recoverFromPrevDb(prevPath, sessionPath) {
   if (fs.existsSync(prevPath)) {
     try {
       const prevDb = new Database(prevPath);
-      const prevRes = prevDb.pragma('integrity_check', { simple: true });
+      const prevRes = prevDb.pragma('integrity_check', {simple: true});
       prevDb.close();
-      
+
       if (prevRes === 'ok') {
         fs.copyFileSync(prevPath, sessionPath);
         logger.warn('[DB] Restored session DB from previous DB.');
         return true;
       } else {
         logger.error('[DB] Previous DB is also corrupt. Deleting it.');
-        try { fs.unlinkSync(prevPath); } catch {}
+        try {
+          fs.unlinkSync(prevPath);
+        } catch {}
       }
     } catch (e) {
       logger.error('[DB] Error reading previous DB:', e);
-      try { fs.unlinkSync(prevPath); } catch {}
+      try {
+        fs.unlinkSync(prevPath);
+      } catch {}
     }
   }
-  
+
   return false;
 }
 
@@ -211,13 +219,13 @@ export class CrawlDB {
   constructor(paths, dbInstance) {
     this.paths = paths;
     this.db = dbInstance;
-    
+
     // Create backup of main DB if it exists
     if (fs.existsSync(this.paths.main)) {
       this.createBackup();
     }
   }
-  
+
   /**
    * Create a backup of the main database
    * @returns {boolean} - True if backup was successful
@@ -231,7 +239,7 @@ export class CrawlDB {
       return false;
     }
   }
-  
+
   /**
    * Recover from backup
    * @returns {boolean} - True if recovery was successful
@@ -240,9 +248,9 @@ export class CrawlDB {
     try {
       // Check backup integrity
       const backupDb = new Database(this.paths.backup);
-      const res = backupDb.pragma('integrity_check', { simple: true });
+      const res = backupDb.pragma('integrity_check', {simple: true});
       backupDb.close();
-      
+
       if (res === 'ok') {
         fs.copyFileSync(this.paths.backup, this.paths.main);
         logger.warn('[CrawlDB] Restored DB from backup.');
@@ -253,28 +261,31 @@ export class CrawlDB {
     } catch (e) {
       logger.error('[CrawlDB] Error reading backup:', e);
     }
-    
-    try { fs.unlinkSync(this.paths.backup); } catch {}
-    try { fs.unlinkSync(this.paths.main); } catch {}
+
+    try {
+      fs.unlinkSync(this.paths.backup);
+    } catch {}
+    try {
+      fs.unlinkSync(this.paths.main);
+    } catch {}
     logger.warn('[CrawlDB] Created new DB after corruption.');
     return false;
   }
-  
+
   /**
    * Insert or update a page in the database
    * @param {Object} page - Page data
    */
   upsertPage(page) {
-    
     // Ensure optional fields are always present for SQL binding
     if (!('title' in page)) page.title = null;
     if (!('file_path' in page)) page.file_path = null;
-    
+
     // Debug: Log upsert for test traceability
     if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
       logger.info('[DB][upsertPage] Upserting page:', JSON.stringify(page));
     }
-    
+
     const stmt = this.db.prepare(`
       INSERT INTO pages (url, etag, last_modified, content_hash, last_crawled, status, title, file_path)
       VALUES (@url, @etag, @last_modified, @content_hash, @last_crawled, @status, @title, @file_path)
@@ -287,7 +298,7 @@ export class CrawlDB {
         title=excluded.title,
         file_path=excluded.file_path;
     `);
-    
+
     try {
       const result = stmt.run(page);
       // Only log results in test mode
@@ -298,14 +309,14 @@ export class CrawlDB {
       logger.error(`SQL execution error: ${err.message}`);
       throw err;
     }
-    
+
     // Debug: Confirm page is now in DB (test mode only)
     if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
       const check = this.getPage(page.url);
       logger.info('[DB][upsertPage] DB now has:', JSON.stringify(check));
     }
   }
-  
+
   /**
    * Get a page from the database
    * @param {string} url - Page URL
@@ -314,7 +325,7 @@ export class CrawlDB {
   getPage(url) {
     return this.db.prepare('SELECT * FROM pages WHERE url = ?').get(url);
   }
-  
+
   /**
    * Insert a crawl session
    * @param {Object} session - Session data
@@ -324,17 +335,17 @@ export class CrawlDB {
       INSERT INTO crawl_sessions (started_at, finished_at, pages_crawled, notes)
       VALUES (@started_at, @finished_at, @pages_crawled, @notes)
     `);
-    
+
     stmt.run(session);
   }
-  
+
   /**
    * Close the database connection
    */
   close() {
     this.db.close();
   }
-  
+
   /**
    * Finalize the crawl session
    * 1. Rename crawl.db to crawl_prev.db (overwrite if needed)
@@ -349,20 +360,20 @@ export class CrawlDB {
       logger.warn('[CrawlDB] Error closing database:', e);
       // Continue anyway
     }
-    
+
     logger.info('[CrawlDB] Finalizing session...');
     logger.info(`- Current DB: ${this.paths.main}`);
     logger.info(`- Session DB: ${this.paths.session}`);
     logger.info(`- Previous DB: ${this.paths.prev}`);
-    
+
     // Check if the session DB exists and is valid
     let sessionValid = checkDbIntegrity(this.paths.session);
-    
+
     if (!sessionValid) {
       logger.error('[CrawlDB] Session DB is invalid, cannot finalize');
       return false;
     }
-    
+
     // Check content of session DB before finalization (test mode only)
     if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
       try {
@@ -374,13 +385,13 @@ export class CrawlDB {
         console.log('[TRACE] Error checking session DB content:', err.message);
       }
     }
-    
+
     // Ensure parent directory exists for all files
     const dbDir = path.dirname(this.paths.main);
     if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true });
+      fs.mkdirSync(dbDir, {recursive: true});
     }
-    
+
     // 1. Backup current DB to prev if it exists
     if (fs.existsSync(this.paths.main)) {
       try {
@@ -394,7 +405,7 @@ export class CrawlDB {
             // Continue anyway
           }
         }
-        
+
         // Now rename current to prev (atomic operation)
         fs.renameSync(this.paths.main, this.paths.prev);
         logger.info(`[CrawlDB] Backed up current DB to: ${this.paths.prev}`);
@@ -403,7 +414,7 @@ export class CrawlDB {
         // Continue anyway - we still want to try to promote the session DB
       }
     }
-    
+
     // 2. Rename session DB to current DB
     try {
       fs.renameSync(this.paths.session, this.paths.main);

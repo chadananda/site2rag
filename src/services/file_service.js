@@ -25,7 +25,7 @@ export class FileService {
     try {
       await fs.promises.access(dirPath);
     } catch (e) {
-      await fs.promises.mkdir(dirPath, { recursive: true });
+      await fs.promises.mkdir(dirPath, {recursive: true});
     }
   }
 
@@ -68,10 +68,7 @@ export class FileService {
 
     // Create a debug file path with _deleted.md suffix
     const parsedPath = path.parse(originalFilePath);
-    const debugFilePath = path.join(
-      parsedPath.dir,
-      `${parsedPath.name}_deleted${parsedPath.ext}`
-    );
+    const debugFilePath = path.join(parsedPath.dir, `${parsedPath.name}_deleted${parsedPath.ext}`);
 
     // Format the debug content
     let debugContent = `# Removed Blocks Debug Information
@@ -128,7 +125,7 @@ This file contains HTML blocks that were removed during content processing.
 
   /**
    * Gets the full path for a file in the output directory
-   * @param {string} domain - Domain name 
+   * @param {string} domain - Domain name
    * @param {string} filename - Filename (typically generated from URL path)
    * @param {boolean} createDir - Whether to create the directory if it doesn't exist
    * @returns {string} - Full file path
@@ -137,14 +134,14 @@ This file contains HTML blocks that were removed during content processing.
     // Ensure the output directory exists
     if (createDir && !fs.existsSync(this.outputDir)) {
       logger.info(`Creating output directory: ${this.outputDir}`);
-      fs.mkdirSync(this.outputDir, { recursive: true });
+      fs.mkdirSync(this.outputDir, {recursive: true});
     }
-    
+
     if (this.flat) {
       // Flat mode: all files in top-level directory with path-derived names
       return path.join(this.outputDir, this.generateFlatFilename(filename));
     }
-    
+
     // Hierarchical mode: preserve directory structure
     let outputPath;
     if (filename.includes('/')) {
@@ -152,21 +149,21 @@ This file contains HTML blocks that were removed during content processing.
       const lastSlashIndex = filename.lastIndexOf('/');
       const dirPath = filename.substring(0, lastSlashIndex);
       const actualFilename = filename.substring(lastSlashIndex + 1);
-      
+
       // Create the full directory path
       const fullDirPath = path.join(this.outputDir, dirPath);
-      
+
       // Create the directory if it doesn't exist
       if (createDir && !fs.existsSync(fullDirPath)) {
-        fs.mkdirSync(fullDirPath, { recursive: true });
+        fs.mkdirSync(fullDirPath, {recursive: true});
       }
-      
+
       outputPath = path.join(this.outputDir, dirPath, actualFilename);
     } else {
       // No path separators, just use the filename directly
       outputPath = path.join(this.outputDir, filename);
     }
-    
+
     return outputPath;
   }
 
@@ -205,7 +202,7 @@ This file contains HTML blocks that were removed during content processing.
       return defaultValue;
     }
   }
-  
+
   /**
    * Writes JSON data to a file
    * @param {string} filePath - Path to the file
@@ -216,7 +213,7 @@ This file contains HTML blocks that were removed during content processing.
     const content = JSON.stringify(data, null, 2);
     await this.writeFile(filePath, content);
   }
-  
+
   /**
    * Writes binary data to a file, creating directories as needed
    * @param {string} filePath - File path
@@ -228,7 +225,7 @@ This file contains HTML blocks that were removed during content processing.
     await this.ensureDir(dirPath);
     await fs.promises.writeFile(filePath, data);
   }
-  
+
   /**
    * Downloads and saves a document file (PDF, DOCX, etc.) to the output directory
    * @param {string} url - URL of the document to download
@@ -239,7 +236,7 @@ This file contains HTML blocks that were removed during content processing.
   async downloadDocument(url, baseUrl, hostname) {
     try {
       logger.info(`[DOCUMENT] Downloading document from ${url}`);
-      
+
       // Resolve URL if it's relative
       let absoluteUrl = url;
       if (!url.startsWith('http') && !url.startsWith('//')) {
@@ -247,66 +244,66 @@ This file contains HTML blocks that were removed during content processing.
           absoluteUrl = new URL(url, baseUrl).href;
         } catch (error) {
           logger.warn(`[DOCUMENT] Error resolving URL: ${url}`, error);
-          return { success: false, error: 'Invalid URL' };
+          return {success: false, error: 'Invalid URL'};
         }
       }
-      
+
       // Fetch the document
       const response = await fetch(absoluteUrl);
       if (!response.ok) {
         logger.warn(`[DOCUMENT] Failed to download document: ${response.status} ${response.statusText}`);
-        return { success: false, error: `HTTP error: ${response.status}` };
+        return {success: false, error: `HTTP error: ${response.status}`};
       }
-      
+
       // Get the document data as buffer
       const documentData = await response.arrayBuffer();
       const buffer = Buffer.from(documentData);
-      
+
       // Extract filename from URL or use a hash
       const urlObj = new URL(absoluteUrl);
       let filename = path.basename(urlObj.pathname);
-      
+
       // If filename is empty or doesn't have an extension, generate one
       if (!filename || !path.extname(filename)) {
         const contentType = response.headers.get('content-type');
         let extension = '.bin';
-        
+
         if (contentType) {
           if (contentType.includes('pdf')) extension = '.pdf';
           else if (contentType.includes('word') || contentType.includes('docx')) extension = '.docx';
           else if (contentType.includes('excel') || contentType.includes('xlsx')) extension = '.xlsx';
           else if (contentType.includes('powerpoint') || contentType.includes('pptx')) extension = '.pptx';
         }
-        
+
         // Use URL path as filename or fallback to a timestamp
         const pathParts = urlObj.pathname.split('/');
         const lastPathPart = pathParts[pathParts.length - 1];
         filename = lastPathPart || `document-${Date.now()}${extension}`;
       }
-      
+
       // Create documents directory within the hostname directory
       const documentsDir = path.join(hostname, 'documents');
       const outputPath = this.getOutputPath(documentsDir, filename);
-      
+
       // Save the document
       await this.writeBinaryFile(outputPath, buffer);
-      
+
       // Calculate the relative path from the hostname directory
       const relativePath = path.join('documents', filename);
-      
+
       logger.info(`[DOCUMENT] Saved document to ${outputPath}`);
-      return { 
-        success: true, 
-        relativePath, 
+      return {
+        success: true,
+        relativePath,
         fullPath: outputPath,
         filename
       };
     } catch (error) {
       logger.error(`[DOCUMENT] Error downloading document: ${error.message}`);
-      return { success: false, error: error.message };
+      return {success: false, error: error.message};
     }
   }
-  
+
   /**
    * Saves binary file content to a file in the output directory
    * @param {Buffer} data - Binary data to write

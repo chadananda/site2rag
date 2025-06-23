@@ -11,89 +11,89 @@ class LoggerService {
     // Define log types with their properties
     this.logTypes = {
       // Always enabled in all modes
-      INFO: { 
-        prefix: '[INFO]', 
+      INFO: {
+        prefix: '[INFO]',
         color: '\x1b[36m', // Cyan
         enabled: true,
         // Hide info messages in production mode by default
         productionLevel: 'none' // 'all', 'critical', 'none'
       },
-      WARN: { 
-        prefix: '[WARN]', 
+      WARN: {
+        prefix: '[WARN]',
         color: '\x1b[33m', // Yellow
         enabled: true,
         productionLevel: 'all'
       },
-      ERROR: { 
-        prefix: '[ERROR]', 
+      ERROR: {
+        prefix: '[ERROR]',
         color: '\x1b[31m', // Red
         enabled: true,
         productionLevel: 'all'
       },
-      
+
       // Debug-only log types - disabled in production mode
-      DEBUG: { 
-        prefix: '[DEBUG]', 
+      DEBUG: {
+        prefix: '[DEBUG]',
         color: '\x1b[35m', // Magenta
         enabled: false,
         productionLevel: 'none'
       },
-      DOMAIN_FILTER: { 
-        prefix: '[DOMAIN_FILTER]', 
+      DOMAIN_FILTER: {
+        prefix: '[DOMAIN_FILTER]',
         color: '\x1b[32m', // Green
         enabled: false,
         productionLevel: 'none'
       },
-      CRAWL: { 
-        prefix: '[CRAWL]', 
+      CRAWL: {
+        prefix: '[CRAWL]',
         color: '\x1b[34m', // Blue
         enabled: false,
         productionLevel: 'critical'
       },
-      LINKS: { 
-        prefix: '[LINKS]', 
+      LINKS: {
+        prefix: '[LINKS]',
         color: '\x1b[36m', // Cyan
         enabled: false,
         productionLevel: 'none'
       },
-      CONTENT: { 
-        prefix: '[CONTENT]', 
+      CONTENT: {
+        prefix: '[CONTENT]',
         color: '\x1b[35m', // Magenta
         enabled: false,
         productionLevel: 'none'
       },
-      DECISION: { 
-        prefix: '[DECISION]', 
+      DECISION: {
+        prefix: '[DECISION]',
         color: '\x1b[33m', // Yellow
         enabled: false,
         productionLevel: 'none'
       },
-      CACHE: { 
-        prefix: '[CACHE]', 
+      CACHE: {
+        prefix: '[CACHE]',
         color: '\x1b[90m', // Gray
         enabled: false,
         productionLevel: 'none'
       },
-      MARKDOWN: { 
-        prefix: '[MARKDOWN]', 
+      MARKDOWN: {
+        prefix: '[MARKDOWN]',
         color: '\x1b[36m', // Cyan
         enabled: false,
         productionLevel: 'none'
       },
-      TEST: { 
-        prefix: '[TEST]', 
+      TEST: {
+        prefix: '[TEST]',
         color: '\x1b[35m', // Magenta
         enabled: false,
         productionLevel: 'none'
       },
-      DEBUG_FLAG: { 
-        prefix: '[DEBUG FLAG]', 
+      DEBUG_FLAG: {
+        prefix: '[DEBUG FLAG]',
         color: '\x1b[35m', // Magenta
         enabled: false,
         productionLevel: 'none'
       }
     };
-    
+
     // If debug mode is enabled, enable all debug-related log types
     if (this.debug) {
       Object.keys(this.logTypes).forEach(type => {
@@ -102,7 +102,7 @@ class LoggerService {
         }
       });
     }
-    
+
     // If verbose mode is enabled, enable all log types
     if (this.verbose) {
       Object.keys(this.logTypes).forEach(type => {
@@ -119,7 +119,7 @@ class LoggerService {
     if (options.debug !== undefined) this.debug = options.debug;
     if (options.verbose !== undefined) this.verbose = options.verbose;
     if (options.prefix) this.logPrefix = options.prefix;
-    
+
     // Update log type settings based on new debug/verbose settings
     if (this.debug || this.verbose) {
       Object.keys(this.logTypes).forEach(type => {
@@ -144,7 +144,7 @@ class LoggerService {
    */
   log(type, message, level = undefined) {
     const logType = this.logTypes[type] || this.logTypes.INFO;
-    
+
     // Skip logging if:
     // 1. Log type is not enabled (based on debug/verbose settings)
     // 2. In production mode (debug=false) and either:
@@ -153,7 +153,7 @@ class LoggerService {
     if (!logType.enabled) {
       return;
     }
-    
+
     if (!this.debug && !this.verbose) {
       // We're in production mode
       if (logType.productionLevel === 'none') {
@@ -163,7 +163,7 @@ class LoggerService {
         return;
       }
     }
-    
+
     const reset = '\x1b[0m';
     console.log(`${logType.color}${this.logPrefix} ${logType.prefix}${reset} ${message}`);
   }

@@ -1,15 +1,14 @@
-import { URL } from 'url';
-import { CrawlLimitReached } from './errors.js';
+import {URL} from 'url';
+import {CrawlLimitReached} from './utils/errors.js';
 // Service imports
-import { UrlService } from './services/url_service.js';
-import { FetchService } from './services/fetch_service.js';
-import { ContentService } from './services/content_service.js';
-import { MarkdownService } from './services/markdown_service.js';
-import { FileService } from './services/file_service.js';
-import { CrawlStateService } from './services/crawl_state_service.js';
-import { CrawlService } from './services/crawl_service.js';
-import { getDB } from './db.js';
-import { DefaultCrawlState } from './crawl_state.js';
+import {UrlService} from './services/url_service.js';
+import {FetchService} from './services/fetch_service.js';
+import {ContentService} from './services/content_service.js';
+import {MarkdownService} from './services/markdown_service.js';
+import {FileService} from './services/file_service.js';
+import {CrawlService} from './services/crawl_service.js';
+import {getDB} from './db.js';
+import {DefaultCrawlState} from './core/crawl_state.js';
 import logger from './services/logger_service.js';
 import fs from 'fs';
 import path from 'path';
@@ -51,19 +50,21 @@ export class SiteProcessor {
       aiConfig: options.aiConfig || {},
       debug: options.debug || false,
       flat: options.flat || false,
+      enhancement: options.enhancement !== undefined ? options.enhancement : true, // Enable enhancement by default
+      test: options.test || false, // Test mode for insertion tracking
       // Explicitly set sameDomain to true by default unless explicitly disabled
       sameDomain: options.sameDomain !== false
     };
-    
+
     // Configure logger based on debug option
-    logger.configure({ debug: this.options.debug });
-    
+    logger.configure({debug: this.options.debug});
+
     // Log important configuration details
     logger.info(`Max depth: ${this.options.maxDepth}`, true);
     logger.info(`Limit: ${this.options.maxPages} pages`, true);
     logger.info(`Crawling: ${this.options.domain}`, true);
     logger.info(`Output dir: ${this.options.outputDir}`, true);
-    
+
     // Log domain filtering status
     if (this.options.sameDomain) {
       logger.domainFilter(`Domain filtering enabled, restricting to: ${hostname}`);
@@ -71,11 +72,11 @@ export class SiteProcessor {
       logger.domainFilter(`Domain filtering explicitly disabled, will crawl external domains`);
     }
     // Initialize services as instance properties
-    const { outputDir, politeWaitMs, aiConfig, debug, flat } = this.options;
-    this.fileService = new FileService({ outputDir, flat });
+    const {outputDir, politeWaitMs, aiConfig, debug, flat} = this.options;
+    this.fileService = new FileService({outputDir, flat});
     this.urlService = new UrlService();
-    this.fetchService = new FetchService({ politeWaitMs });
-    
+    this.fetchService = new FetchService({politeWaitMs});
+
     // Create database and crawl state if not provided
     let db = null;
     if (options.crawlState) {
@@ -87,8 +88,8 @@ export class SiteProcessor {
       db = getDB(dbPath);
       this.crawlStateService = new DefaultCrawlState(db);
     }
-    
-    this.contentService = new ContentService({ aiConfig, debug, outputDir, db });
+
+    this.contentService = new ContentService({aiConfig, debug, outputDir, db});
     this.markdownService = new MarkdownService();
     // Copy configuration options to instance properties for backward compatibility
     Object.assign(this, this.options);
@@ -106,7 +107,7 @@ export class SiteProcessor {
      * @param {string} url - URL to check
      * @returns {boolean} - Whether the URL can be crawled
      */
-    this.canCrawl = (url) => {
+    this.canCrawl = url => {
       return this.fetchService.canCrawl(url);
     };
     // Define getter for robots property
@@ -134,21 +135,24 @@ export class SiteProcessor {
    * @returns {Promise<string[]>} - Array of crawled URLs
    */
   async process() {
-    logger.info(`SiteProcessor.process: Starting with domain=${this.options.domain}, outputDir=${this.options.outputDir}`, true);
-    
+    logger.info(
+      `SiteProcessor.process: Starting with domain=${this.options.domain}, outputDir=${this.options.outputDir}`,
+      true
+    );
+
     // Ensure output directory exists
     if (!fs.existsSync(this.options.outputDir)) {
       logger.info(`Creating output directory: ${this.options.outputDir}`);
-      fs.mkdirSync(this.options.outputDir, { recursive: true });
+      fs.mkdirSync(this.options.outputDir, {recursive: true});
     }
-    
+
     // Create .site2rag directory inside output directory
     const site2ragDir = path.join(this.options.outputDir, '.site2rag');
     if (!fs.existsSync(site2ragDir)) {
       logger.info(`Creating .site2rag directory: ${site2ragDir}`);
-      fs.mkdirSync(site2ragDir, { recursive: true });
+      fs.mkdirSync(site2ragDir, {recursive: true});
     }
-    
+
     this.visited = new Set();
     this.found = [];
     try {
@@ -196,26 +200,104 @@ export class SiteProcessor {
         logger.warn('No domain provided for post-crawl pipeline. Using default hostname.');
         hostname = 'unknown-domain';
       }
-      
+
       // Save final crawl state if the method exists
       if (this.crawlStateService && typeof this.crawlStateService.saveState === 'function') {
         await this.crawlStateService.saveState(hostname);
       }
 
-      // Run context enrichment
+      // Main AI enhancement process
+      if (
+        this.options.enhancement &&
+        this.options.aiConfig &&
+        (this.options.aiConfig.provider || this.options.aiConfig.type === 'fallback')
+      ) {
+        try {
+          const {runContextEnrichment, insertionTracker} = await import('./core/context_processor.js');
+          const dbInstance = this.contentService.db;
+
+          // Start insertion tracking session if test mode is enabled
+          if (this.options.test) {
+            insertionTracker.enabled = true;
+            const sessionId = `${this.options.startUrl.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
+
+            // Get the actual LLM config for tracking
+            const trackingConfig =
+              this.options.aiConfig.type === 'fallback'
+                ? this.options.aiConfig.availableLLMs[0]
+                : this.options.aiConfig;
+
+            insertionTracker.startSession(sessionId, trackingConfig);
+            logger.info(`Started LLM enhancement session: ${trackingConfig.provider}/${trackingConfig.model}`);
+          }
+
+          // Run the main context enrichment for all raw pages
+          if (this.options.aiConfig.type === 'fallback') {
+            // For fallback config, use the first available LLM
+            const firstLLM = this.options.aiConfig.availableLLMs[0];
+            console.log(`[CONTEXT] Using first fallback LLM: ${firstLLM.fallbackName}`);
+            await runContextEnrichment(dbInstance, firstLLM);
+          } else {
+            // Regular AI config
+            await runContextEnrichment(dbInstance, this.options.aiConfig);
+          }
+
+          // Log insertion tracking summary if test mode was enabled
+          if (this.options.test && insertionTracker.enabled) {
+            insertionTracker.logSessionSummary();
+          }
+        } catch (error) {
+          logger.error(`[CONTEXT] AI enhancement failed: ${error.message}`);
+        }
+      } else if (!this.options.enhancement) {
+        logger.info('[CONTEXT] AI enhancement disabled by --no-enhancement flag');
+      } else if (
+        !this.options.aiConfig ||
+        (!this.options.aiConfig.provider && this.options.aiConfig.type !== 'fallback')
+      ) {
+        logger.info('[CONTEXT] AI enhancement skipped - no AI configuration available');
+      }
+
+      // Context enhancement cleanup - retry failed/rate-limited pages
       try {
-        const { runContextEnrichment } = await import('./context.js');
-        const { getDB } = await import('./db.js');
-        
-        // Create proper database path in .site2rag directory - use normalize instead of join to avoid absolute paths
-        const dbPath = path.normalize(`${this.options.outputDir}/.site2rag/crawl.db`);
-        logger.info(`Using database path for context enrichment: ${dbPath}`);
-        
-        const dbInstance = getDB(dbPath);
-        if (!dbInstance) throw new Error('SiteProcessor: database instance required for context enrichment');
-        await runContextEnrichment(dbInstance, this.options.aiConfig);
+        const {enhanceSinglePage} = await import('./core/context_processor.js');
+        const dbInstance = this.contentService.db;
+
+        if (dbInstance && this.options.aiConfig && this.options.aiConfig.provider) {
+          // Find pages that need context enhancement retry
+          const retryStmt = dbInstance.db.prepare(`
+            SELECT url, file_path 
+            FROM pages 
+            WHERE content_status IN ('rate_limited', 'timeout', 'failed', 'processing') 
+            AND file_path IS NOT NULL
+          `);
+          const retryPages = retryStmt.all();
+
+          if (retryPages.length > 0) {
+            logger.info(`[CONTEXT] Retrying context enhancement for ${retryPages.length} failed pages`);
+
+            for (const page of retryPages) {
+              try {
+                // Add delay between retries to respect rate limits
+                await new Promise(resolve => setTimeout(resolve, 2000));
+
+                const result = await enhanceSinglePage(page.url, page.file_path, this.options.aiConfig, dbInstance);
+
+                if (result.success) {
+                  logger.info(`[CONTEXT] ✓ Retry success: ${page.url}`);
+                } else {
+                  logger.warn(`[CONTEXT] ⚠️  Retry failed: ${page.url} - ${result.error}`);
+                }
+              } catch (retryError) {
+                logger.warn(`[CONTEXT] Retry error for ${page.url}: ${retryError.message}`);
+              }
+            }
+          } else {
+            logger.info(`[CONTEXT] No pages need context enhancement retry`);
+          }
+        }
       } catch (contextErr) {
-        logger.error(`Context enrichment error: ${contextErr.message}`);
+        logger.error(`Context enhancement cleanup error: ${contextErr.message}`);
       }
 
       // PDF conversion (if enabled)
@@ -227,20 +309,7 @@ export class SiteProcessor {
         }
       }
 
-      // Run context enrichment again for new MDs from PDFs
-      try {
-        const { runContextEnrichment } = await import('./context.js');
-        const { getDB } = await import('./db.js');
-        
-        // Create proper database path in .site2rag directory - use normalize instead of join to avoid absolute paths
-        const dbPath = path.normalize(`${this.options.outputDir}/.site2rag/crawl.db`);
-        logger.info(`Using database path for secondary context enrichment: ${dbPath}`);
-        
-        const dbInstance = getDB(dbPath);
-        await runContextEnrichment(dbInstance, this.options.aiConfig);
-      } catch (contextErr) {
-        logger.error(`Secondary context enrichment error: ${contextErr.message}`);
-      }
+      // PDF-generated markdown would be processed by the same integrated enhancement system
     } catch (err) {
       throw err;
     }
@@ -266,7 +335,7 @@ if (process.env.NODE_ENV !== 'test' && process.argv[1] && process.argv[1].endsWi
         process.exit(1);
       }
       logger.info(`Starting crawl of ${url} with limit ${limit}...`, true);
-      const sp = new SiteProcessor(url, { limit });
+      const sp = new SiteProcessor(url, {limit});
       const found = await sp.process();
       logger.info(`Crawled ${found.length} pages: ${found.join(', ')}`, true);
     } catch (err) {
