@@ -399,7 +399,7 @@ export class CrawlService {
     this.options = options;
     this.domain = options.domain;
     this.startUrl = options.startUrl || this.domain;
-    this.maxPages = options.maxPages || 100;
+    this.maxPages = options.maxPages !== undefined ? options.maxPages : 100;
     this.maxDepth = options.maxDepth || -1;
     this.urlService = options.urlService;
     this.fetchService = options.fetchService;
