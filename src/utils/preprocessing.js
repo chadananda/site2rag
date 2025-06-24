@@ -408,7 +408,7 @@ export class ContentBlockAnalyzer {
 
 // --- AI Content Reviewer (Stub, for future AI integration) ---
 export class AIContentReviewer {
-  async reviewAmbiguousBlocks(blocks) {
+  async reviewAmbiguousBlocks() {
     // Placeholder: always keep all blocks
     return {remove: []};
   }

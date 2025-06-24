@@ -15,7 +15,7 @@ function safeFilename(url) {
   try {
     const {pathname} = new URL(url);
     let file = pathname.replace(/\/+$/, '') || 'index';
-    file = file.replace(/[^a-zA-Z0-9-_\.]+/g, '_');
+    file = file.replace(/[^a-zA-Z0-9-_.]+/g, '_');
     if (!file.endsWith('.md')) file += '.md';
     return file;
   } catch {

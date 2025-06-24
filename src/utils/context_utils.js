@@ -7,6 +7,7 @@
  * @returns {Object} Window size and overlap size in words
  */
 export function getOptimalWindowSize(aiConfig) {
+  // eslint-disable-next-line no-unused-vars
   const provider = aiConfig.provider?.toLowerCase() || 'ollama';
   const model = aiConfig.model?.toLowerCase() || '';
 

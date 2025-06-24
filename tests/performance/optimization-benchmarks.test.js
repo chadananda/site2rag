@@ -1,4 +1,4 @@
-import {describe, it, expect, vi} from 'vitest';
+import {describe, it, expect} from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -18,7 +18,7 @@ class RealisticMockAI {
     this.totalTime = 0;
     this.cache = new Map();
   }
-  async mockCall(prompt, schema, aiConfig) {
+  async mockCall(prompt) {
     this.callCount++;
     const start = Date.now();
     const promptPrefix = prompt.substring(0, 1000);
@@ -52,12 +52,12 @@ class RealisticMockAI {
     };
   }
   mockEnhancementResponse(prompt) {
-    const originalMatch = prompt.match(/Original text: (\".*?\")/);
+    const originalMatch = prompt.match(/Original text: (".*?")/);
     let originalText = 'Enhanced text';
     if (originalMatch) {
       try {
         originalText = JSON.parse(originalMatch[1]);
-      } catch (e) {
+      } catch {
         // Use fallback
       }
     }
@@ -125,7 +125,7 @@ describe('Performance: Optimization Benchmarks', () => {
       {provider: 'mock'},
       traditionalAI.mockCall.bind(traditionalAI)
     );
-    const traditionalResult = await enhanceBlocksWithEntityContext(
+    await enhanceBlocksWithEntityContext(
       benchmarkBlocks,
       entityGraph,
       {provider: 'mock'},
@@ -136,7 +136,6 @@ describe('Performance: Optimization Benchmarks', () => {
     // Cache-optimized approach benchmark
     console.log('\\n⚡ Cache-Optimized Approach');
     const cachedAI = new RealisticMockAI('Cache-Opt', 150);
-    const cachedStart = Date.now();
     const cachedEntityGraph = await extractEntitiesWithSlidingWindow(
       benchmarkBlocks.slice(0, 3),
       benchmarkMetadata,

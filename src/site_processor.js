@@ -33,7 +33,7 @@ export class SiteProcessor {
       const url = new URL(startUrl);
       hostname = url.hostname;
       domain = url.origin;
-    } catch (err) {
+    } catch {
       // Handle case where startUrl isn't a valid URL (e.g., a file path)
       hostname = startUrl.split('/').pop() || 'output';
       domain = '';
@@ -185,37 +185,36 @@ export class SiteProcessor {
    * @private
    */
   async runPostCrawlPipeline() {
-    try {
-      // Validate domain before using it
-      let hostname = '';
-      if (this.options.domain) {
-        try {
-          const url = new URL(this.options.domain);
-          hostname = url.hostname;
-        } catch (urlError) {
-          logger.warn(`Invalid domain URL: ${this.options.domain}. Using fallback hostname.`);
-          // Use the domain string as hostname if it's not a valid URL
-          hostname = this.options.domain.replace(/[^a-zA-Z0-9.-]/g, '');
-        }
-      } else {
-        logger.warn('No domain provided for post-crawl pipeline. Using default hostname.');
-        hostname = 'unknown-domain';
+    // Validate domain before using it
+    let hostname = '';
+    if (this.options.domain) {
+      try {
+        const url = new URL(this.options.domain);
+        hostname = url.hostname;
+      } catch {
+        logger.warn(`Invalid domain URL: ${this.options.domain}. Using fallback hostname.`);
+        // Use the domain string as hostname if it's not a valid URL
+        hostname = this.options.domain.replace(/[^a-zA-Z0-9.-]/g, '');
       }
+    } else {
+      logger.warn('No domain provided for post-crawl pipeline. Using default hostname.');
+      hostname = 'unknown-domain';
+    }
 
-      // Save final crawl state if the method exists
-      if (this.crawlStateService && typeof this.crawlStateService.saveState === 'function') {
-        await this.crawlStateService.saveState(hostname);
-      }
+    // Save final crawl state if the method exists
+    if (this.crawlStateService && typeof this.crawlStateService.saveState === 'function') {
+      await this.crawlStateService.saveState(hostname);
+    }
 
-      // Main AI enhancement process
-      if (
-        this.options.enhancement &&
-        this.options.aiConfig &&
-        (this.options.aiConfig.provider || this.options.aiConfig.type === 'fallback')
-      ) {
-        try {
-          const {runContextEnrichment, insertionTracker} = await import('./core/context_processor.js');
-          const dbInstance = this.contentService.db;
+    // Main AI enhancement process
+    if (
+      this.options.enhancement &&
+      this.options.aiConfig &&
+      (this.options.aiConfig.provider || this.options.aiConfig.type === 'fallback')
+    ) {
+      try {
+        const {runContextEnrichment, insertionTracker} = await import('./core/context_processor.js');
+        const dbInstance = this.contentService.db;
 
           // Start insertion tracking session if test mode is enabled
           if (this.options.test) {
@@ -330,9 +329,6 @@ export class SiteProcessor {
       }
 
       // PDF-generated markdown would be processed by the same integrated enhancement system
-    } catch (err) {
-      throw err;
-    }
   }
 }
 // Command-line interface for quick testing
@@ -350,7 +346,7 @@ if (process.env.NODE_ENV !== 'test' && process.argv[1] && process.argv[1].endsWi
       // Validate URL before proceeding
       try {
         new URL(url); // This will throw if URL is invalid
-      } catch (e) {
+      } catch {
         logger.error(`'${url}' is not a valid URL. Please provide a URL with protocol (e.g., https://example.com)`);
         process.exit(1);
       }

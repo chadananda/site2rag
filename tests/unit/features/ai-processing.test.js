@@ -231,7 +231,7 @@ describe('AI Processing Features', () => {
         });
 
       // This would be part of a larger two-pass processing system
-      const originalText = 'The founder and his son established the religion.';
+      // const originalText = 'The founder and his son established the religion.';
       
       // First pass would extract entities (mocked above)
       // Second pass would enhance with context (mocked above)

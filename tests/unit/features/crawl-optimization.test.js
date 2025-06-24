@@ -159,7 +159,7 @@ describe('Crawl Optimization Features', () => {
       
       // Simulate caching AI enhancement for similar content
       const content1 = 'The organization was founded in 1844';
-      const content2 = 'The organization was established in 1844'; // Very similar
+      // const content2 = 'The organization was established in 1844'; // Very similar
       
       const enhancement1 = 'The [[Bahai]] organization was founded in 1844';
       mockCache.set(content1, enhancement1);
@@ -178,7 +178,7 @@ describe('Crawl Optimization Features', () => {
       };
       
       // Simulate cache operations
-      function checkCache(key) {
+      function checkCache() {
         cacheStats.total++;
         if (Math.random() > 0.3) { // 70% hit rate
           cacheStats.hits++;
@@ -340,7 +340,7 @@ describe('Crawl Optimization Features', () => {
             urlObj.pathname = urlObj.pathname.slice(0, -1);
           }
           normalizedUrls.add(urlObj.toString());
-        } catch (e) {
+        } catch {
           // Handle invalid URLs
         }
       });

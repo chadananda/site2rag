@@ -35,7 +35,6 @@ export async function classifyBlocksWithAI(blocks, opts = {}) {
     const cheerio = await import('cheerio');
     const conciseBlocks = blocks.map((html, i) => {
       const $ = cheerio.load(html);
-      const text = $.text().trim().substring(0, 150); // Get first 150 chars of text
 
       // Get the actual element, not the html root
       // First get all top-level elements in the fragment
@@ -101,7 +100,7 @@ export async function classifyBlocksWithAI(blocks, opts = {}) {
             .filter(x => !isNaN(x));
         }
       }
-    } catch (e) {
+    } catch {
       /* fallback: ignore errors */
     }
     return [];

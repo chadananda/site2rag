@@ -242,21 +242,6 @@ Another paragraph mentioning Microsoft and their software.`;
 
       fs.writeFileSync(testFile, content);
 
-      const options = {
-        noEnhancement: true,
-        output: path.join(TEST_DIR, 'simple-entities.json')
-      };
-
-      // Mock AI to avoid real AI calls in tests
-      const mockAI = () =>
-        Promise.resolve({
-          people: [{name: 'John', context: 'worker'}],
-          places: [{name: 'Paris', type: 'city'}],
-          organizations: [{name: 'Microsoft', type: 'company'}],
-          subjects: ['software', 'work'],
-          relationships: []
-        });
-
       // Test would require mocking the AI system
       // For now, just test that the function doesn't throw
       expect(() => parseFile(testFile)).not.toThrow();

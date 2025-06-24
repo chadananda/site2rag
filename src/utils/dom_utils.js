@@ -25,14 +25,15 @@ export function generateFullSelectorPath($, element, maxDepth = 5, includeAttrib
 
     // Add ID if present (most specific)
     const id = current.attr('id');
+    let className;
     if (id) {
       // Clean ID to handle potential special characters
-      const cleanId = id.replace(/[:\[\].,\s]/g, '-');
+      const cleanId = id.replace(/[:[\].,\s]/g, '-');
       selector += `#${cleanId}`;
     }
     // Otherwise add classes if present
     else {
-      const className = current.attr('class');
+      className = current.attr('class');
       if (className) {
         const classes = className.split(/\s+/).filter(Boolean);
         if (classes.length > 0) {
@@ -146,7 +147,6 @@ export function analyzeSelectorPath(selectorPath) {
 
   // Split the path into components for more precise analysis
   const pathComponents = selectorPath.split(' > ');
-  const lastComponent = pathComponents[pathComponents.length - 1];
 
   // Check for semantic elements with stronger weight for the last component
   // Last component is the actual element we're analyzing
@@ -341,7 +341,7 @@ export function isLikelyFrameworkWrapper(selectorPath) {
     for (const {pattern, weight} of frameworkPatterns) {
       // More precise regex to match framework patterns
       // Matches exact IDs, classes, or data attributes
-      const regex = new RegExp(`[#]${pattern}$|[.]${pattern}$|\[data-${pattern}\]`, 'i');
+      const regex = new RegExp(`[#]${pattern}$|[.]${pattern}$|\\[data-${pattern}\\]`, 'i');
       if (regex.test(component)) {
         score += weight;
         detectedPatterns.push(pattern);

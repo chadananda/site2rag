@@ -131,7 +131,7 @@ export const insertionTracker = {
 
     if (session.files.size > 0) {
       console.log('\n📄 PER-FILE BREAKDOWN:');
-      for (const [filePath, fileData] of session.files) {
+      for (const [, fileData] of session.files) {
         console.log(`  ${fileData.fileName}: ${fileData.insertionCount} insertions`);
       }
 
@@ -477,7 +477,7 @@ Return valid JSON only, no other text or explanation.`;
   try {
     // Start cached AI session for maximum efficiency
     // await getAISession(sessionId, cachedInstructions, aiConfig);
-    throw new Error('Using fallback for test'); // Force fallback for reliable test
+    // throw new Error('Using fallback for test'); // Force fallback for reliable test
 
     const entityExtractions = [];
 
@@ -571,7 +571,7 @@ Text window: ${windowEscaped}`;
  * @param {Function} callAIImpl - AI call implementation
  * @returns {Promise<Object>} Complete entity graph
  */
-async function extractEntitiesWithoutCache(blocks, metadata, aiConfig, callAIImpl) {
+async function extractEntitiesWithoutCache(blocks, metadata, aiConfig, callAIImpl) { // eslint-disable-line no-unused-vars
   console.log(`[ENTITIES] Fallback: Non-cached entity extraction`);
 
   const sentences = blocks.flatMap(block => {
@@ -611,7 +611,8 @@ Be strict and conservative - only extract explicit information.`;
  * @param {boolean} isTestMode - Whether to show detailed logs
  * @returns {Object} - { capacity, windowSize, overlapSize }
  */
-function getOptimalContextCapacity(aiConfig, isTestMode = false) {
+function getOptimalContextCapacity(aiConfig, isTestMode = false) { // eslint-disable-line no-unused-vars
+  // eslint-disable-next-line no-unused-vars
   const provider = aiConfig.provider?.toLowerCase() || 'ollama';
   const model = aiConfig.model?.toLowerCase() || '';
 
@@ -1296,7 +1297,7 @@ IMPORTANT: All context additions must be justified by information found elsewher
  * @param {Function} callAIImpl - Optional AI call implementation for testing
  * @returns {Promise<Array>} Enhanced blocks
  */
-export async function enhanceBlocksDirectly(blocks, metadata, aiConfig, options = {}, callAIImpl = callAI) {
+export async function enhanceBlocksDirectly(blocks, metadata, aiConfig, options = {}/*, callAIImpl = callAI*/) {
   const isTestMode = options.test || process.env.NODE_ENV === 'test';
   
   // Build full document context
@@ -1362,7 +1363,7 @@ IMPORTANT: All context additions must be justified by information found in this 
     // Add delay before starting each batch (except the first)
     const delayMs = batchIndex * POLITE_DELAY_MS;
     
-    return new Promise(async (resolve) => {
+    return (async () => {
       // Wait for the polite delay
       if (delayMs > 0) {
         debugLogger.direct(`Batch ${batchIndex + 1} waiting ${delayMs}ms before starting...`);
@@ -1446,8 +1447,8 @@ IMPORTANT: All context additions must be justified by information found in this 
         }
       }
       
-      resolve({ batchIndex: batchIndex + 1, results: batchResults });
-    });
+      return { batchIndex: batchIndex + 1, results: batchResults };
+    })();
   });
   
   // Process all batches in parallel
@@ -1479,12 +1480,23 @@ IMPORTANT: All context additions must be justified by information found in this 
  * @param {Function} callAIImpl - Optional AI call implementation for testing
  * @returns {Promise<Array>} Enhanced blocks with cache metrics
  */
-export async function enhanceBlocksWithCaching(blocks, metadata, aiConfig, options = {}, callAIImpl = callAI) {
-  // Import the unified implementation
-  const {enhanceDocumentUnified} = await import('./context_processor_unified.js');
+export async function enhanceBlocksWithCaching(blocks, metadata, aiConfig, options = {}/*, callAIImpl = callAI*/) {
+  debugLogger.ai('=== enhanceBlocksWithCaching called ===');
   
-  // Use unified approach for all documents
-  return await enhanceDocumentUnified(blocks, metadata, aiConfig, options);
+  // Validate inputs
+  if (!blocks || !Array.isArray(blocks)) {
+    console.error('[CONTEXT] ERROR: Invalid blocks passed to enhanceBlocksWithCaching:', blocks);
+    return [];
+  }
+  
+  debugLogger.ai(`Blocks: ${blocks.length}, Provider: ${aiConfig.provider}, Model: ${aiConfig.model}`);
+  
+  // Import the unified V2 implementation with proper caching
+  const {enhanceDocumentUnifiedV2} = await import('./context_processor_unified_v2.js');
+  
+  // Use unified V2 approach for all documents (with proper context caching)
+  debugLogger.ai('Using unified V2 implementation with proper context caching');
+  return await enhanceDocumentUnifiedV2(blocks, metadata, aiConfig, options);
 }
 
 /**
@@ -1502,7 +1514,7 @@ export async function enhanceBlocksWithCaching(blocks, metadata, aiConfig, optio
  * @param {Object} aiConfig - AI configuration
  * @returns {Array} Array of sliding context windows
  */
-function createSlidingContextWindows(blocks, maxWindowWords, staticContextSize, aiConfig) {
+function createSlidingContextWindows(blocks, maxWindowWords, staticContextSize, aiConfig) { // eslint-disable-line no-unused-vars
   const fullText = blocks.map(block => block.text || block.content || block.original).join(' ');
   const words = fullText.split(/\s+/).filter(w => w.length > 0);
 
@@ -1591,7 +1603,7 @@ function findBlocksInWindow(startWord, windowLength, blocks) {
  * @param {Array} windows - Array of sliding windows
  * @returns {Object} Best window for this block
  */
-function findWindowForBlock(blockIndex, windows) {
+function findWindowForBlock(blockIndex, windows) { // eslint-disable-line no-unused-vars
   // Find window that contains this block (prefer windows where block is more centered)
   const candidateWindows = windows.filter(window => window.coveredBlocks.includes(blockIndex));
 
@@ -1628,6 +1640,7 @@ function findWindowForBlock(blockIndex, windows) {
  * @returns {Object} Context limits for the model
  */
 function getModelContextLimits(aiConfig) {
+  // eslint-disable-next-line no-unused-vars
   const provider = aiConfig.provider?.toLowerCase() || 'ollama';
   const model = aiConfig.model?.toLowerCase() || '';
 
@@ -1864,6 +1877,7 @@ export function getEntityReference(contentAnalysis, maxChars) {
 export function optimizeForTokenLimit(components, tokenLimit) {
   // Strict char-based enforcement, including headers and joiners
   const joiner = '\n\n---\n\n';
+  // eslint-disable-next-line no-unused-vars
   let out = '',
     parts = [];
   for (const [k, v] of Object.entries(components)) {
@@ -1922,7 +1936,7 @@ function createKeyedBlockMapping(blocks, minCharacters = 100) {
 
   for (const block of blocks) {
     // Filter by content length (remove formatting characters)
-    const textContent = block.text.replace(/[#*`\[\]()\-_]/g, '').trim();
+    const textContent = block.text.replace(/[#*`[\]()\-_]/g, '').trim();
 
     if (textContent.length >= minCharacters) {
       const key = `block_${block.originalIndex}`;
@@ -2028,9 +2042,12 @@ async function enhanceKeyedBlocksWithContext(keyedBlocks, indexMapping, metadata
   const batches = createOptimalBatches(keyedBlocks, aiConfig);
   debugLogger.keyed(`Split into ${batches.length} batches for processing`);
 
-  // Create AI session for caching
+  // Import and use V2 AI client for proper message-based caching
+  const {getAISessionV2, closeAISessionV2} = await import('./ai_client_v2.js');
+  
+  // Create AI session with V2 client for proper caching
   const sessionId = `keyed-enhancement-${Date.now()}`;
-  const session = getAISession(sessionId, aiConfig);
+  const session = getAISessionV2(sessionId, aiConfig);
   
   // Set cached context with ONLY instructions (not the full document)
   const cachedContext = `# KEYED CONTEXT DISAMBIGUATION
@@ -2054,8 +2071,8 @@ You will receive batches of text blocks from a document. Each batch contains key
 Return a JSON object with "enhanced_blocks" containing the same keys with enhanced text.
 `;
   
-  session.setCachedContext(cachedContext);
-  debugLogger.keyed(`Set cached context: ${cachedContext.length} chars (instructions only)`);
+  session.setSystemContext(cachedContext);
+  debugLogger.keyed(`Set system context: ${cachedContext.length} chars (instructions only)`);
 
   const allEnhancedBlocks = {};
   const POLITE_DELAY_MS = 500; // Delay between batch submissions
@@ -2066,7 +2083,8 @@ Return a JSON object with "enhanced_blocks" containing the same keys with enhanc
       // Add delay before starting each batch (except the first)
       const delayMs = i * POLITE_DELAY_MS;
       
-      return new Promise(async (resolve) => {
+      return new Promise((resolve) => {
+        (async () => {
         // Wait for the polite delay
         if (delayMs > 0) {
           debugLogger.keyed(`Batch ${i + 1} waiting ${delayMs}ms before starting...`);
@@ -2093,6 +2111,7 @@ Return a JSON object with "enhanced_blocks" containing the same keys with enhanc
           debugLogger.keyed(`Batch ${i + 1} error: ${error.message}`);
           resolve({ batchIndex: i + 1, enhancedBlocks: {}, error });
         }
+        })();
       });
     });
     
@@ -2179,9 +2198,10 @@ Return a JSON object with "enhanced_blocks" containing the same keys with enhanc
   } finally {
     // Always close the session to clean up
     if (session) {
-      const metrics = closeAISession(sessionId);
+      const metrics = closeAISessionV2(sessionId);
       if (metrics) {
         debugLogger.keyed(`Session closed. Cache hit rate: ${metrics.hitRate}%`);
+        debugLogger.ai(`V2 Session metrics: Tokens saved: ${metrics.tokensSaved || 0}`);
       }
     }
   }
@@ -2285,7 +2305,7 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
 
     // Filter out blocks with less than 100 characters of significant content
     const significantBlocks = allBlocks.filter(block => {
-      const textContent = block.text.replace(/[#*`\[\]()\-_]/g, '').trim();
+      const textContent = block.text.replace(/[#*`[\]()\-_]/g, '').trim();
       return textContent.length >= 100;
     });
 
@@ -2517,7 +2537,7 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
       let meta = {title: doc.title || '', url: doc.url};
       try {
         if (doc.metadata) meta = {...meta, ...JSON.parse(doc.metadata)};
-      } catch (e) {
+      } catch {
         // Continue with basic metadata if parsing fails
       }
 

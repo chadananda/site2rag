@@ -63,7 +63,7 @@ export function safeFilename(url) {
     }
 
     return path;
-  } catch (e) {
+  } catch {
     // If URL parsing fails, return a default page name
     return 'page.md';
   }
@@ -93,7 +93,7 @@ export function normalizeUrl(url, baseUrl) {
     }
 
     return fullUrl.origin + path;
-  } catch (e) {
+  } catch {
     // Return original URL if parsing fails
     return url;
   }

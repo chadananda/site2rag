@@ -52,13 +52,13 @@ export class UrlService {
         // First try to decode URI components if they're encoded
         try {
           segment = decodeURIComponent(segment);
-        } catch (e) {
+        } catch {
           // If decoding fails, use the original segment
         }
 
         // Replace special characters with underscores, but preserve alphanumeric in any language
         // This allows Arabic, Chinese, etc. characters to remain intact
-        let safeSegment = segment.replace(/[\/?*:|"<>\\]+/g, '_');
+        let safeSegment = segment.replace(/[/?*:|"<>\\]+/g, '_');
 
         // Remove any existing extension from the last segment
         if (segment === segments[segments.length - 1]) {

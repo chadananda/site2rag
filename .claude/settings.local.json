@@ -100,7 +100,17 @@
       "WebFetch(domain:www.anthropic.com)",
       "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-unified-integration --flat 2 >& 1)",
       "Bash(npm run enhance:*)",
-      "Bash(npx vitest run:*)"
+      "Bash(npx vitest run:*)",
+      "mcp__context7__resolve-library-id",
+      "mcp__context7__get-library-docs",
+      "WebFetch(domain:docs.anthropic.com)",
+      "WebFetch(domain:github.com)",
+      "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-v2-caching --flat 2 >& 1)",
+      "Bash(DEBUG=true timeout 20 node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-trace --flat 2 >& 1)",
+      "Bash(DEBUG=true timeout 30 node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-v2-final --flat 2 >& 1)",
+      "Bash(DEBUG=true timeout 30 node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-v2-fixed --flat 2 >& 1)",
+      "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-v2-debug --flat 2 >& 1)",
+      "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-debug-v2 --flat 2 >& 1)"
     ],
     "deny": []
   }

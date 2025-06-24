@@ -8,7 +8,7 @@ function createKeyedBlocks(blocks, minChars = 30) {
   blocks.forEach((block, index) => {
     // Extract text content only (no markdown formatting)
     const textOnly = (block.text || block.content || block)
-      .replace(/[#*`\[\]()\-_]/g, '')
+      .replace(/[#*`[\]()\-_]/g, '')
       .trim();
     
     if (textOnly.length >= minChars) {

@@ -250,7 +250,7 @@ export class SitemapService {
       // If URL has no language indicators and looks like English content, assume 'en'
       if (pathSegments.length > 0 && 
           !pathSegments[0].match(/^(ar|bn|de|es|fa|fr|he|hi|id|it|ja|mr|pt|ro|ru|sw|tr|ur|zh)$/) &&
-          urlEntry.loc.match(/^https?:\/\/[^\/]+\/[a-z0-9\-]+/)) {
+          urlEntry.loc.match(/^https?:\/\/[^/]+\/[a-z0-9-]+/)) {
         metadata.language = 'en';
       }
     }

@@ -1,4 +1,4 @@
-import {describe, it, expect, vi, beforeEach, afterEach} from 'vitest';
+import {describe, it, expect, beforeEach, afterEach} from 'vitest';
 import fs from 'fs';
 import path from 'path';
 import {
@@ -15,7 +15,7 @@ class MockAIService {
     this.callCount = 0;
     this.responses = new Map();
   }
-  async callAI(prompt, schema, config) {
+  async callAI(prompt) {
     this.callCount++;
     if (prompt.includes('Extract all entities')) {
       return {

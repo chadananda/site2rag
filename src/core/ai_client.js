@@ -439,6 +439,7 @@ export async function callAI(prompt, schema, aiConfig) {
         }
 
         // Basic cleanup for control characters only
+        // eslint-disable-next-line no-control-regex
         jsonText = jsonText.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
         
         debugLogger.ai(`Final JSON text (first 200 chars): ${jsonText.substring(0, 200)}...`);
