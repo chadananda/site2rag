@@ -98,7 +98,9 @@
       "Bash(cat:*)",
       "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-parallel --flat 2 >& 1)",
       "WebFetch(domain:www.anthropic.com)",
-      "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-unified-integration --flat 2 >& 1)"
+      "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-unified-integration --flat 2 >& 1)",
+      "Bash(npm run enhance:*)",
+      "Bash(npx vitest run:*)"
     ],
     "deny": []
   }

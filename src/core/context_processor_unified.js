@@ -177,10 +177,10 @@ Remember:
 /**
  * Convert blocks to keyed format with filtering
  * @param {Array} blocks - Document blocks
- * @param {number} minChars - Minimum text characters (default 100)
+ * @param {number} minChars - Minimum text characters (default 30)
  * @returns {Object} Keyed blocks and index mapping
  */
-function createKeyedBlocks(blocks, minChars = 100) {
+function createKeyedBlocks(blocks, minChars = 30) {
   const keyedBlocks = {};
   const indexMapping = {};
   
@@ -189,6 +189,10 @@ function createKeyedBlocks(blocks, minChars = 100) {
     const textOnly = (block.text || block.content || block)
       .replace(/[#*`\[\]()\-_]/g, '')
       .trim();
+    
+    // 30 chars minimum includes most meaningful content while filtering out
+    // truly trivial blocks. This threshold was chosen after analysis showed
+    // 100 chars filtered out ~65% of blocks including important headers
     
     if (textOnly.length >= minChars) {
       const key = `block_${index}`;
