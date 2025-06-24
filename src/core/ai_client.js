@@ -45,6 +45,12 @@ export class AISession {
   async call(prompt, schema) {
     this.lastUsed = Date.now();
     const fullPrompt = this.cachedContext ? `${this.cachedContext}\n\n${prompt}` : prompt;
+    
+    // Log prompt sizes for debugging
+    debugLogger.ai(`Session ${this.sessionId} - Cached context: ${this.cachedContext ? this.cachedContext.length : 0} chars`);
+    debugLogger.ai(`Session ${this.sessionId} - Additional prompt: ${prompt.length} chars`);
+    debugLogger.ai(`Session ${this.sessionId} - Total prompt: ${fullPrompt.length} chars`);
+    
     this.conversationHistory.push({prompt: fullPrompt, timestamp: Date.now()});
     try {
       const result = await callAI(fullPrompt, schema, this.aiConfig);
@@ -400,6 +406,12 @@ export async function callAI(prompt, schema, aiConfig) {
     debugLogger.ai(`Model: ${aiConfig.model || 'default'}`);
     debugLogger.ai(`Host: ${aiConfig.host || 'default'}`);
     debugLogger.ai(`Prompt length: ${prompt.length} characters`);
+    
+    // Log first 500 chars of prompt for debugging large prompts
+    if (prompt.length > 5000) {
+      debugLogger.ai(`Large prompt detected! First 500 chars: ${prompt.substring(0, 500)}...`);
+      debugLogger.ai(`Last 500 chars: ...${prompt.substring(prompt.length - 500)}`);
+    }
     
     for (let attempt = 1; attempt <= 3; attempt++) {
       await delay(300); // Spread out requests to avoid throttling

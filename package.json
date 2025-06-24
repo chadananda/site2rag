@@ -1,6 +1,6 @@
 {
   "name": "site2rag",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "CLI tool to convert websites into RAG-ready local markdown knowledge bases with AI-powered content improvement.",
   "main": "index.js",
   "bin": {
@@ -37,7 +37,12 @@
     "test:crawl-sitemap": "vitest run tests/unit/services/crawl-service-sitemap.test.js",
     "test:sitemap-real": "vitest run tests/integration/sitemap-discovery.test.js",
     "test:sitemap-debug": "vitest run tests/debug/sitemap-debug.test.js",
-    "test:sitemap-extract": "vitest run tests/integration/sitemap-extraction.test.js"
+    "test:sitemap-extract": "vitest run tests/integration/sitemap-extraction.test.js",
+    "test:parallel:setup": "node tests/debug/test-parallel-batches.js",
+    "test:parallel": "DEBUG=true node ./bin/site2rag.js tests/debug/parallel-test-output/large-sample.md --output tests/debug/parallel-test-output/enhanced --flat",
+    "test:ambiguous": "DEBUG=true node ./bin/site2rag.js tests/debug/ambiguous-test.md --output tests/debug/ambiguous-enhanced.md --flat",
+    "test:unlimited": "DEBUG=true node ./bin/site2rag.js example.com --output ./tests/tmp/unlimited-test --flat 2>&1 | grep -E '(progress|100|totalUrls|crawled)'",
+    "test:limited": "DEBUG=true node ./bin/site2rag.js example.com --limit 5 --output ./tests/tmp/limited-test --flat"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

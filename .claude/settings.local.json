@@ -95,7 +95,10 @@
       "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/debug-ai-timeout --flat 2 >& 1)",
       "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-final-debug --flat 2 >& 1)",
       "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-caching-fix --flat 2 >& 1)",
-      "Bash(cat:*)"
+      "Bash(cat:*)",
+      "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-parallel --flat 2 >& 1)",
+      "WebFetch(domain:www.anthropic.com)",
+      "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-unified-integration --flat 2 >& 1)"
     ],
     "deny": []
   }

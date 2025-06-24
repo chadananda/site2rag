@@ -11,11 +11,8 @@ import {callAI, getAISession, closeAISession} from './ai_client.js';
 import debugLogger from '../services/debug_logger.js';
 import fs from 'fs';
 import {
-  buildSlidingCacheInstructions,
   createBatchProcessingPrompt,
-  createOptimizedSlidingWindows,
   createParagraphBatches,
-  findBlocksInWindowRange,
   validateEnhancement,
   removeContextInsertions,
   extractContextInsertions,
@@ -1358,70 +1355,109 @@ IMPORTANT: All context additions must be justified by information found in this 
   debugLogger.direct(`Set cached context: ${staticContext.length} chars`);
   debugLogger.direct(`Using session caching for ${batches.length} batches`);
 
-  // Process each batch sequentially using cached session
-  for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
-    const batch = batches[batchIndex];
+  const POLITE_DELAY_MS = 500; // Delay between batch submissions
+  
+  // Create all batch promises with polite delays
+  const batchPromises = batches.map((batch, batchIndex) => {
+    // Add delay before starting each batch (except the first)
+    const delayMs = batchIndex * POLITE_DELAY_MS;
     
-    if (isTestMode) {
-      debugLogger.direct(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.blocks.length} paragraphs, ~${batch.wordCount} words)`);
-    }
-    
-    try {
-      const batchPrompt = createBatchProcessingPrompt(batch);
-      const boundSessionCall = session.call.bind(session);
-      boundSessionCall.session = session; // Add session reference for fallback detection
-      const result = await executeWithFallback(boundSessionCall, aiConfig, batchPrompt, BatchEnhancementSchema);
+    return new Promise(async (resolve) => {
+      // Wait for the polite delay
+      if (delayMs > 0) {
+        debugLogger.direct(`Batch ${batchIndex + 1} waiting ${delayMs}ms before starting...`);
+        await new Promise(wait => setTimeout(wait, delayMs));
+      }
       
-      if (result && result.enhanced_paragraphs && result.enhanced_paragraphs.length === batch.blocks.length) {
-        for (let i = 0; i < batch.blocks.length; i++) {
-          const blockIndex = batch.blocks[i].originalIndex;
-          const originalText = batch.blocks[i].originalText;
-          const enhancedText = result.enhanced_paragraphs[i].text;
-          
-          if (validateEnhancement(originalText, enhancedText)) {
-            processedBlocks[blockIndex] = {
-              original: originalText,
-              contexted: enhancedText
-            };
+      if (isTestMode) {
+        debugLogger.direct(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.blocks.length} paragraphs, ~${batch.wordCount} words)`);
+      }
+      
+      const batchResults = [];
+      
+      try {
+        const batchPrompt = createBatchProcessingPrompt(batch);
+        const boundSessionCall = session.call.bind(session);
+        boundSessionCall.session = session; // Add session reference for fallback detection
+        const result = await executeWithFallback(boundSessionCall, aiConfig, batchPrompt, BatchEnhancementSchema);
+        
+        if (result && result.enhanced_paragraphs && result.enhanced_paragraphs.length === batch.blocks.length) {
+          for (let i = 0; i < batch.blocks.length; i++) {
+            const blockIndex = batch.blocks[i].originalIndex;
+            const originalText = batch.blocks[i].originalText;
+            const enhancedText = result.enhanced_paragraphs[i].text;
             
-            if (isTestMode) {
-              const insertions = extractContextInsertions(enhancedText);
-              if (insertions.length > 0) {
-                console.log(`[TEST_INSERTIONS] Paragraph ${blockIndex + 1} received ${insertions.length} context insertions`);
+            if (validateEnhancement(originalText, enhancedText)) {
+              batchResults.push({
+                blockIndex,
+                block: {
+                  original: originalText,
+                  contexted: enhancedText
+                }
+              });
+              
+              if (isTestMode) {
+                const insertions = extractContextInsertions(enhancedText);
+                if (insertions.length > 0) {
+                  console.log(`[TEST_INSERTIONS] Paragraph ${blockIndex + 1} received ${insertions.length} context insertions`);
+                }
               }
+            } else {
+              // Fallback to original text if validation fails
+              batchResults.push({
+                blockIndex,
+                block: {
+                  original: originalText,
+                  contexted: originalText
+                }
+              });
             }
-          } else {
-            // Fallback to original text if validation fails
-            processedBlocks[blockIndex] = {
-              original: originalText,
-              contexted: originalText
-            };
+          }
+        } else {
+          // Fallback to original text if response format is invalid
+          for (let i = 0; i < batch.blocks.length; i++) {
+            const blockIndex = batch.blocks[i].originalIndex;
+            const originalText = batch.blocks[i].originalText;
+            batchResults.push({
+              blockIndex,
+              block: {
+                original: originalText,
+                contexted: originalText
+              }
+            });
           }
         }
-      } else {
-        // Fallback to original text if response format is invalid
+      } catch (error) {
+        if (isTestMode) {
+          console.error(`[DIRECT_PROCESSING] Error processing batch ${batchIndex + 1}: ${error.message}`);
+        }
+        
+        // Fallback to original text on error
         for (let i = 0; i < batch.blocks.length; i++) {
           const blockIndex = batch.blocks[i].originalIndex;
           const originalText = batch.blocks[i].originalText;
-          processedBlocks[blockIndex] = {
-            original: originalText,
-            contexted: originalText
-          };
+          batchResults.push({
+            blockIndex,
+            block: {
+              original: originalText,
+              contexted: originalText
+            }
+          });
         }
       }
-    } catch (error) {
-      if (isTestMode) {
-        console.error(`[DIRECT_PROCESSING] Error processing batch ${batchIndex + 1}: ${error.message}`);
-      }
-      // Fallback to original text for this batch
-      for (let i = 0; i < batch.blocks.length; i++) {
-        const blockIndex = batch.blocks[i].originalIndex;
-        const originalText = batch.blocks[i].originalText;
-        processedBlocks[blockIndex] = {
-          original: originalText,
-          contexted: originalText
-        };
-      }
+      
+      resolve({ batchIndex: batchIndex + 1, results: batchResults });
+    });
+  });
+  
+  // Process all batches in parallel
+  debugLogger.direct(`Starting parallel processing of ${batches.length} batches with ${POLITE_DELAY_MS}ms delays`);
+  const allBatchResults = await Promise.all(batchPromises);
+  
+  // Merge all results into processedBlocks
+  for (const batchResult of allBatchResults) {
+    for (const { blockIndex, block } of batchResult.results) {
+      processedBlocks[blockIndex] = block;
     }
   }
   
@@ -1444,240 +1480,11 @@ IMPORTANT: All context additions must be justified by information found in this 
  * @returns {Promise<Array>} Enhanced blocks with cache metrics
  */
 export async function enhanceBlocksWithCaching(blocks, metadata, aiConfig, options = {}, callAIImpl = callAI) {
-  const isTestMode = options.test || process.env.NODE_ENV === 'test';
+  // Import the unified implementation
+  const {enhanceDocumentUnified} = await import('./context_processor_unified.js');
   
-  // Calculate total document size
-  const totalText = blocks
-    .map(block => block.text || block.content || block.original || block)
-    .filter(content => typeof content === 'string')
-    .join(' ');
-  const totalWords = totalText.split(/\s+/).filter(w => w.length > 0).length;
-  
-  const {capacity, windowSize, overlapSize} = getOptimalContextCapacity(aiConfig, isTestMode);
-  
-  if (isTestMode) {
-    console.log(`[CONTEXT] Processing document with ${totalWords} words (context capacity: ${Math.floor(windowSize)} words)`);
-  }
-  
-  // Check if entire document fits in context window (with 80% safety margin)
-  const safeWindowSize = windowSize * 0.8;
-  debugLogger.context(`Document size: ${totalWords} words, Safe window: ${safeWindowSize} words`);
-  
-  if (totalWords < safeWindowSize) {
-    debugLogger.context(`Document fits entirely in context window - using DIRECT processing with caching`);
-    return await enhanceBlocksDirectly(blocks, metadata, aiConfig, options, callAIImpl);
-  }
-  
-  debugLogger.context(`Document too large - using sliding window processing`);
-  
-  if (isTestMode) {
-    console.log(`[SLIDING_CACHE] Processing ${blocks.length} blocks with optimal sliding cached context windows`);
-  }
-
-  const sessionId = `sliding-cache-${Date.now()}`;
-  const session = getAISession(sessionId, aiConfig);
-
-  // Build static cached context (instructions + metadata)
-  const staticCachedContext = buildSlidingCacheInstructions(metadata);
-  const staticTokens = Math.ceil(staticCachedContext.length / 3); // ~3 chars per token
-
-  if (isTestMode) {
-    console.log(`[CACHE] Static context: ${staticTokens} tokens (${staticCachedContext.length} chars)`);
-  }
-
-  // Create sliding windows with 50% overlap
-  const slidingWindows = createOptimizedSlidingWindows(blocks, windowSize, overlapSize, isTestMode);
-
-  const processedBlocks = new Array(blocks.length); // Pre-allocate for proper ordering
-  const startTime = Date.now();
-  let cacheRefreshCount = 0;
-
-  try {
-    // Process each sliding window
-    for (let windowIndex = 0; windowIndex < slidingWindows.length; windowIndex++) {
-      const window = slidingWindows[windowIndex];
-      if (isTestMode) {
-        console.log(
-          `[SLIDING_CACHE] Processing window ${windowIndex + 1}/${slidingWindows.length} (${window.actualWordCount} words, ${window.coveredBlocks.length} blocks)`
-        );
-      }
-
-      // Set cached context for this window (instructions + metadata + document context)
-      const fullCachedContext = `${staticCachedContext}
-
-## Document Context Window ${windowIndex + 1}
-${window.contextText}`;
-      session.setCachedContext(fullCachedContext);
-      cacheRefreshCount++;
-
-      if (isTestMode) {
-        console.log(`[CACHE] Refresh ${cacheRefreshCount}: ${Math.ceil(fullCachedContext.length / 3)} tokens cached`);
-      }
-
-      // Process paragraphs in batches for efficiency
-      for (let batchIndex = 0; batchIndex < window.paragraphBatches.length; batchIndex++) {
-        const batch = window.paragraphBatches[batchIndex];
-        if (isTestMode) {
-          console.log(
-            `[BATCH] Processing batch ${batchIndex + 1}/${window.paragraphBatches.length} (${batch.blocks.length} paragraphs) in window ${windowIndex + 1}`
-          );
-        }
-
-        try {
-          // Create batch processing prompt
-          const batchPrompt = createBatchProcessingPrompt(batch);
-
-          let result;
-          if (callAIImpl !== callAI) {
-            const fullPrompt = `${fullCachedContext}\n\n${batchPrompt}`;
-            result = await executeWithFallback(callAIImpl, aiConfig, fullPrompt, BatchEnhancementSchema, aiConfig);
-          } else {
-            const boundSessionCall = session.call.bind(session);
-            boundSessionCall.session = session; // Add session reference for fallback detection
-            result = await executeWithFallback(boundSessionCall, aiConfig, batchPrompt, BatchEnhancementSchema);
-          }
-
-          // Process batch results
-          if (result && result.enhanced_paragraphs && result.enhanced_paragraphs.length === batch.blocks.length) {
-            for (let i = 0; i < batch.blocks.length; i++) {
-              const blockIndex = batch.blocks[i].originalIndex;
-              const originalText = batch.blocks[i].originalText;
-              const enhancedText = result.enhanced_paragraphs[i].text;
-
-              if (validateEnhancement(originalText, enhancedText)) {
-                processedBlocks[blockIndex] = {
-                  original: originalText,
-                  contexted: enhancedText
-                };
-
-                // Log context insertions in test mode
-                if (isTestMode) {
-                  const insertions = extractContextInsertions(enhancedText);
-                  if (insertions.length > 0) {
-                    console.log(
-                      `[TEST_INSERTIONS] Paragraph ${blockIndex + 1} received ${insertions.length} context insertions`
-                    );
-                  }
-                }
-              } else {
-                console.log(
-                  `[VALIDATION] Paragraph ${blockIndex + 1} failed validation, retrying with stricter prompt...`
-                );
-
-                // Retry with a much stricter prompt emphasizing preservation
-                const retryPrompt = `## CRITICAL: PRESERVE MARKDOWN EXACTLY - ONLY ADD [[context]] INSERTIONS
-
-Original MARKDOWN text to enhance (MUST remain identical):
-"${originalText}"
-
-MARKDOWN PRESERVATION REQUIREMENTS:
-1. This is MARKDOWN - preserve ALL markdown syntax exactly
-2. NEVER change URLs, links, image paths: ![text](url) or [text](url)
-3. NEVER change markdown formatting, headers, or structure
-4. Return the EXACT same text with ONLY [[...]] context additions
-5. ONLY add [[context]] after unclear terms in readable text
-6. Do NOT add [[...]] inside URLs, alt text, or markdown syntax
-
-Examples:
-Input: "this was amazing"  
-Correct: "this [[Ocean project]] was amazing"
-
-Input: "![screenshot](https://example.com/pic.png)"
-Correct: "![screenshot](https://example.com/pic.png)" (NO CHANGES)
-
-WRONG: Changing URLs, removing alt text, or modifying markdown syntax
-
-Return as JSON in this format:
-{
-  "enhanced_text": "your enhanced markdown text here"
-}
-
-Return ONLY valid JSON, nothing else.`;
-
-                try {
-                  const retryResult = await executeWithFallback(
-                    session.call.bind(session),
-                    aiConfig,
-                    retryPrompt,
-                    z.object({
-                      enhanced_text: z.string()
-                    })
-                  );
-
-                  const retryText = retryResult?.enhanced_text?.trim() || originalText;
-
-                  // Validate the retry
-                  if (validateEnhancement(originalText, retryText)) {
-                    console.log(`[VALIDATION] ✓ Retry succeeded for paragraph ${blockIndex + 1}`);
-                    processedBlocks[blockIndex] = {
-                      original: originalText,
-                      contexted: retryText
-                    };
-
-                    // Log context insertions in test mode
-                    if (options.test) {
-                      const insertions = extractContextInsertions(retryText);
-                      if (insertions.length > 0) {
-                        console.log(
-                          `[TEST_INSERTIONS] Paragraph ${blockIndex + 1} received ${insertions.length} context insertions on retry`
-                        );
-                      }
-                    }
-                  } else {
-                    console.log(`[VALIDATION] ✗ Retry also failed for paragraph ${blockIndex + 1}, using original`);
-                    processedBlocks[blockIndex] = {
-                      original: originalText,
-                      contexted: originalText
-                    };
-                  }
-                } catch (retryErr) {
-                  console.log(
-                    `[VALIDATION] Retry error for paragraph ${blockIndex + 1}: ${retryErr.message}, using original`
-                  );
-                  processedBlocks[blockIndex] = {
-                    original: originalText,
-                    contexted: originalText
-                  };
-                }
-              }
-            }
-            console.log(`[BATCH] Successfully processed batch ${batchIndex + 1} (${batch.blocks.length} paragraphs)`);
-          } else {
-            console.log(`[BATCH] Batch ${batchIndex + 1} failed validation, processing individually`);
-            // Fallback to individual processing for this batch
-            for (const blockData of batch.blocks) {
-              processedBlocks[blockData.originalIndex] = {
-                original: blockData.originalText,
-                contexted: blockData.originalText
-              };
-            }
-          }
-        } catch (err) {
-          console.log(`[BATCH] Failed to process batch ${batchIndex + 1}: ${err.message}, using original text`);
-          // Fallback: use original text for failed batch
-          for (const blockData of batch.blocks) {
-            processedBlocks[blockData.originalIndex] = {
-              original: blockData.originalText,
-              contexted: blockData.originalText
-            };
-          }
-        }
-      }
-    }
-  } finally {
-    const metrics = closeAISession(sessionId);
-    const duration = Date.now() - startTime;
-
-    console.log(`[SLIDING_CACHE] Processing completed in ${duration}ms`);
-    console.log(`[CACHE] Cache refreshes: ${cacheRefreshCount}, Final metrics: ${metrics?.hitRate || 0}% hit rate`);
-
-    return {
-      blocks: processedBlocks.filter(Boolean), // Remove any undefined entries
-      cacheMetrics: {...metrics, cacheRefreshes: cacheRefreshCount},
-      windowCount: slidingWindows.length,
-      processingTime: duration
-    };
-  }
+  // Use unified approach for all documents
+  return await enhanceDocumentUnified(blocks, metadata, aiConfig, options);
 }
 
 /**
@@ -2225,52 +2032,81 @@ async function enhanceKeyedBlocksWithContext(keyedBlocks, indexMapping, metadata
   const sessionId = `keyed-enhancement-${Date.now()}`;
   const session = getAISession(sessionId, aiConfig);
   
-  // Set cached context with full document and instructions
-  const fullContext = Object.values(keyedBlocks).join('\n\n');
+  // Set cached context with ONLY instructions (not the full document)
   const cachedContext = `# KEYED CONTEXT DISAMBIGUATION
 
 ## Document Metadata
 Title: ${metadata.title || 'Unknown'}
 URL: ${metadata.url || 'Unknown'}
 
-## Full Document Context
-${fullContext}
-
 ## Task
-Enhance each block below by adding factual context clarifications using ONLY information found in the document context above.
+You will receive batches of text blocks from a document. Each batch contains keyed blocks that need context enhancement.
 
 ## Important Guidelines
-1. **Document-Only Context**: Only add context that appears elsewhere in this document
-2. **Factual Focus**: Prioritize factual disambiguation over grammatical clarifications  
-3. **Avoid Redundancy**: Don't repeat information already clear in the block
-4. **[[...]] Format**: Use [[...]] delimiters for all context additions
-5. **Preserve Original**: Keep all original text exactly as is, only add [[...]] insertions
+1. **Self-Contained Batches**: Each batch contains all the context needed for disambiguation
+2. **Cross-Reference Within Batch**: Look for context clues within the blocks provided in each batch
+3. **[[...]] Format**: Use [[...]] delimiters for all context additions
+4. **Preserve Original**: Keep all original text exactly as is, only add [[...]] insertions
+5. **Factual Focus**: Prioritize factual disambiguation (names, places, dates) over grammatical clarifications
 6. **No Parentheses**: Never use parentheses for clarifications - only [[...]]
 
+## Response Format
+Return a JSON object with "enhanced_blocks" containing the same keys with enhanced text.
 `;
   
   session.setCachedContext(cachedContext);
-  debugLogger.keyed(`Set cached context: ${cachedContext.length} chars`);
+  debugLogger.keyed(`Set cached context: ${cachedContext.length} chars (instructions only)`);
 
   const allEnhancedBlocks = {};
+  const POLITE_DELAY_MS = 500; // Delay between batch submissions
 
   try {
-    // Process each batch separately
-    for (let i = 0; i < batches.length; i++) {
-      const batch = batches[i];
-      debugLogger.keyed(`Processing batch ${i + 1}/${batches.length} (${batch.wordCount} words, ${batch.blockCount} blocks)`);
-
-      // Create batch-specific prompt (only the blocks to process)
-      const batchPrompt = createKeyedBatchPrompt(batch.blocks);
-
-      // Use session to call AI with cached context
-      const result = await session.call(batchPrompt, KeyedEnhancementSchema);
-
-      if (result && result.enhanced_blocks) {
-        Object.assign(allEnhancedBlocks, result.enhanced_blocks);
-        debugLogger.keyed(`Batch ${i + 1} completed: ${Object.keys(result.enhanced_blocks).length} blocks enhanced`);
-      } else {
-        debugLogger.keyed(`Batch ${i + 1} failed: no enhanced blocks returned`);
+    // Create all batch promises with polite delays
+    const batchPromises = batches.map((batch, i) => {
+      // Add delay before starting each batch (except the first)
+      const delayMs = i * POLITE_DELAY_MS;
+      
+      return new Promise(async (resolve) => {
+        // Wait for the polite delay
+        if (delayMs > 0) {
+          debugLogger.keyed(`Batch ${i + 1} waiting ${delayMs}ms before starting...`);
+          await new Promise(wait => setTimeout(wait, delayMs));
+        }
+        
+        debugLogger.keyed(`Processing batch ${i + 1}/${batches.length} (${batch.wordCount} words, ${batch.blockCount} blocks)`);
+        
+        try {
+          // Create batch-specific prompt (only the blocks to process)
+          const batchPrompt = createKeyedBatchPrompt(batch.blocks);
+          
+          // Use session to call AI with cached context
+          const result = await session.call(batchPrompt, KeyedEnhancementSchema);
+          
+          if (result && result.enhanced_blocks) {
+            debugLogger.keyed(`Batch ${i + 1} completed: ${Object.keys(result.enhanced_blocks).length} blocks enhanced`);
+            resolve({ batchIndex: i + 1, enhancedBlocks: result.enhanced_blocks });
+          } else {
+            debugLogger.keyed(`Batch ${i + 1} failed: no enhanced blocks returned`);
+            resolve({ batchIndex: i + 1, enhancedBlocks: {} });
+          }
+        } catch (error) {
+          debugLogger.keyed(`Batch ${i + 1} error: ${error.message}`);
+          resolve({ batchIndex: i + 1, enhancedBlocks: {}, error });
+        }
+      });
+    });
+    
+    // Process all batches in parallel
+    debugLogger.keyed(`Starting parallel processing of ${batches.length} batches with ${POLITE_DELAY_MS}ms delays`);
+    const results = await Promise.all(batchPromises);
+    
+    // Merge all results
+    for (const result of results) {
+      if (result.enhancedBlocks) {
+        Object.assign(allEnhancedBlocks, result.enhancedBlocks);
+      }
+      if (result.error) {
+        debugLogger.keyed(`Batch ${result.batchIndex} had error: ${result.error.message}`);
       }
     }
 

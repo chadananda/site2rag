@@ -167,8 +167,9 @@ export class ProgressService {
     );
 
     // Start the progress bar
-    // For unlimited crawls (totalUrls <= 0), start with 1 to avoid division errors
-    const total = this.stats.totalUrls > 0 ? this.stats.totalUrls : 1;
+    // For unlimited crawls (totalUrls <= 0), start with 100 as placeholder
+    // This will be updated dynamically as URLs are discovered
+    const total = this.stats.totalUrls > 0 ? this.stats.totalUrls : 100;
     this.multibar.start(total, 0);
 
     // Start the update interval to refresh the progress bar based on real progress
@@ -334,10 +335,15 @@ export class ProgressService {
     if (this.multibar) {
       try {
         // Update total to match actual crawled count for final display
-        if (this.stats.crawledUrls > 0 && this.stats.totalUrls !== this.stats.crawledUrls) {
-          this.multibar.setTotal ? this.multibar.setTotal(this.stats.crawledUrls) : 
-            this.multibar.total = this.stats.crawledUrls;
-          this.multibar.update(this.stats.crawledUrls);
+        // For unlimited crawls or when discovered URLs differ from initial estimate
+        if (this.stats.crawledUrls > 0) {
+          const finalTotal = this.stats.crawledUrls;
+          if (this.multibar.setTotal) {
+            this.multibar.setTotal(finalTotal);
+          } else {
+            this.multibar.total = finalTotal;
+          }
+          this.multibar.update(finalTotal);
         }
         this.multibar.stop();
         if (process.stdout.isTTY) {
@@ -444,10 +450,17 @@ export class ProgressService {
     if (stats.aiFailed !== undefined) this.stats.aiFailed = stats.aiFailed;
 
     // Update progress bar total if it changed and we have an active progress bar
-    if (this.multibar && this.stats.totalUrls !== oldTotalUrls && this.stats.totalUrls > 0) {
+    if (this.multibar && this.stats.totalUrls !== oldTotalUrls) {
       // For SingleBar, we need to update the total differently
-      this.multibar.setTotal ? this.multibar.setTotal(this.stats.totalUrls) : 
-        this.multibar.total = this.stats.totalUrls;
+      // Always update the total, even if it's 0 (will use our placeholder of 100)
+      const newTotal = this.stats.totalUrls > 0 ? this.stats.totalUrls : 100;
+      if (this.multibar.setTotal) {
+        this.multibar.setTotal(newTotal);
+      } else {
+        this.multibar.total = newTotal;
+      }
+      // Force update to reflect the new total
+      this.multibar.update(this.stats.crawledUrls);
     }
     
     // Update total progress bar if it exists (legacy)
