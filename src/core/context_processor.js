@@ -9,6 +9,7 @@ import {getDB} from '../db.js';
 import {z} from 'zod';
 import {callAI, getAISession, closeAISession} from './ai_client.js';
 import debugLogger from '../services/debug_logger.js';
+import logger from '../services/logger_service.js';
 import fs from 'fs';
 import {
   createBatchProcessingPrompt,
@@ -49,27 +50,27 @@ async function executeWithFallback(callFunc, aiConfig, ...args) {
         const session = callFunc.session;
         session.aiConfig = currentLLM;
         const result = await callFunc(...args);
-        console.log(`✅ Fallback ${i + 1} succeeded: ${currentLLM.fallbackName}`);
+        debugLogger.ai(`✅ Fallback ${i + 1} succeeded: ${currentLLM.fallbackName}`);
         return result;
       } else {
         // This is a direct callAI call
         const result = await callFunc(args[0], args[1], currentLLM);
-        console.log(`✅ Fallback ${i + 1} succeeded: ${currentLLM.fallbackName}`);
+        debugLogger.ai(`✅ Fallback ${i + 1} succeeded: ${currentLLM.fallbackName}`);
         return result;
       }
     } catch (error) {
       lastError = error;
-      console.log(`❌ Fallback ${i + 1} failed: ${currentLLM.fallbackName} - ${error.message}`);
+      debugLogger.ai(`❌ Fallback ${i + 1} failed: ${currentLLM.fallbackName} - ${error.message}`);
 
       // Don't try more fallbacks if it's a validation error (not provider issue)
       if (error.message.includes('validation') || error.message.includes('schema')) {
-        console.log(`🛑 Schema validation error, stopping fallback attempts`);
+        debugLogger.ai(`🛑 Schema validation error, stopping fallback attempts`);
         throw error;
       }
     }
   }
 
-  console.log(`💥 All ${availableLLMs.length} fallback providers failed`);
+  debugLogger.ai(`💥 All ${availableLLMs.length} fallback providers failed`);
   throw lastError || new Error('All fallback providers failed');
 }
 
@@ -120,36 +121,36 @@ export const insertionTracker = {
     const session = this.getSessionSummary(sessionId);
     if (!session) return;
 
-    console.log('\n' + '='.repeat(80));
-    console.log(`🤖 LLM ENHANCEMENT SUMMARY - ${session.llmConfig.provider}/${session.llmConfig.model}`);
-    console.log('='.repeat(80));
+    logger.info('\n' + '='.repeat(80));
+    logger.info(`🤖 LLM ENHANCEMENT SUMMARY - ${session.llmConfig.provider}/${session.llmConfig.model}`);
+    logger.info('='.repeat(80));
 
-    console.log(`📊 Total files processed: ${session.files.size}`);
-    console.log(`📊 Total insertions: ${session.totalInsertions}`);
-    console.log(`📊 Total enhanced blocks: ${session.totalBlocks}`);
-    console.log(`⏱️  Processing time: ${((Date.now() - session.startTime) / 1000).toFixed(1)}s`);
+    logger.info(`📊 Total files processed: ${session.files.size}`);
+    logger.info(`📊 Total insertions: ${session.totalInsertions}`);
+    logger.info(`📊 Total enhanced blocks: ${session.totalBlocks}`);
+    logger.info(`⏱️  Processing time: ${((Date.now() - session.startTime) / 1000).toFixed(1)}s`);
 
     if (session.files.size > 0) {
-      console.log('\n📄 PER-FILE BREAKDOWN:');
+      logger.info('\n📄 PER-FILE BREAKDOWN:');
       for (const [, fileData] of session.files) {
-        console.log(`  ${fileData.fileName}: ${fileData.insertionCount} insertions`);
+        logger.info(`  ${fileData.fileName}: ${fileData.insertionCount} insertions`);
       }
 
       if (session.enhancedBlocks.length > 0) {
-        console.log('\n🔍 ALL ENHANCED BLOCKS (for LLM comparison):');
+        logger.info('\n🔍 ALL ENHANCED BLOCKS (for LLM comparison):');
         for (const block of session.enhancedBlocks) {
           const insertions = extractContextInsertions(block.enhanced);
           if (insertions.length > 0) {
-            console.log(`\n📄 ${block.fileName} - Block ${block.blockKey}:`);
-            console.log(`Original: "${block.original.substring(0, 100)}${block.original.length > 100 ? '...' : ''}"`);
-            console.log(`Enhanced: "${block.enhanced.substring(0, 150)}${block.enhanced.length > 150 ? '...' : ''}"`);
-            console.log(`Insertions: ${insertions.map(i => `[[${i}]]`).join(', ')}`);
+            logger.info(`\n📄 ${block.fileName} - Block ${block.blockKey}:`);
+            logger.info(`Original: "${block.original.substring(0, 100)}${block.original.length > 100 ? '...' : ''}"`);
+            logger.info(`Enhanced: "${block.enhanced.substring(0, 150)}${block.enhanced.length > 150 ? '...' : ''}"`);
+            logger.info(`Insertions: ${insertions.map(i => `[[${i}]]`).join(', ')}`);
           }
         }
       }
     }
 
-    console.log('='.repeat(80));
+    logger.info('='.repeat(80));
   },
 
   clear() {
@@ -483,7 +484,7 @@ Return valid JSON only, no other text or explanation.`;
 
     for (let i = 0; i < windows.length; i++) {
       const window = windows[i];
-      console.log(
+      debugLogger.ai(
         `[ENTITIES] Processing window ${i + 1}/${windows.length} (${window.actualWordCount} words) - Cached session`
       );
 
@@ -499,29 +500,29 @@ Text window: ${windowEscaped}`;
         if (extraction) {
           normalizeExtractionFields(extraction);
           entityExtractions.push(extraction);
-          console.log(
+          debugLogger.ai(
             `[ENTITIES] Window ${i + 1} extracted: ${extraction.people?.length || 0} people, ${extraction.places?.length || 0} places, ${extraction.documents?.length || 0} documents`
           );
         }
       } catch (err) {
-        console.log(`[ENTITIES] Failed to extract from window ${i + 1}: ${err.message}`);
+        debugLogger.ai(`[ENTITIES] Failed to extract from window ${i + 1}: ${err.message}`);
       }
     }
 
     // Close the AI session
     await closeAISession(sessionId);
-    console.log(`[CACHE] Knowledge graph extraction session completed`);
+    debugLogger.ai(`[CACHE] Knowledge graph extraction session completed`);
 
     // Merge all extractions with improved deduplication
     const entityGraph = mergeEntityExtractions(entityExtractions);
-    console.log(
+    debugLogger.ai(
       `[ENTITIES] Merged entities: ${entityGraph.people?.length || 0} people, ${entityGraph.places?.length || 0} places, ${entityGraph.documents?.length || 0} documents`
     );
 
     return entityGraph;
   } catch (error) {
-    console.error(`[CACHE] Knowledge graph session failed: ${error.message}`);
-    console.log(`[FALLBACK] Using non-cached large window approach`);
+    debugLogger.ai(`[CACHE] Knowledge graph session failed: ${error.message}`);
+    debugLogger.ai(`[FALLBACK] Using non-cached large window approach`);
 
     // Fall back to non-cached approach with large windows
     const entityExtractions = [];
@@ -545,12 +546,12 @@ Text window: ${windowEscaped}`;
         if (extraction) {
           normalizeExtractionFields(extraction);
           entityExtractions.push(extraction);
-          console.log(
+          debugLogger.ai(
             `[ENTITIES] Window ${i + 1} extracted: ${extraction.people?.length || 0} people, ${extraction.places?.length || 0} places, ${extraction.documents?.length || 0} documents`
           );
         }
       } catch (err) {
-        console.log(`[ENTITIES] Failed to extract from window ${i + 1}: ${err.message}`);
+        debugLogger.ai(`[ENTITIES] Failed to extract from window ${i + 1}: ${err.message}`);
       }
     }
 
@@ -2489,7 +2490,7 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
   const rawDocs = db.db.prepare("SELECT url, file_path, title FROM pages WHERE content_status = 'raw'").all();
   // Only show in test mode
   if (process.env.NODE_ENV === 'test') {
-    console.log(`[CONTEXT] Starting optimized context enhancement for ${rawDocs.length} documents`);
+    logger.info(`[CONTEXT] Starting optimized context enhancement for ${rawDocs.length} documents`);
   }
 
   for (let docIndex = 0; docIndex < rawDocs.length; docIndex++) {
@@ -2497,7 +2498,7 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
     try {
       // Only show in test mode
       if (process.env.NODE_ENV === 'test') {
-        console.log(`[CONTEXT] Processing document ${docIndex + 1}/${rawDocs.length}: ${doc.url}`);
+        logger.info(`[CONTEXT] Processing document ${docIndex + 1}/${rawDocs.length}: ${doc.url}`);
       }
 
       if (!doc.file_path || !fs.existsSync(doc.file_path)) {
@@ -2584,7 +2585,7 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
       const blocksWithInsertions = processedBlocks.filter(
         b => b.contexted && b.contexted !== b.original && b.contexted.includes('[[')
       );
-      console.log(
+      debugLogger.ai(
         `[CONTEXT] Document ${doc.url}: ${blocksWithInsertions.length}/${processedBlocks.length} blocks have context insertions`
       );
 
@@ -2595,7 +2596,7 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
       const insertionsCount = contextedMarkdown.match(/\[\[.*?\]\]/g)?.length || 0;
       // Only show insertion count in test mode
       if (process.env.NODE_ENV === 'test') {
-        console.log(`[CONTEXT] Document ${doc.url}: Found ${insertionsCount} context insertions in final markdown`);
+        logger.info(`[CONTEXT] Document ${doc.url}: Found ${insertionsCount} context insertions in final markdown`);
       }
 
       // Preserve frontmatter if present

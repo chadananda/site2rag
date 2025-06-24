@@ -249,7 +249,7 @@ export class SiteProcessor {
               const firstLLM = this.options.aiConfig.availableLLMs[0];
               // Only show in test mode
               if (process.env.NODE_ENV === 'test') {
-                console.log(`[CONTEXT] Using first fallback LLM: ${firstLLM.fallbackName}`);
+                logger.info(`[CONTEXT] Using first fallback LLM: ${firstLLM.fallbackName}`);
               }
               await runContextEnrichment(dbInstance, firstLLM, progressCallback);
             } else {
