@@ -592,6 +592,10 @@ export class CrawlService {
       // For limited crawls, use maxPages as total
       // For unlimited crawls, start with 0 and update dynamically
       const totalUrls = (this.maxPages > 0) ? this.maxPages : 0;
+      
+      if (process.env.DEBUG) {
+        console.log(`[CRAWL_SERVICE] Starting progress - maxPages: ${this.maxPages}, totalUrls: ${totalUrls}`);
+      }
 
       this.progressService.start({
         totalUrls: totalUrls,

@@ -173,9 +173,10 @@ export class ProgressService {
     );
 
     // Start the progress bar
-    // For unlimited crawls (totalUrls <= 0), show as 'unlimited' in the progress bar
-    // This will be updated dynamically as URLs are discovered
-    const total = this.stats.totalUrls > 0 ? this.stats.totalUrls : 1000; // Use larger placeholder
+    // For unlimited crawls (totalUrls < 0), use placeholder
+    // For limited crawls (totalUrls > 0), use the actual limit
+    // If totalUrls is 0, it means no limit was set, use placeholder
+    const total = this.stats.totalUrls > 0 ? this.stats.totalUrls : 100; // Back to 100 as placeholder
     this.multibar.start(total, 0);
 
     // Start the update interval to refresh the progress bar based on real progress

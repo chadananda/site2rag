@@ -43,7 +43,7 @@ export class SiteProcessor {
     this.options = {
       startUrl,
       domain,
-      maxPages: options.limit !== undefined ? options.limit : -1,
+      maxPages: options.limit !== undefined ? parseInt(options.limit) : -1,
       maxDepth: options.maxDepth !== undefined ? options.maxDepth : -1,
       politeWaitMs: options.politeWaitMs || 1000,
       outputDir: options.outputDir || options.output || `./${hostname}`,
