@@ -779,7 +779,10 @@ export class CrawlService {
 
     // Add to queue and eligible URLs
     this.queuedUrls.add(normalizedUrl);
-    this.eligibleUrls.add(normalizedUrl);
+    // Only add to eligible if not already there (crawl() will also add it)
+    if (!this.eligibleUrls.has(normalizedUrl)) {
+      this.eligibleUrls.add(normalizedUrl);
+    }
 
     // Update progress bar with eligible URLs only
     if (this.progressService) {
@@ -1017,9 +1020,6 @@ export class CrawlService {
     if (this.visitedUrls.has(normalizedUrl)) {
       return;
     }
-    
-    // Add to eligible URLs set for accurate progress tracking
-    this.eligibleUrls.add(normalizedUrl);
 
     // Add to active downloads in progress service
     this.progressService.addActiveUrl(normalizedUrl);
@@ -1041,13 +1041,19 @@ export class CrawlService {
           logger.domainFilter(
             `Skipping external URL: ${normalizedUrl} (domain: ${urlHostname}, not in base domain: ${this.baseDomain})`
           );
+          // Remove from active downloads since we're not crawling it
+          this.progressService.completeUrl(normalizedUrl, 'filtered');
           return;
         }
       } catch (err) {
         logger.warn(`Error checking domain for ${normalizedUrl}: ${err.message}`);
+        this.progressService.completeUrl(normalizedUrl, 'error');
         return;
       }
     }
+    
+    // Add to eligible URLs set AFTER all filtering checks pass
+    this.eligibleUrls.add(normalizedUrl);
 
     // Domain filtering is now handled at the beginning of the crawl method
 
@@ -1952,8 +1958,11 @@ ${markdownContent}`;
               if (this.urlFilter.shouldCrawlUrl(normalizedLink)) {
                 // Check domain filtering for depth > 0
                 if (depth === 0 || !this.options.sameDomain || this.isInternalUrl(normalizedLink)) {
-                  this.eligibleUrls.add(normalizedLink);
-                  newUrlCount++;
+                  // Only count if not already in eligible URLs
+                  if (!this.eligibleUrls.has(normalizedLink)) {
+                    this.eligibleUrls.add(normalizedLink);
+                    newUrlCount++;
+                  }
                 }
               }
             }
@@ -1969,6 +1978,10 @@ ${markdownContent}`;
             });
             
             logger.info(`Discovered ${newUrlCount} new eligible URLs from ${normalizedUrl}, total eligible: ${totalEligible}`);
+            if (this.debug) {
+              logger.debug(`[ELIGIBLE] Current eligible URLs count: ${this.eligibleUrls.size}`);
+              logger.debug(`[ELIGIBLE] Links found: ${links.length}, New eligible: ${newUrlCount}`);
+            }
           }
         }
       } catch (err) {
@@ -2301,6 +2314,7 @@ ${markdownContent}`;
         }
         
         logger.info(`Filtered to ${eligibleCount} eligible URLs from ${sitemapUrls.length} sitemap URLs`);
+        logger.info(`Total eligible URLs after sitemap processing: ${this.eligibleUrls.size}`);
         
         // Update progress bar total with eligible URLs only
         if (this.progressService) {
