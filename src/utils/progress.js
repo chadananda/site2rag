@@ -173,15 +173,26 @@ export class ProgressService {
     );
 
     // Start the progress bar
-    // For unlimited crawls (totalUrls < 0), use placeholder
+    // For unlimited crawls (totalUrls <= 0), use placeholder that will be updated dynamically
     // For limited crawls (totalUrls > 0), use the actual limit
-    // If totalUrls is 0, it means no limit was set, use placeholder
-    const total = this.stats.totalUrls > 0 ? this.stats.totalUrls : 100; // Back to 100 as placeholder
+    const total = this.stats.totalUrls > 0 ? this.stats.totalUrls : 1; // Start with 1 for unlimited
+    
+    if (process.env.DEBUG) {
+      console.log(`[PROGRESS] Starting multibar - totalUrls: ${this.stats.totalUrls}, using total: ${total}`);
+    }
+    
     this.multibar.start(total, 0);
 
     // Start the update interval to refresh the progress bar based on real progress
     this.updateInterval = setInterval(() => {
       if (this.multibar) {
+        // For unlimited crawls, dynamically update the total as URLs are discovered
+        if (initialStats.totalUrls <= 0 && this.stats.queuedUrls > 0) {
+          const discoveredTotal = this.stats.crawledUrls + this.stats.queuedUrls;
+          if (discoveredTotal > this.multibar.total) {
+            this.multibar.setTotal(discoveredTotal);
+          }
+        }
         // Update with the actual number of crawled URLs
         this.multibar.update(this.stats.crawledUrls);
       }
