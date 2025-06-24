@@ -135,7 +135,13 @@ export class ProgressService {
     }
 
     // Set initial stats if provided
-    if (initialStats.totalUrls) this.stats.totalUrls = initialStats.totalUrls;
+    if (initialStats.totalUrls !== undefined) {
+      this.stats.totalUrls = initialStats.totalUrls;
+      // Debug log
+      if (process.env.DEBUG) {
+        console.log(`[PROGRESS] Setting totalUrls to ${initialStats.totalUrls}`);
+      }
+    }
 
     // Display the figlet header
     this.displayHeader();
@@ -167,9 +173,9 @@ export class ProgressService {
     );
 
     // Start the progress bar
-    // For unlimited crawls (totalUrls <= 0), start with 100 as placeholder
+    // For unlimited crawls (totalUrls <= 0), show as 'unlimited' in the progress bar
     // This will be updated dynamically as URLs are discovered
-    const total = this.stats.totalUrls > 0 ? this.stats.totalUrls : 100;
+    const total = this.stats.totalUrls > 0 ? this.stats.totalUrls : 1000; // Use larger placeholder
     this.multibar.start(total, 0);
 
     // Start the update interval to refresh the progress bar based on real progress
@@ -259,6 +265,11 @@ export class ProgressService {
       this.multibar = null;
     }
 
+    // Clear the line and move cursor up to overwrite any leftover progress bar artifacts
+    process.stdout.write('\x1b[2K\r'); // Clear current line
+    process.stdout.write('\x1b[1A');    // Move up one line
+    process.stdout.write('\x1b[2K\r'); // Clear that line too
+    
     console.log(chalk.blue(`\nProcessing content with AI enhancement:\n`));
 
     // Create new progress bar for processing
@@ -274,7 +285,9 @@ export class ProgressService {
         barIncompleteChar: '\u2591',
         barsize: barSize,
         stopOnComplete: false,
-        forceRedraw: true
+        forceRedraw: true,
+        linewrap: false,
+        gracefulExit: true
       },
       cliProgress.Presets.shades_classic
     );
