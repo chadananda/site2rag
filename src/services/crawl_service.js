@@ -589,18 +589,18 @@ export class CrawlService {
 
     // Start progress display
     if (this.progressService) {
-      // For limited crawls, use maxPages as total
-      // For unlimited crawls, start with 0 and update dynamically
-      const totalUrls = (this.maxPages > 0) ? this.maxPages : 0;
+      // Always start with 1 (the initial URL) and update dynamically as URLs are discovered
+      const totalUrls = 1;
       
       if (process.env.DEBUG) {
-        console.log(`[CRAWL_SERVICE] Starting progress - maxPages: ${this.maxPages}, totalUrls: ${totalUrls}`);
+        console.log(`[CRAWL_SERVICE] Starting progress - maxPages: ${this.maxPages}, initial totalUrls: ${totalUrls}`);
       }
 
       this.progressService.start({
         totalUrls: totalUrls,
         isReCrawl: this.isReCrawl,
-        siteUrl: this.options.startUrl || this.domain
+        siteUrl: this.options.startUrl || this.domain,
+        maxPages: this.maxPages // Pass the limit for reference
       });
     }
 
@@ -779,11 +779,12 @@ export class CrawlService {
     // Add to queue
     this.queuedUrls.add(normalizedUrl);
 
-    // Update progress bar total for unlimited crawls as URLs are discovered
-    if (this.progressService && (this.maxPages <= 0 || this.maxPages === null)) {
+    // Always update progress bar total as URLs are discovered
+    if (this.progressService) {
       const totalDiscovered = this.visitedUrls.size + this.queuedUrls.size;
       this.progressService.updateStats({
-        totalUrls: totalDiscovered
+        totalUrls: totalDiscovered,
+        queuedUrls: this.queuedUrls.size
       });
     }
 
