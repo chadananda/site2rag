@@ -280,7 +280,7 @@ export class ProgressService {
       {
         clearOnComplete: false,
         hideCursor: true,
-        format: `${chalk.magenta.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}${chalk.gray('/')}${chalk.yellow.bold('{total}')} ${chalk.cyan('{url}')}`,
+        format: `${chalk.magenta.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}${chalk.gray('/')}${chalk.yellow.bold('{total}')}`,
         barCompleteChar: '\u2588',
         barIncompleteChar: '\u2591',
         barsize: barSize,
@@ -292,7 +292,7 @@ export class ProgressService {
       cliProgress.Presets.shades_classic
     );
 
-    this.multibar.start(totalDocuments, 0, { url: 'Starting...' });
+    this.multibar.start(totalDocuments, 0);
   }
 
   /**
@@ -303,9 +303,7 @@ export class ProgressService {
    */
   updateProcessing(current, total, url) {
     if (this.multibar) {
-      // Truncate long URLs for display
-      const displayUrl = url.length > 50 ? url.substring(0, 47) + '...' : url;
-      this.multibar.update(current, { url: displayUrl });
+      this.multibar.update(current);
     }
   }
 
