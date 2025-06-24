@@ -244,6 +244,14 @@ function createOptimizedBatches(keyedBlocks, targetWords = 500) {
 export async function enhanceDocumentUnified(blocks, metadata, aiConfig, options = {}) {
   const startTime = Date.now();
   const isTestMode = options.test || process.env.NODE_ENV === 'test';
+  const progressService = options.progressService || null;
+  
+  // Set appropriate timeout for local vs cloud models
+  if (!aiConfig.timeout) {
+    // Default timeouts: 120s for local models, 30s for cloud
+    const isLocalModel = aiConfig.provider === 'ollama' || aiConfig.host?.includes('localhost');
+    aiConfig.timeout = isLocalModel ? 120000 : 30000;
+  }
   
   // Calculate window capacity
   const capacity = calculateWindowCapacity(aiConfig);
@@ -274,6 +282,16 @@ export async function enhanceDocumentUnified(blocks, metadata, aiConfig, options
       const window = windows[windowIndex];
       
       debugLogger.context(`Processing window ${windowIndex + 1}/${windows.length} (${window.actualWordCount} words)`);
+      
+      // Update progress if service is available
+      if (progressService && progressService.updateProcessing) {
+        const currentBlock = windowIndex * Math.floor(blocks.length / windows.length);
+        progressService.updateProcessing(
+          currentBlock,
+          blocks.length,
+          `Processing window ${windowIndex + 1}/${windows.length}`
+        );
+      }
       
       // Set cached context for this window
       const cachedContext = `${instructions}
@@ -310,6 +328,16 @@ ${window.contextText}`;
         
         // Process all batches in parallel
         debugLogger.batching(`Processing ${batches.length} batches in parallel for window ${windowIndex + 1}`);
+        
+        // Update progress for batch processing
+        if (progressService && progressService.updateProcessing && batch.blockIndices.length > 0) {
+          const firstBlockIdx = Math.min(...batch.blockIndices);
+          progressService.updateProcessing(
+            firstBlockIdx,
+            blocks.length,
+            `Enhancing blocks ${firstBlockIdx + 1}-${firstBlockIdx + batch.blockIndices.length} with AI`
+          );
+        }
         
         const batchPromises = batches.map((batch, batchIdx) => 
           processBatchWithRetry(batch, session, batchIdx, options)
@@ -407,9 +435,18 @@ function calculateWindowCapacity(aiConfig) {
   const availableTokens = limits.safe - reservedTokens;
   const windowWords = Math.floor(availableTokens * 0.75); // ~0.75 words per token
   
+  // Cap window size to prevent timeouts with local models
+  // Local models struggle with very large prompts
+  const MAX_WINDOW_WORDS = 5000; // ~25K chars max
+  const cappedWindowWords = Math.min(windowWords, MAX_WINDOW_WORDS);
+  
+  // For very small models, ensure minimum window size
+  const MIN_WINDOW_WORDS = 500;
+  const finalWindowWords = Math.max(cappedWindowWords, MIN_WINDOW_WORDS);
+  
   return {
-    windowSize: windowWords,
-    overlapSize: Math.floor(windowWords * 0.5) // 50% overlap
+    windowSize: finalWindowWords,
+    overlapSize: Math.floor(finalWindowWords * 0.5) // 50% overlap
   };
 }
 
