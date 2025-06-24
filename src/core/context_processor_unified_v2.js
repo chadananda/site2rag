@@ -304,15 +304,20 @@ export async function enhanceDocumentUnifiedV2(blocks, metadata, aiConfig, optio
     for (let windowIndex = 0; windowIndex < windows.length; windowIndex++) {
       const window = windows[windowIndex];
       debugLogger.ai(`\n--- Processing Window ${windowIndex + 1}/${windows.length} ---`);
-      debugLogger.ai(`Window blocks: ${window.blocks.length}, Words: ${window.wordCount}`);
+      debugLogger.ai(`Window blocks: ${window.coveredBlocks.length}, Words: ${window.wordCount}`);
       
       // Update progress
       progressCallback(processedBlocks, totalKeyedBlocks);
       
       // Extract blocks for this window
       const windowKeyedBlocks = {};
-      for (const block of window.blocks) {
-        windowKeyedBlocks[block.key] = block.text;
+      for (const blockIndex of window.coveredBlocks) {
+        // Find the corresponding keyed block
+        const entries = Object.entries(keyedBlocks);
+        if (blockIndex < entries.length) {
+          const [key, text] = entries[blockIndex];
+          windowKeyedBlocks[key] = text;
+        }
       }
       
       // Create batches from window blocks
@@ -333,7 +338,7 @@ export async function enhanceDocumentUnifiedV2(blocks, metadata, aiConfig, optio
         Object.assign(allEnhancedBlocks, batchResult);
       }
       
-      processedBlocks += window.blocks.length;
+      processedBlocks += window.coveredBlocks.length;
       debugLogger.ai(`Window ${windowIndex + 1}: Completed. Total processed: ${processedBlocks}/${totalKeyedBlocks}`);
     }
     
