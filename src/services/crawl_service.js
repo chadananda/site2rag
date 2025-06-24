@@ -1938,6 +1938,40 @@ ${markdownContent}`;
         }
 
         links_to_crawl = links;
+        
+        // Immediately update progress bar with all discovered links
+        if (this.progressService && links.length > 0) {
+          // Count how many new URLs we're discovering (not already visited or queued)
+          let newUrlCount = 0;
+          for (const link of links) {
+            const linkString = typeof link === 'object' ? link.href : link;
+            const normalizedLink = this.urlService?.normalizeUrl ? this.urlService.normalizeUrl(linkString) : linkString;
+            
+            // Only count if not already visited or queued
+            if (!this.visitedUrls.has(normalizedLink) && !this.queuedUrls.has(normalizedLink)) {
+              // Apply same filtering rules as queueUrl
+              if (this.urlFilter.shouldCrawlUrl(normalizedLink)) {
+                // Check domain filtering for depth > 0
+                if (depth === 0 || !this.options.sameDomain || this.isInternalUrl(normalizedLink)) {
+                  newUrlCount++;
+                }
+              }
+            }
+          }
+          
+          if (newUrlCount > 0) {
+            // Calculate new total including these discovered URLs
+            const currentTotal = this.visitedUrls.size + this.queuedUrls.size;
+            const projectedTotal = currentTotal + newUrlCount;
+            
+            this.progressService.updateStats({
+              totalUrls: projectedTotal,
+              queuedUrls: this.queuedUrls.size + newUrlCount
+            });
+            
+            logger.info(`Discovered ${newUrlCount} new URLs from ${normalizedUrl}, total now: ${projectedTotal}`);
+          }
+        }
       } catch (err) {
         logger.error(`Error saving links: ${err.message}`);
         // Continue with empty links if there was an error
@@ -1974,6 +2008,28 @@ ${markdownContent}`;
       logger.error(`Error crawling ${normalizedUrl}: ${err.message}`);
     }
   }
+  /**
+   * Check if a URL is internal (same domain as base)
+   * @param {string} url - URL to check
+   * @returns {boolean} - True if internal
+   */
+  isInternalUrl(url) {
+    try {
+      const urlObj = new URL(url);
+      const urlHostname = urlObj.hostname;
+      
+      // Get base domain if not already set
+      if (!this.baseDomain && this.startUrl) {
+        const startUrlObj = new URL(this.startUrl);
+        this.baseDomain = startUrlObj.hostname;
+      }
+      
+      return this.baseDomain && urlHostname === this.baseDomain;
+    } catch (err) {
+      return false;
+    }
+  }
+
   calculateContentHash(content) {
     // Simple hash function for strings
     // This is a basic implementation - for production, consider using crypto.createHash
@@ -2234,6 +2290,17 @@ ${markdownContent}`;
             this.queuedUrls.add(url);
           }
         }
+        
+        // Update progress bar total with discovered sitemap URLs
+        if (this.progressService) {
+          const totalDiscovered = this.visitedUrls.size + this.queuedUrls.size;
+          this.progressService.updateStats({
+            totalUrls: totalDiscovered,
+            queuedUrls: this.queuedUrls.size
+          });
+          logger.info(`Updated progress total to ${totalDiscovered} URLs (${this.queuedUrls.size} from sitemap)`);
+        }
+        
         return sitemapUrls;
       } else {
         logger.info('No sitemap URLs found');
