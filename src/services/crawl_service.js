@@ -777,20 +777,32 @@ export class CrawlService {
       return; // URL filtering already logs the reason
     }
 
-    // Add to queue and eligible URLs
+    // Add to queue
     this.queuedUrls.add(normalizedUrl);
-    // Only add to eligible if not already there (crawl() will also add it)
-    if (!this.eligibleUrls.has(normalizedUrl)) {
-      this.eligibleUrls.add(normalizedUrl);
-    }
-
-    // Update progress bar with eligible URLs only
-    if (this.progressService) {
-      const totalEligible = this.eligibleUrls.size;
-      this.progressService.updateStats({
-        totalUrls: totalEligible,
-        queuedUrls: this.queuedUrls.size
-      });
+    
+    // Only add to eligible URLs if not in sitemap-first mode
+    // In sitemap mode, eligible URLs are already determined from the sitemap
+    if (!this._sitemapFirstMode) {
+      // Only add to eligible if not already there (crawl() will also add it)
+      if (!this.eligibleUrls.has(normalizedUrl)) {
+        this.eligibleUrls.add(normalizedUrl);
+      }
+      
+      // Update progress bar with eligible URLs only
+      if (this.progressService) {
+        const totalEligible = this.eligibleUrls.size;
+        this.progressService.updateStats({
+          totalUrls: totalEligible,
+          queuedUrls: this.queuedUrls.size
+        });
+      }
+    } else {
+      // In sitemap mode, just update queue count
+      if (this.progressService) {
+        this.progressService.updateStats({
+          queuedUrls: this.queuedUrls.size
+        });
+      }
     }
 
     // Recursively crawl this URL
@@ -803,6 +815,9 @@ export class CrawlService {
    */
   async crawlFromSitemap(startUrl) {
     logger.info(`Using sitemap-first crawling with language filter: ${this.urlFilter.includeLanguage}`);
+    
+    // Add the start URL to eligible URLs
+    this.eligibleUrls.add(startUrl);
     
     // Always process the home page first
     await this.processUrlDirectly(startUrl);
@@ -820,6 +835,21 @@ export class CrawlService {
     // Filter URLs that pass path/pattern filters and count them
     const validUrls = allSitemapUrls.filter(sitemapUrl => this.urlFilter.shouldCrawlUrl(sitemapUrl.url));
     logger.info(`After path/pattern filtering: ${validUrls.length} valid URLs to crawl`);
+    
+    // Add all valid URLs to eligible set
+    for (const sitemapUrl of validUrls) {
+      this.eligibleUrls.add(sitemapUrl.url);
+    }
+    
+    // Update progress bar with final eligible count
+    if (this.progressService) {
+      const totalEligible = this.eligibleUrls.size;
+      this.progressService.updateStats({
+        totalUrls: totalEligible,
+        queuedUrls: 0
+      });
+      logger.info(`Set progress total to ${totalEligible} eligible URLs from sitemap`);
+    }
     
     // Process each valid URL directly
     for (const sitemapUrl of validUrls) {
@@ -1053,7 +1083,10 @@ export class CrawlService {
     }
     
     // Add to eligible URLs set AFTER all filtering checks pass
-    this.eligibleUrls.add(normalizedUrl);
+    // But not in sitemap-first mode where eligible URLs are predetermined
+    if (!this._sitemapFirstMode) {
+      this.eligibleUrls.add(normalizedUrl);
+    }
 
     // Domain filtering is now handled at the beginning of the crawl method
 
@@ -1958,10 +1991,19 @@ ${markdownContent}`;
               if (this.urlFilter.shouldCrawlUrl(normalizedLink)) {
                 // Check domain filtering for depth > 0
                 if (depth === 0 || !this.options.sameDomain || this.isInternalUrl(normalizedLink)) {
-                  // Only count if not already in eligible URLs
-                  if (!this.eligibleUrls.has(normalizedLink)) {
-                    this.eligibleUrls.add(normalizedLink);
-                    newUrlCount++;
+                  // In sitemap-first mode, don't add new URLs to eligible set
+                  // The sitemap already gave us all URLs we should crawl
+                  if (!this._sitemapFirstMode) {
+                    // Only count if not already in eligible URLs
+                    if (!this.eligibleUrls.has(normalizedLink)) {
+                      this.eligibleUrls.add(normalizedLink);
+                      newUrlCount++;
+                    }
+                  } else {
+                    // In sitemap mode, just count for logging but don't add to eligible
+                    if (!this.eligibleUrls.has(normalizedLink)) {
+                      newUrlCount++;
+                    }
                   }
                 }
               }
@@ -1969,15 +2011,26 @@ ${markdownContent}`;
           }
           
           if (newUrlCount > 0) {
-            // Update progress with eligible URLs only
-            const totalEligible = this.eligibleUrls.size;
+            logger.info(`Discovered ${newUrlCount} new eligible URLs from ${normalizedUrl}`);
             
-            this.progressService.updateStats({
-              totalUrls: totalEligible,
-              queuedUrls: this.queuedUrls.size
-            });
+            // In sitemap-first mode, don't update the total - it's already set from sitemap
+            if (!this._sitemapFirstMode) {
+              // Only update progress total if we're not in sitemap-first mode
+              const totalEligible = this.eligibleUrls.size;
+              
+              this.progressService.updateStats({
+                totalUrls: totalEligible,
+                queuedUrls: this.queuedUrls.size
+              });
+              
+              logger.info(`Updated total eligible to: ${totalEligible}`);
+            } else {
+              // In sitemap mode, just update the queue count
+              this.progressService.updateStats({
+                queuedUrls: this.queuedUrls.size
+              });
+            }
             
-            logger.info(`Discovered ${newUrlCount} new eligible URLs from ${normalizedUrl}, total eligible: ${totalEligible}`);
             if (this.debug) {
               logger.debug(`[ELIGIBLE] Current eligible URLs count: ${this.eligibleUrls.size}`);
               logger.debug(`[ELIGIBLE] Links found: ${links.length}, New eligible: ${newUrlCount}`);
