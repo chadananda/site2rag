@@ -413,6 +413,7 @@ export class CrawlService {
     // Efficient URL tracking to minimize redundant processing
     this.visitedUrls = new Set(); // URLs already processed in this session
     this.queuedUrls = new Set(); // URLs in the queue to be processed
+    this.eligibleUrls = new Set(); // URLs that pass all filters (for accurate progress tracking)
     this.foundUrls = []; // URLs successfully processed
     this.contentHashes = new Map(); // In-memory cache of URL content hashes for this session
     this.linkMap = {}; // Map of source URLs to their outbound links
@@ -698,8 +699,8 @@ export class CrawlService {
       // Stop progress display without clearing the screen
       if (this.progressService) {
         // Final update of stats before stopping
-        // Use the maxPages value (which comes from options.limit in the constructor)
-        const finalTotal = this.maxPages;
+        // Use eligible URLs for accurate total
+        const finalTotal = this.eligibleUrls.size;
 
         this.progressService.updateStats({
           totalUrls: finalTotal,
@@ -776,14 +777,15 @@ export class CrawlService {
       return; // URL filtering already logs the reason
     }
 
-    // Add to queue
+    // Add to queue and eligible URLs
     this.queuedUrls.add(normalizedUrl);
+    this.eligibleUrls.add(normalizedUrl);
 
-    // Always update progress bar total as URLs are discovered
+    // Update progress bar with eligible URLs only
     if (this.progressService) {
-      const totalDiscovered = this.visitedUrls.size + this.queuedUrls.size;
+      const totalEligible = this.eligibleUrls.size;
       this.progressService.updateStats({
-        totalUrls: totalDiscovered,
+        totalUrls: totalEligible,
         queuedUrls: this.queuedUrls.size
       });
     }
@@ -1015,6 +1017,9 @@ export class CrawlService {
     if (this.visitedUrls.has(normalizedUrl)) {
       return;
     }
+    
+    // Add to eligible URLs set for accurate progress tracking
+    this.eligibleUrls.add(normalizedUrl);
 
     // Add to active downloads in progress service
     this.progressService.addActiveUrl(normalizedUrl);
@@ -1351,8 +1356,9 @@ export class CrawlService {
     this.queuedUrls.delete(normalizedUrl); // Remove from queue if it was there
     // Note: URL will be added to foundUrls only after successful processing
 
-    // Update crawl stats
+    // Update crawl stats with eligible URLs total
     this.progressService.updateStats({
+      totalUrls: this.eligibleUrls.size,
       crawledUrls: this.visitedUrls.size,
       queuedUrls: this.queuedUrls.size,
       activeUrls: this.activeCrawls
@@ -1866,21 +1872,14 @@ ${markdownContent}`;
         logger.crawl(`Total URLs mapped so far: ${this.totalUrlsMapped}`);
       }
 
-      // Update progress bar for dynamic crawls
+      // Update progress bar with eligible URLs
       if (this.progressService) {
-        // For unlimited crawls, update total to reflect all discovered URLs
-        if (this.maxPages <= 0 || this.maxPages === null) {
-          const totalDiscovered = this.visitedUrls.size + this.queuedUrls.size;
-          this.progressService.updateStats({
-            totalUrls: totalDiscovered,
-            crawledUrls: this.foundUrls.length
-          });
-        } else {
-          // For limited crawls, just update crawled count
-          this.progressService.updateStats({
-            crawledUrls: this.foundUrls.length
-          });
-        }
+        // Always use eligible URLs for the total
+        const totalEligible = this.eligibleUrls.size;
+        this.progressService.updateStats({
+          totalUrls: totalEligible,
+          crawledUrls: this.foundUrls.length
+        });
       }
 
       // Context enhancement integration - process in background (non-blocking)
@@ -1953,6 +1952,7 @@ ${markdownContent}`;
               if (this.urlFilter.shouldCrawlUrl(normalizedLink)) {
                 // Check domain filtering for depth > 0
                 if (depth === 0 || !this.options.sameDomain || this.isInternalUrl(normalizedLink)) {
+                  this.eligibleUrls.add(normalizedLink);
                   newUrlCount++;
                 }
               }
@@ -1960,16 +1960,15 @@ ${markdownContent}`;
           }
           
           if (newUrlCount > 0) {
-            // Calculate new total including these discovered URLs
-            const currentTotal = this.visitedUrls.size + this.queuedUrls.size;
-            const projectedTotal = currentTotal + newUrlCount;
+            // Update progress with eligible URLs only
+            const totalEligible = this.eligibleUrls.size;
             
             this.progressService.updateStats({
-              totalUrls: projectedTotal,
-              queuedUrls: this.queuedUrls.size + newUrlCount
+              totalUrls: totalEligible,
+              queuedUrls: this.queuedUrls.size
             });
             
-            logger.info(`Discovered ${newUrlCount} new URLs from ${normalizedUrl}, total now: ${projectedTotal}`);
+            logger.info(`Discovered ${newUrlCount} new eligible URLs from ${normalizedUrl}, total eligible: ${totalEligible}`);
           }
         }
       } catch (err) {
@@ -2284,21 +2283,33 @@ ${markdownContent}`;
       const sitemapUrls = await this.sitemapService.getAllSitemapUrls(domain);
       if (sitemapUrls.length > 0) {
         logger.info(`Found ${sitemapUrls.length} URLs in sitemaps`);
-        // Add sitemap URLs to the queue for priority crawling
+        
+        // Filter sitemap URLs and only add eligible ones to the queue
+        let eligibleCount = 0;
         for (const url of sitemapUrls) {
           if (!this.visitedUrls.has(url) && !this.queuedUrls.has(url)) {
-            this.queuedUrls.add(url);
+            // Apply URL filtering to check if this URL should be crawled
+            if (this.urlFilter.shouldCrawlUrl(url)) {
+              // Also check domain filtering if enabled
+              if (!this.options.sameDomain || this.isInternalUrl(url)) {
+                this.queuedUrls.add(url);
+                this.eligibleUrls.add(url);
+                eligibleCount++;
+              }
+            }
           }
         }
         
-        // Update progress bar total with discovered sitemap URLs
+        logger.info(`Filtered to ${eligibleCount} eligible URLs from ${sitemapUrls.length} sitemap URLs`);
+        
+        // Update progress bar total with eligible URLs only
         if (this.progressService) {
-          const totalDiscovered = this.visitedUrls.size + this.queuedUrls.size;
+          const totalEligible = this.eligibleUrls.size;
           this.progressService.updateStats({
-            totalUrls: totalDiscovered,
+            totalUrls: totalEligible,
             queuedUrls: this.queuedUrls.size
           });
-          logger.info(`Updated progress total to ${totalDiscovered} URLs (${this.queuedUrls.size} from sitemap)`);
+          logger.info(`Updated progress total to ${totalEligible} eligible URLs`);
         }
         
         return sitemapUrls;
