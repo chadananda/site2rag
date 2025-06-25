@@ -346,6 +346,30 @@ export function validateEnhancement(original, enhanced) {
     };
   }
 
+  // Check for forbidden general knowledge patterns FIRST
+  const forbiddenPatterns = [
+    /\[\[personal computer\]\]/i,
+    /\[\[a city in[^\]]*\]\]/i,
+    /\[\[a country in[^\]]*\]\]/i,
+    /\[\[a.+House of Worship\]\]/i,
+    /\[\[a.+text\]\]/i,
+    /\[\[a.+historical text\]\]/i,
+    /\[\[the possibility of[^\]]*\]\]/i,
+    /\[\[disagreement[^\]]*\]\]/i,
+    /\[\[a.+temple\]\]/i,
+    /\[\[.+definition[^\]]*\]\]/i
+  ];
+
+  for (const pattern of forbiddenPatterns) {
+    if (pattern.test(enhanced)) {
+      const match = enhanced.match(pattern);
+      return {
+        isValid: false,
+        error: `Forbidden general knowledge detected: ${match[0]}`
+      };
+    }
+  }
+
   // Strip [[...]] context additions from enhanced text for comparison
   const enhancedWithoutContext = enhanced.replace(/\s*\[\[.*?\]\]/g, '');
 
