@@ -346,44 +346,6 @@ export function validateEnhancement(original, enhanced) {
     };
   }
 
-  // Check for forbidden general knowledge patterns FIRST
-  const forbiddenPatterns = [
-    // Definitions
-    /\[\[personal computer\]\]/i,
-    /\[\[PC\]\]/i,
-    // Geography
-    /\[\[a city in[^\]]*\]\]/i,
-    /\[\[a country in[^\]]*\]\]/i,
-    /\[\[.+city\]\]/i,
-    /\[\[.+country\]\]/i,
-    // Religious descriptions
-    /\[\[.+House of Worship\]\]/i,
-    /\[\[.+Bahá'í text\]\]/i,
-    /\[\[.+historical text\]\]/i,
-    /\[\[.+religious text\]\]/i,
-    /\[\[.+community member\]\]/i,
-    /\[\[.+temple\]\]/i,
-    // Explanations
-    /\[\[the possibility of[^\]]*\]\]/i,
-    /\[\[disagreement[^\]]*\]\]/i,
-    /\[\[.+definition[^\]]*\]\]/i,
-    // Single words that are not clarifications
-    /\[\[successfully\]\]/i,
-    /\[\[the\]\]/i,
-    /\[\[a\]\]/i,
-    /\[\[an\]\]/i
-  ];
-
-  for (const pattern of forbiddenPatterns) {
-    if (pattern.test(enhanced)) {
-      const match = enhanced.match(pattern);
-      return {
-        isValid: false,
-        error: `Forbidden general knowledge detected: ${match[0]}`
-      };
-    }
-  }
-
   // Strip [[...]] context additions from enhanced text for comparison
   const enhancedWithoutContext = enhanced.replace(/\s*\[\[.*?\]\]/g, '');
 
