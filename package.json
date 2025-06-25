@@ -42,7 +42,13 @@
     "test:parallel": "DEBUG=true node ./bin/site2rag.js tests/debug/parallel-test-output/large-sample.md --output tests/debug/parallel-test-output/enhanced --flat",
     "test:ambiguous": "DEBUG=true node ./bin/site2rag.js tests/debug/ambiguous-test.md --output tests/debug/ambiguous-enhanced.md --flat",
     "test:unlimited": "DEBUG=true node ./bin/site2rag.js example.com --output ./tests/tmp/unlimited-test --flat 2>&1 | grep -E '(progress|100|totalUrls|crawled)'",
-    "test:limited": "DEBUG=true node ./bin/site2rag.js example.com --limit 5 --output ./tests/tmp/limited-test --flat"
+    "test:limited": "DEBUG=true node ./bin/site2rag.js example.com --limit 5 --output ./tests/tmp/limited-test --flat",
+    "pr:list": "gh pr list",
+    "pr:view": "gh pr view",
+    "pr:diff": "gh pr diff",
+    "pr:create": "gh pr create",
+    "pr:merge": "gh pr merge",
+    "pr:review": "gh pr review"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",

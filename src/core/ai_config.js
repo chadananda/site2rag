@@ -105,7 +105,7 @@ export function getLLMConfigFromFlags(options) {
       provider: 'openai',
       model: 'gpt-4o-mini',
       apiKey: process.env.OPENAI_API_KEY,
-      timeout: 30000 // More generous timeout for complex prompts
+      timeout: 60000 // 60s timeout for complex prompts with large context
     };
   }
 
@@ -182,8 +182,8 @@ export function createFallbackConfig(options) {
     return null; // Fallback not enabled
   }
 
-  // Default fallback order based on our test results (best to worst quality)
-  const defaultOrder = ['gpt4o', 'gpt4o-mini', 'opus4', 'gpt4-turbo', 'ollama'];
+  // Default fallback order optimized for speed/cost (gpt4o-mini is ideal for context disambiguation)
+  const defaultOrder = ['gpt4o-mini', 'gpt4o', 'opus4', 'gpt4-turbo', 'ollama'];
 
   // Parse custom fallback order if provided
   let fallbackOrder = defaultOrder;
@@ -208,7 +208,7 @@ export function createFallbackConfig(options) {
               provider: 'openai',
               model: 'gpt-4o',
               apiKey: process.env.OPENAI_API_KEY,
-              timeout: 30000,
+              timeout: 60000, // 60s for large context windows
               fallbackName: 'gpt4o'
             };
           }
@@ -220,7 +220,7 @@ export function createFallbackConfig(options) {
               provider: 'openai',
               model: 'gpt-4o-mini',
               apiKey: process.env.OPENAI_API_KEY,
-              timeout: 30000,
+              timeout: 60000, // 60s for large context windows with gpt4o-mini
               fallbackName: 'gpt4o-mini'
             };
           }

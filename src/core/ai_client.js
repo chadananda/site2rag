@@ -7,8 +7,8 @@ import pLimit from 'p-limit';
 import logger from '../services/logger_service.js';
 import debugLogger from '../services/debug_logger.js';
 
-// Global limiter: only 3 concurrent AI calls at a time
-export const aiLimiter = pLimit(3);
+// Global limiter: 10 concurrent AI calls at a time
+export const aiLimiter = pLimit(10);
 // Session management for context caching
 const activeSessions = new Map();
 
@@ -45,12 +45,14 @@ export class AISession {
   async call(prompt, schema) {
     this.lastUsed = Date.now();
     const fullPrompt = this.cachedContext ? `${this.cachedContext}\n\n${prompt}` : prompt;
-    
+
     // Log prompt sizes for debugging
-    debugLogger.ai(`Session ${this.sessionId} - Cached context: ${this.cachedContext ? this.cachedContext.length : 0} chars`);
+    debugLogger.ai(
+      `Session ${this.sessionId} - Cached context: ${this.cachedContext ? this.cachedContext.length : 0} chars`
+    );
     debugLogger.ai(`Session ${this.sessionId} - Additional prompt: ${prompt.length} chars`);
     debugLogger.ai(`Session ${this.sessionId} - Total prompt: ${fullPrompt.length} chars`);
-    
+
     this.conversationHistory.push({prompt: fullPrompt, timestamp: Date.now()});
     try {
       const result = await callAI(fullPrompt, schema, this.aiConfig);
@@ -120,7 +122,7 @@ export function cleanupInactiveSessions() {
  */
 async function makeAICall(prompt, aiConfig) {
   const provider = aiConfig.provider || 'ollama';
-  
+
   debugLogger.ai(`makeAICall - Provider: ${provider}`);
 
   if (provider === 'ollama') {
@@ -175,12 +177,12 @@ async function makeAICall(prompt, aiConfig) {
     const data = await response.json();
     debugLogger.ai(`Ollama - Response data keys: ${Object.keys(data).join(', ')}`);
     debugLogger.ai(`Ollama - Response length: ${(data.response || '').length}`);
-    
+
     if (!data.response) {
       console.error(`[AI ERROR] Ollama - No response field in data:`, data);
       throw new Error(`Ollama response missing 'response' field`);
     }
-    
+
     return data.response;
   }
 
@@ -241,6 +243,7 @@ async function makeAICall(prompt, aiConfig) {
     }
 
     const timeoutMs = aiConfig.timeout || 30000; // 30 second default for OpenAI
+    debugLogger.ai(`OpenAI - Timeout set to ${timeoutMs}ms (config: ${aiConfig.timeout}ms)`);
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error(`AI call timed out after ${timeoutMs}ms`)), timeoutMs);
     });
@@ -256,7 +259,8 @@ async function makeAICall(prompt, aiConfig) {
         messages: [{role: 'user', content: prompt}],
         max_tokens: 4000,
         temperature: 0.1,
-        top_p: 0.9
+        top_p: 0.9,
+        response_format: {type: 'json_object'} // Request JSON response
       })
     });
 
@@ -401,20 +405,23 @@ async function makeAICall(prompt, aiConfig) {
 export async function callAI(prompt, schema, aiConfig) {
   return aiLimiter(async () => {
     let lastError = null;
-    
+
     debugLogger.ai(`Starting AI call with provider: ${aiConfig.provider || 'ollama'}`);
     debugLogger.ai(`Model: ${aiConfig.model || 'default'}`);
     debugLogger.ai(`Host: ${aiConfig.host || 'default'}`);
     debugLogger.ai(`Prompt length: ${prompt.length} characters`);
-    
+
     // Log first 500 chars of prompt for debugging large prompts
     if (prompt.length > 5000) {
       debugLogger.ai(`Large prompt detected! First 500 chars: ${prompt.substring(0, 500)}...`);
       debugLogger.ai(`Last 500 chars: ...${prompt.substring(prompt.length - 500)}`);
     }
-    
+
     for (let attempt = 1; attempt <= 3; attempt++) {
-      await delay(300); // Spread out requests to avoid throttling
+      // Only delay on retries, not the first attempt
+      if (attempt > 1) {
+        await delay(1000 * attempt); // Exponential backoff on retries
+      }
       try {
         debugLogger.ai(`Attempt ${attempt}: Making AI call...`);
         const responseText = await makeAICall(prompt, aiConfig);
@@ -425,10 +432,11 @@ export async function callAI(prompt, schema, aiConfig) {
         let jsonText = responseText.trim();
 
         // Handle cases where AI returns JSON wrapped in markdown code blocks
-        const codeBlockMatch = jsonText.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+        // Updated regex to handle ```json{ case without space/newline
+        const codeBlockMatch = jsonText.match(/```(?:json)?(\s*)([\s\S]*?)\s*```/);
         if (codeBlockMatch) {
           debugLogger.ai(`Found JSON in code blocks`);
-          jsonText = codeBlockMatch[1].trim();
+          jsonText = codeBlockMatch[2].trim();
         }
 
         // Try to find JSON object in the response
@@ -441,12 +449,12 @@ export async function callAI(prompt, schema, aiConfig) {
         // Basic cleanup for control characters only
         // eslint-disable-next-line no-control-regex
         jsonText = jsonText.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
-        
+
         debugLogger.ai(`Final JSON text (first 200 chars): ${jsonText.substring(0, 200)}...`);
 
         const parsed = JSON.parse(jsonText);
         debugLogger.ai(`JSON parsed successfully`);
-        
+
         const validated = schema.parse(parsed);
         debugLogger.ai(`Schema validation successful`);
         return validated;
@@ -455,36 +463,38 @@ export async function callAI(prompt, schema, aiConfig) {
         console.error(`[AI ERROR] Attempt ${attempt} failed:`);
         console.error(`[AI ERROR] Error type: ${e.constructor.name}`);
         console.error(`[AI ERROR] Error message: ${e.message}`);
-        
+
         if (e.name === 'ZodError') {
           console.error(`[AI ERROR] Zod validation error details:`, JSON.stringify(e.errors, null, 2));
         }
-        
+
         if (e.message.includes('Unexpected token')) {
           console.error(`[AI ERROR] JSON parsing failed - likely malformed JSON response`);
         }
-        
+
         if (e.message.includes('timed out')) {
           console.error(`[AI ERROR] Request timed out - check network/model availability`);
-          console.error(`[AI ERROR] Timeout occurred after ${aiConfig.timeout || 30000}ms for prompt of ${prompt.length} chars`);
+          console.error(
+            `[AI ERROR] Timeout occurred after ${aiConfig.timeout || 30000}ms for prompt of ${prompt.length} chars`
+          );
         }
-        
+
         if (e.message.includes('API request failed')) {
           console.error(`[AI ERROR] API request failed - check provider configuration`);
         }
-        
+
         console.error(`[AI ERROR] Full error stack:`, e.stack);
-        
+
         if (attempt < 3) {
-          console.error(`[AI] Retrying in ${1000 * attempt}ms...`);
-          await delay(1000 * attempt); // Exponential backoff
+          console.error(`[AI] Will retry attempt ${attempt + 1}...`);
+          // Delay is handled at the start of the loop
         } else {
           console.error(`[AI FATAL] All 3 attempts failed. Unable to get valid AI response.`);
           logger.error(`AI response validation failed after 3 attempts: ${e.message}`);
         }
       }
     }
-    
+
     console.error(`[AI FATAL] Returning null after all attempts failed`);
     console.error(`[AI FATAL] Last error was: ${lastError?.message || 'Unknown error'}`);
     return null;

@@ -3,6 +3,7 @@
 ## Getting Up to Speed (Claude Self-Onboarding)
 
 ### Required Reading (In Order)
+
 1. **Anthropic Claude Code Best Practices**: https://www.anthropic.com/engineering/claude-code-best-practices
 2. `planning/prd.md` - Complete Product Requirements Document
 3. `src/REFACTORING_MAP.md` - Function catalog and safety levels
@@ -10,12 +11,14 @@
 5. `planning/` directory - All design docs and specifications
 
 ### Context Files (Always check these first)
+
 - **`src/REFACTORING_MAP.md`** - Check for existing functions before creating new ones
 - **`tests/README.md`** - Understand test structure and patterns
 - **`planning/project-constraints.md`** - Core architectural constraints
 - **Current git status** - Understand work in progress
 
 ### Project Status Check
+
 - Run `git status` to see current work
 - Check `tests/unit/` for recent test additions
 - Review `src/` structure for new utilities
@@ -45,6 +48,7 @@
 ## Autonomous Development Workflow
 
 ### Core Development Pipeline (Claude handles automatically)
+
 1. **Pre-Development Check**:
    - Check `src/REFACTORING_MAP.md` for existing functions
    - Search codebase for similar functionality
@@ -79,13 +83,14 @@
    - Auto-commit when tests pass
 
 ### Commit Pattern (Claude executes automatically)
+
 ```bash
 # After creating pure function with tests
 npm run quality:check
 git add . && git commit -m "feat: add {functionName} utility with comprehensive tests
 
 - Exported pure function in src/utils/{category}.js
-- Added unit tests in tests/unit/utils/{category}.test.js  
+- Added unit tests in tests/unit/utils/{category}.test.js
 - Updated REFACTORING_MAP.md and tests/README.md
 - All tests passing, lint clean
 
@@ -93,6 +98,7 @@ git add . && git commit -m "feat: add {functionName} utility with comprehensive 
 ```
 
 ### Sub-Agent Usage (Automatic)
+
 - **Code Review Agent**: Review all code for style compliance
 - **Test Creation Agent**: Create comprehensive tests for pure functions
 - **Documentation Agent**: Update all relevant documentation files
@@ -156,24 +162,28 @@ Watch for these and stop immediately:
 ## Quality Gates (All Automatic)
 
 ### Mandatory Checks Before Any Commit:
+
 1. **Lint Check**: `npm run lint` must pass (no warnings/errors)
 2. **Test Suite**: `npm run test` must pass (all tests green)
 3. **Function Reuse**: Check REFACTORING_MAP.md for existing functions
 4. **Documentation**: All new functions documented in appropriate files
 
 ### Test Output Isolation:
+
 - **ALL test outputs** → `tests/tmp/{test-name}/` only
 - **Never delete core files** - only clean `tests/tmp/` contents
 - **Database files** → `tests/tmp/{test-name}/db/`
 - **Generated content** → `tests/tmp/{test-name}/output/`
 
 ### AI Testing Standards:
+
 - Use pattern-based assertions (not exact matches)
 - Mock non-deterministic AI responses
 - Test structure preservation and enhancement patterns
 - Validate error handling and edge cases
 
 ### Commit Standards:
+
 - Conventional commit format: `feat:`, `fix:`, `refactor:`, `test:`, `docs:`
 - Include test status and lint status in commit message
 - Reference updated documentation files
@@ -182,18 +192,21 @@ Watch for these and stop immediately:
 ## Emergency Procedures
 
 ### If Tests Fail:
+
 1. **STOP development immediately**
 2. **Fix failing tests before any new work**
 3. **Do not commit broken code**
 4. **Check git status and rollback if needed**
 
 ### If Lint Fails:
+
 1. **Fix all linting issues immediately**
 2. **Do not proceed with development**
 3. **Use autofix where possible**: `npm run lint -- --fix`
 4. **Manual fix for complex issues**
 
 ### If Function Already Exists:
+
 1. **Use existing function instead of creating new one**
 2. **Update existing function if enhancement needed**
 3. **Add tests for existing function if missing**
@@ -233,3 +246,14 @@ Watch for these and stop immediately:
 - When committing fixes to git, update the version with a minor update
 - When merging a feature branch, increment a major update (in the package.json)
 - Publish to NPM on major changes (npm publish)
+
+## AI Context Processing Configuration
+
+- **Batch Size**: 4000 words per batch (reduces network overhead when sending full context)
+- **Concurrency**: 10 parallel AI calls (no artificial delays)
+- **Minimum Block Size**: 200 characters (filters out trivial content)
+- **Window Overlap**: Fixed 1000 words (not percentage-based)
+- **Primary Provider**: GPT-4o-mini (optimized for speed/cost on disambiguation tasks)
+- **Fallback Order**: gpt4o-mini → gpt4o → opus4 → gpt4-turbo → ollama
+- **Caching Strategy**: Full document context cached per sliding window
+- **Return Format**: Only blocks requiring disambiguation are returned

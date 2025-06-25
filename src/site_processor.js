@@ -156,12 +156,40 @@ export class SiteProcessor {
 
     this.visited = new Set();
     this.found = [];
+    
+    // Start parallel AI processor if enhancement is enabled
+    let parallelProcessor = null;
+    if (this.options.enhancement && this.options.aiConfig && 
+        (this.options.aiConfig.provider || this.options.aiConfig.type === 'fallback')) {
+      const { createParallelAIProcessor } = await import('./core/parallel_ai_processor.js');
+      const dbInstance = this.contentService.db;
+      
+      if (dbInstance) {
+        // Use the actual AI config (for fallback, use the first available LLM)
+        const actualAIConfig = this.options.aiConfig.type === 'fallback' 
+          ? this.options.aiConfig.availableLLMs[0]
+          : this.options.aiConfig;
+          
+        parallelProcessor = createParallelAIProcessor(dbInstance, actualAIConfig);
+        parallelProcessor.start();
+        logger.info('[AI] Started parallel AI processor - will process pages as they are crawled');
+      }
+    }
+    
     try {
       logger.info(`Processing sitemaps...`, true);
       await this.crawlService.processSitemaps(this.options.domain);
       logger.info(`Starting site crawl...`, true);
       this.found = await this.crawlService.crawlSite(this.options.startUrl);
       logger.info(`Crawl complete. Processed ${this.crawlService.foundUrls.length} URLs.`, true);
+      
+      // Stop parallel processor if running
+      if (parallelProcessor) {
+        parallelProcessor.stop();
+        const stats = parallelProcessor.getStats();
+        logger.info(`[AI] Parallel processor completed: ${stats.processed} pages enhanced during crawl`);
+      }
+      
       if (this.found.length === 1 && this.options.maxDepth === 0) {
         logger.info('Single page crawl completed, skipping post-processing');
         return this.found;
@@ -170,6 +198,11 @@ export class SiteProcessor {
       await this.runPostCrawlPipeline();
       logger.info('Post-crawl pipeline completed');
     } catch (err) {
+      // Stop parallel processor on error
+      if (parallelProcessor) {
+        parallelProcessor.stop();
+      }
+      
       if (!(err instanceof CrawlLimitReached)) {
         logger.error('Error during crawl:', err);
         throw err;
@@ -216,119 +249,129 @@ export class SiteProcessor {
         const {runContextEnrichment, insertionTracker} = await import('./core/context_processor.js');
         const dbInstance = this.contentService.db;
 
-          // Start insertion tracking session if test mode is enabled
-          if (this.options.test) {
-            insertionTracker.enabled = true;
-            const sessionId = `${this.options.startUrl.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
+        // Start insertion tracking session if test mode is enabled
+        if (this.options.test) {
+          insertionTracker.enabled = true;
+          const sessionId = `${this.options.startUrl.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
 
-            // Get the actual LLM config for tracking
-            const trackingConfig =
-              this.options.aiConfig.type === 'fallback'
-                ? this.options.aiConfig.availableLLMs[0]
-                : this.options.aiConfig;
+          // Get the actual LLM config for tracking
+          const trackingConfig =
+            this.options.aiConfig.type === 'fallback' ? this.options.aiConfig.availableLLMs[0] : this.options.aiConfig;
 
-            insertionTracker.startSession(sessionId, trackingConfig);
-            logger.info(`Started LLM enhancement session: ${trackingConfig.provider}/${trackingConfig.model}`);
-          }
-
-          // Check how many documents need processing
-          const rawDocs = dbInstance.db.prepare("SELECT url FROM pages WHERE content_status = 'raw'").all();
-          
-          if (rawDocs.length > 0) {
-            // Start processing progress bar
-            this.crawlService.progressService.startProcessing(rawDocs.length);
-            
-            // Create progress callback
-            const progressCallback = (current, total, url) => {
-              this.crawlService.progressService.updateProcessing(current, total, url);
-            };
-            
-            // Run the main context enrichment for all raw pages
-            if (this.options.aiConfig.type === 'fallback') {
-              // For fallback config, use the first available LLM
-              const firstLLM = this.options.aiConfig.availableLLMs[0];
-              // Only show in test mode
-              if (process.env.NODE_ENV === 'test') {
-                logger.info(`[CONTEXT] Using first fallback LLM: ${firstLLM.fallbackName}`);
-              }
-              await runContextEnrichment(dbInstance, firstLLM, progressCallback);
-            } else {
-              // Regular AI config
-              await runContextEnrichment(dbInstance, this.options.aiConfig, progressCallback);
-            }
-            
-            // Complete processing progress
-            this.crawlService.progressService.completeProcessing();
-          }
-
-          // Log insertion tracking summary if test mode was enabled
-          if (this.options.test && insertionTracker.enabled) {
-            insertionTracker.logSessionSummary();
-          }
-        } catch (error) {
-          logger.error(`[CONTEXT] AI enhancement failed: ${error.message}`);
+          insertionTracker.startSession(sessionId, trackingConfig);
+          logger.info(`Started LLM enhancement session: ${trackingConfig.provider}/${trackingConfig.model}`);
         }
-      } else if (!this.options.enhancement) {
-        logger.info('[CONTEXT] AI enhancement disabled by --no-enhancement flag');
-      } else if (
-        !this.options.aiConfig ||
-        (!this.options.aiConfig.provider && this.options.aiConfig.type !== 'fallback')
-      ) {
-        logger.info('[CONTEXT] AI enhancement skipped - no AI configuration available');
+
+        // Check how many documents need processing (skip ones already processed by parallel processor)
+        const rawDocs = dbInstance.db.prepare("SELECT url FROM pages WHERE content_status = 'raw'").all();
+
+        if (rawDocs.length > 0) {
+          logger.info(`[CONTEXT] Found ${rawDocs.length} remaining raw pages to process`);
+        } else {
+          logger.info(`[CONTEXT] All pages already processed by parallel processor`);
+        }
+
+        if (rawDocs.length > 0) {
+          // Estimate ~5 windows per document as initial guess (will update dynamically)
+          const estimatedRequests = rawDocs.length * 5;
+          this.crawlService.progressService.startProcessing(estimatedRequests);
+
+          // Progress callback will receive actual AI request counts
+          const progressCallback = (current, total) => {
+            this.crawlService.progressService.updateProcessing(current, total);
+          };
+
+          // Run the main context enrichment for all raw pages
+          if (this.options.aiConfig.type === 'fallback') {
+            // For fallback config, use the first available LLM
+            const firstLLM = this.options.aiConfig.availableLLMs[0];
+            // Only show in test mode
+            if (process.env.NODE_ENV === 'test') {
+              logger.info(`[CONTEXT] Using first fallback LLM: ${firstLLM.fallbackName}`);
+            }
+            await runContextEnrichment(dbInstance, firstLLM, progressCallback);
+          } else {
+            // Regular AI config
+            await runContextEnrichment(dbInstance, this.options.aiConfig, progressCallback);
+          }
+
+          // Complete processing progress
+          this.crawlService.progressService.completeProcessing();
+        }
+
+        // Log insertion tracking summary if test mode was enabled
+        if (this.options.test && insertionTracker.enabled) {
+          insertionTracker.logSessionSummary();
+        }
+      } catch (error) {
+        logger.error(`[CONTEXT] AI enhancement failed: ${error.message}`);
       }
+    } else if (!this.options.enhancement) {
+      logger.info('[CONTEXT] AI enhancement disabled by --no-enhancement flag');
+    } else if (
+      !this.options.aiConfig ||
+      (!this.options.aiConfig.provider && this.options.aiConfig.type !== 'fallback')
+    ) {
+      logger.info('[CONTEXT] AI enhancement skipped - no AI configuration available');
+    }
 
-      // Context enhancement cleanup - retry failed/rate-limited pages
-      try {
-        const {enhanceSinglePage} = await import('./core/context_processor.js');
-        const dbInstance = this.contentService.db;
+    // Context enhancement cleanup - retry failed/rate-limited pages
+    try {
+      const {enhanceSinglePage} = await import('./core/context_processor.js');
+      const dbInstance = this.contentService.db;
 
-        if (dbInstance && this.options.aiConfig && this.options.aiConfig.provider) {
-          // Find pages that need context enhancement retry
-          const retryStmt = dbInstance.db.prepare(`
+      if (dbInstance && this.options.aiConfig && this.options.aiConfig.provider) {
+        // Find pages that need context enhancement retry
+        const retryStmt = dbInstance.db.prepare(`
             SELECT url, file_path 
             FROM pages 
             WHERE content_status IN ('rate_limited', 'timeout', 'failed', 'processing') 
             AND file_path IS NOT NULL
           `);
-          const retryPages = retryStmt.all();
+        const retryPages = retryStmt.all();
 
-          if (retryPages.length > 0) {
-            logger.info(`[CONTEXT] Retrying context enhancement for ${retryPages.length} failed pages`);
+        if (retryPages.length > 0) {
+          logger.info(`[CONTEXT] Retrying context enhancement for ${retryPages.length} failed pages`);
 
-            for (const page of retryPages) {
-              try {
-                // Add delay between retries to respect rate limits
-                await new Promise(resolve => setTimeout(resolve, 2000));
+          for (const page of retryPages) {
+            try {
+              // Add delay between retries to respect rate limits
+              await new Promise(resolve => setTimeout(resolve, 2000));
 
-                const result = await enhanceSinglePage(page.url, page.file_path, this.options.aiConfig, dbInstance);
+              // Use the actual AI config (for fallback, use the first available LLM)
+              const actualAIConfig = this.options.aiConfig.type === 'fallback' 
+                ? this.options.aiConfig.availableLLMs[0]
+                : this.options.aiConfig;
+              
+              const result = await enhanceSinglePage(page.url, page.file_path, actualAIConfig, dbInstance);
 
-                if (result.success) {
-                  logger.info(`[CONTEXT] ✓ Retry success: ${page.url}`);
-                } else {
-                  logger.warn(`[CONTEXT] ⚠️  Retry failed: ${page.url} - ${result.error}`);
-                }
-              } catch (retryError) {
-                logger.warn(`[CONTEXT] Retry error for ${page.url}: ${retryError.message}`);
+              if (result.success) {
+                logger.info(`[CONTEXT] ✓ Retry success: ${page.url}`);
+              } else {
+                logger.warn(`[CONTEXT] ⚠️  Retry failed: ${page.url} - ${result.error}`);
               }
+            } catch (retryError) {
+              logger.warn(`[CONTEXT] Retry error for ${page.url}: ${retryError.message}`);
             }
-          } else {
-            logger.info(`[CONTEXT] No pages need context enhancement retry`);
           }
-        }
-      } catch (contextErr) {
-        logger.error(`Context enhancement cleanup error: ${contextErr.message}`);
-      }
-
-      // PDF conversion (if enabled)
-      if (this.options.aiConfig && this.options.aiConfig.pdfApiEnabled) {
-        try {
-          // await runPdfConversionTask(dbInstance, this.options.aiConfig); // Implement as needed
-        } catch (pdfErr) {
-          logger.error(`PDF conversion error: ${pdfErr.message}`);
+        } else {
+          logger.info(`[CONTEXT] No pages need context enhancement retry`);
         }
       }
+    } catch (contextErr) {
+      logger.error(`Context enhancement cleanup error: ${contextErr.message}`);
+    }
 
-      // PDF-generated markdown would be processed by the same integrated enhancement system
+    // PDF conversion (if enabled)
+    if (this.options.aiConfig && this.options.aiConfig.pdfApiEnabled) {
+      try {
+        // await runPdfConversionTask(dbInstance, this.options.aiConfig); // Implement as needed
+      } catch (pdfErr) {
+        logger.error(`PDF conversion error: ${pdfErr.message}`);
+      }
+    }
+
+    // PDF-generated markdown would be processed by the same integrated enhancement system
   }
 }
 // Command-line interface for quick testing
