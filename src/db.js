@@ -388,27 +388,27 @@ export class CrawlDB {
     let query = 'SELECT * FROM sitemap_urls';
     const conditions = [];
     const params = {};
-    
+
     if (filters.language) {
       conditions.push('language = @language');
       params.language = filters.language;
     }
-    
+
     if (filters.unprocessedOnly) {
       conditions.push('processed = 0');
     }
-    
+
     if (conditions.length > 0) {
       query += ' WHERE ' + conditions.join(' AND ');
     }
-    
+
     query += ' ORDER BY priority DESC, lastmod DESC';
-    
+
     if (filters.limit) {
       query += ' LIMIT @limit';
       params.limit = filters.limit;
     }
-    
+
     const stmt = this.db.prepare(query);
     return stmt.all(params);
   }

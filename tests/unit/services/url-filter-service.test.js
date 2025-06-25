@@ -115,13 +115,13 @@ describe('UrlFilterService', () => {
     it('should apply all URL filters correctly', () => {
       // Should be excluded by path
       expect(filterService.shouldCrawlUrl('https://example.com/admin/test')).toBe(false);
-      
+
       // Should be excluded by pattern
       expect(filterService.shouldCrawlUrl('https://example.com/docs/file.pdf')).toBe(false);
-      
+
       // Should be excluded by include pattern
       expect(filterService.shouldCrawlUrl('https://example.com/about')).toBe(false);
-      
+
       // Should be allowed
       expect(filterService.shouldCrawlUrl('https://example.com/docs/guide')).toBe(true);
     });
@@ -129,7 +129,7 @@ describe('UrlFilterService', () => {
     it('should apply content filters after URL filters', () => {
       const englishHtml = '<html lang="en"><head><title>Test</title></head></html>';
       const frenchHtml = '<html lang="fr"><head><title>Test</title></head></html>';
-      
+
       expect(filterService.shouldProcessContent(englishHtml, 'https://example.com/docs/test')).toBe(true);
       expect(filterService.shouldProcessContent(frenchHtml, 'https://example.com/docs/test')).toBe(false);
     });
@@ -139,7 +139,7 @@ describe('UrlFilterService', () => {
     it('should handle empty configuration', () => {
       filterService = new UrlFilterService({});
       expect(filterService.shouldCrawlUrl('https://example.com/anything')).toBe(true);
-      
+
       const html = '<html><head><title>Test</title></head></html>';
       expect(filterService.shouldProcessContent(html, 'https://example.com/test')).toBe(true);
     });
@@ -157,7 +157,7 @@ describe('UrlFilterService', () => {
         includePatterns: ['include']
       };
       filterService = new UrlFilterService(config);
-      
+
       const returned = filterService.getFilterConfig();
       expect(returned.excludePaths).toEqual(['/test']);
       expect(returned.excludePatterns).toEqual(['pattern']);

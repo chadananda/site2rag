@@ -17,7 +17,7 @@ export function detectLanguage(html) {
   if (htmlLangMatch) {
     return normalizeLanguageCode(htmlLangMatch[1]);
   }
-  // 2. Check <meta http-equiv="content-language"> 
+  // 2. Check <meta http-equiv="content-language">
   const metaLangMatch = html.match(/<meta[^>]+http-equiv=['"]content-language['"][^>]+content=['"]([^'"]+)['"]/i);
   if (metaLangMatch) {
     return normalizeLanguageCode(metaLangMatch[1]);

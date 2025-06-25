@@ -156,40 +156,42 @@ export class SiteProcessor {
 
     this.visited = new Set();
     this.found = [];
-    
+
     // Start parallel AI processor if enhancement is enabled
     let parallelProcessor = null;
-    if (this.options.enhancement && this.options.aiConfig && 
-        (this.options.aiConfig.provider || this.options.aiConfig.type === 'fallback')) {
-      const { createParallelAIProcessor } = await import('./core/parallel_ai_processor.js');
+    if (
+      this.options.enhancement &&
+      this.options.aiConfig &&
+      (this.options.aiConfig.provider || this.options.aiConfig.type === 'fallback')
+    ) {
+      const {createParallelAIProcessor} = await import('./core/parallel_ai_processor.js');
       const dbInstance = this.contentService.db;
-      
+
       if (dbInstance) {
         // Use the actual AI config (for fallback, use the first available LLM)
-        const actualAIConfig = this.options.aiConfig.type === 'fallback' 
-          ? this.options.aiConfig.availableLLMs[0]
-          : this.options.aiConfig;
-          
+        const actualAIConfig =
+          this.options.aiConfig.type === 'fallback' ? this.options.aiConfig.availableLLMs[0] : this.options.aiConfig;
+
         parallelProcessor = createParallelAIProcessor(dbInstance, actualAIConfig);
         parallelProcessor.start();
         logger.info('[AI] Started parallel AI processor - will process pages as they are crawled');
       }
     }
-    
+
     try {
       logger.info(`Processing sitemaps...`, true);
       await this.crawlService.processSitemaps(this.options.domain);
       logger.info(`Starting site crawl...`, true);
       this.found = await this.crawlService.crawlSite(this.options.startUrl);
       logger.info(`Crawl complete. Processed ${this.crawlService.foundUrls.length} URLs.`, true);
-      
+
       // Stop parallel processor if running
       if (parallelProcessor) {
         parallelProcessor.stop();
         const stats = parallelProcessor.getStats();
         logger.info(`[AI] Parallel processor completed: ${stats.processed} pages enhanced during crawl`);
       }
-      
+
       if (this.found.length === 1 && this.options.maxDepth === 0) {
         logger.info('Single page crawl completed, skipping post-processing');
         return this.found;
@@ -202,7 +204,7 @@ export class SiteProcessor {
       if (parallelProcessor) {
         parallelProcessor.stop();
       }
-      
+
       if (!(err instanceof CrawlLimitReached)) {
         logger.error('Error during crawl:', err);
         throw err;
@@ -339,10 +341,11 @@ export class SiteProcessor {
               await new Promise(resolve => setTimeout(resolve, 2000));
 
               // Use the actual AI config (for fallback, use the first available LLM)
-              const actualAIConfig = this.options.aiConfig.type === 'fallback' 
-                ? this.options.aiConfig.availableLLMs[0]
-                : this.options.aiConfig;
-              
+              const actualAIConfig =
+                this.options.aiConfig.type === 'fallback'
+                  ? this.options.aiConfig.availableLLMs[0]
+                  : this.options.aiConfig;
+
               const result = await enhanceSinglePage(page.url, page.file_path, actualAIConfig, dbInstance);
 
               if (result.success) {

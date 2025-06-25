@@ -59,9 +59,9 @@ export class ProgressService {
 
     // Get terminal width for full-width progress bar
     const terminalWidth = process.stdout.columns || 80;
-    // Use full terminal width for the progress bar, just reserve space for text
-    const minBarSize = 40; // Minimum size for small terminals
-    const maxBarSize = terminalWidth - 25; // Reserve space for percentage and count
+    // Use 2/3 of available width for the progress bar to align with header
+    const minBarSize = 30; // Minimum size for small terminals
+    const maxBarSize = Math.floor(((terminalWidth - 25) * 2) / 3); // 2/3 of available width
     const barSize = Math.max(minBarSize, maxBarSize);
 
     // Create multibar container with simplified format
@@ -156,7 +156,7 @@ export class ProgressService {
 
     // Create a single-bar instance instead of multibar to avoid double line issues
     const terminalWidth = process.stdout.columns || 80;
-    const barSize = Math.max(40, terminalWidth - 25);
+    const barSize = Math.max(30, Math.floor(((terminalWidth - 25) * 2) / 3));
 
     this.multibar = new cliProgress.SingleBar(
       {
@@ -175,11 +175,11 @@ export class ProgressService {
     // Always start with the initial total (usually 1 for the starting URL)
     // This will be updated dynamically as URLs are discovered
     const total = this.stats.totalUrls || 1;
-    
+
     if (process.env.DEBUG) {
       console.log(`[PROGRESS] Starting multibar - initial totalUrls: ${total}`);
     }
-    
+
     this.multibar.start(total, 0);
 
     // Start the update interval to refresh the progress bar based on real progress
@@ -190,7 +190,7 @@ export class ProgressService {
         if (discoveredTotal > this.multibar.total) {
           this.multibar.setTotal(discoveredTotal);
         }
-        
+
         // Update with the actual number of crawled URLs
         this.multibar.update(this.stats.crawledUrls);
       }
@@ -245,9 +245,7 @@ export class ProgressService {
         '\n' +
         chalk.white('Converting web content to AI-ready markdown with intelligent crawling') +
         '\n' +
-        chalk.hex('#FF8C00')(
-          `Version ${this.version} | https://github.com/chadananda/site${chalk.yellow('2')}rag`
-        ),
+        chalk.hex('#FF8C00')(`Version ${this.version} | https://github.com/chadananda/site${chalk.yellow('2')}rag`),
       {
         padding: 1,
         margin: 1,
@@ -266,9 +264,9 @@ export class ProgressService {
 
   /**
    * Start AI processing progress bar (second phase)
-   * @param {number} totalDocuments - Total number of documents to process
+   * @param {number} totalRequests - Total number of AI requests to process
    */
-  startProcessing(totalDocuments) {
+  startProcessing(totalRequests) {
     // Clean up download progress bar first
     if (this.multibar) {
       this.multibar.stop();
@@ -277,20 +275,20 @@ export class ProgressService {
 
     // Clear the line and move cursor up to overwrite any leftover progress bar artifacts
     process.stdout.write('\x1b[2K\r'); // Clear current line
-    process.stdout.write('\x1b[1A');    // Move up one line
+    process.stdout.write('\x1b[1A'); // Move up one line
     process.stdout.write('\x1b[2K\r'); // Clear that line too
-    
+
     console.log(chalk.blue(`\nProcessing content with AI enhancement:\n`));
 
     // Create new progress bar for processing
     const terminalWidth = process.stdout.columns || 80;
-    const barSize = Math.max(40, terminalWidth - 25);
+    const barSize = Math.max(30, Math.floor(((terminalWidth - 25) * 2) / 3));
 
     this.multibar = new cliProgress.SingleBar(
       {
         clearOnComplete: false,
         hideCursor: true,
-        format: `${chalk.magenta.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}${chalk.gray('/')}${chalk.yellow.bold('{total}')}`,
+        format: `${chalk.magenta.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}${chalk.gray('/')}${chalk.yellow.bold('{total}')} AI requests`,
         barCompleteChar: '\u2588',
         barIncompleteChar: '\u2591',
         barsize: barSize,
@@ -302,17 +300,21 @@ export class ProgressService {
       cliProgress.Presets.shades_classic
     );
 
-    this.multibar.start(totalDocuments, 0);
+    this.multibar.start(totalRequests, 0);
   }
 
   /**
    * Update processing progress
-   * @param {number} current - Current document being processed
-   * @param {number} total - Total documents
-   * @param {string} url - Current URL being processed
+   * @param {number} current - Current AI request completed
+   * @param {number} total - Total AI requests
+   * @param {string} detail - Current processing detail
    */
-  updateProcessing(current, total, url) {
+  updateProcessing(current, total) {
     if (this.multibar) {
+      // Update total if it has changed (for dynamic progress tracking)
+      if (total && total !== this.multibar.total) {
+        this.multibar.setTotal(total);
+      }
       this.multibar.update(current);
     }
   }
@@ -325,7 +327,7 @@ export class ProgressService {
       this.multibar.stop();
       this.multibar = null;
     }
-    
+
     console.log(`\n${chalk.green('✓')} ${chalk.green('AI processing completed successfully!')}\n`);
   }
 
@@ -483,7 +485,7 @@ export class ProgressService {
       // Force update to reflect the new total
       this.multibar.update(this.stats.crawledUrls);
     }
-    
+
     // Update total progress bar if it exists (legacy)
     if (this.totalProgress) {
       this.totalProgress.setTotal(this.stats.totalUrls || 100);

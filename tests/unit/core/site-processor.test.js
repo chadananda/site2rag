@@ -28,7 +28,7 @@ describe('SiteProcessor Core', () => {
       siteProcessor = new SiteProcessor('https://example.com', {
         outputDir: testOutputDir
       });
-      
+
       expect(siteProcessor.url).toBe('https://example.com');
       expect(siteProcessor.outputDir).toBe(testOutputDir);
     });
@@ -37,7 +37,7 @@ describe('SiteProcessor Core', () => {
       siteProcessor = new SiteProcessor('https://example.com/', {
         outputDir: testOutputDir
       });
-      
+
       expect(siteProcessor.url).toBe('https://example.com');
     });
 
@@ -45,7 +45,7 @@ describe('SiteProcessor Core', () => {
       siteProcessor = new SiteProcessor('https://example.com', {
         outputDir: testOutputDir
       });
-      
+
       expect(siteProcessor.options.limit).toBe(-1);
       expect(siteProcessor.options.maxDepth).toBe(-1);
       expect(siteProcessor.options.includePatterns).toEqual([]);
@@ -60,9 +60,9 @@ describe('SiteProcessor Core', () => {
         includePatterns: ['/blog/**'],
         excludePatterns: ['/admin/**']
       };
-      
+
       siteProcessor = new SiteProcessor('https://example.com', customOptions);
-      
+
       expect(siteProcessor.options.limit).toBe(10);
       expect(siteProcessor.options.maxDepth).toBe(2);
       expect(siteProcessor.options.includePatterns).toEqual(['/blog/**']);
@@ -89,11 +89,11 @@ describe('SiteProcessor Core', () => {
   describe('output directory handling', () => {
     it('should create output directory if it does not exist', () => {
       const nonExistentDir = join(testOutputDir, 'new-dir');
-      
+
       siteProcessor = new SiteProcessor('https://example.com', {
         outputDir: nonExistentDir
       });
-      
+
       // Directory should be created during initialization
       expect(fs.existsSync(nonExistentDir)).toBe(true);
     });
@@ -101,7 +101,7 @@ describe('SiteProcessor Core', () => {
     it('should handle existing output directory', () => {
       // Create directory first
       fs.mkdirSync(testOutputDir, {recursive: true});
-      
+
       expect(() => {
         siteProcessor = new SiteProcessor('https://example.com', {
           outputDir: testOutputDir
@@ -142,7 +142,7 @@ describe('SiteProcessor Core', () => {
         includePatterns: [],
         excludePatterns: []
       });
-      
+
       // With no patterns, all URLs should be included
       expect(processor.shouldIncludeUrl('/any/path')).toBe(true);
       expect(processor.shouldIncludeUrl('/another/path')).toBe(true);

@@ -122,8 +122,8 @@ export class SitemapService {
       const urls = [];
       // Handle sitemap index (contains references to other sitemaps)
       if (result.sitemapindex && result.sitemapindex.sitemap) {
-        const sitemaps = Array.isArray(result.sitemapindex.sitemap) 
-          ? result.sitemapindex.sitemap 
+        const sitemaps = Array.isArray(result.sitemapindex.sitemap)
+          ? result.sitemapindex.sitemap
           : [result.sitemapindex.sitemap];
         for (const sitemap of sitemaps) {
           if (sitemap.loc && urls.length < this.maxUrls) {
@@ -134,9 +134,7 @@ export class SitemapService {
       }
       // Handle regular sitemap (contains URLs)
       if (result.urlset && result.urlset.url) {
-        const urlEntries = Array.isArray(result.urlset.url) 
-          ? result.urlset.url 
-          : [result.urlset.url];
+        const urlEntries = Array.isArray(result.urlset.url) ? result.urlset.url : [result.urlset.url];
         for (const urlEntry of urlEntries) {
           if (urlEntry.loc && urls.length < this.maxUrls) {
             const urlMetadata = this.extractUrlMetadata(urlEntry, sitemapUrl);
@@ -206,7 +204,7 @@ export class SitemapService {
     // Extract language from hreflang link elements
     // First check if this URL explicitly references itself with hreflang
     let foundSelfReference = false;
-    
+
     if (urlEntry.link) {
       const links = Array.isArray(urlEntry.link) ? urlEntry.link : [urlEntry.link];
       for (const link of links) {
@@ -217,7 +215,7 @@ export class SitemapService {
         }
       }
     }
-    
+
     // Also check for xhtml:link elements (common in some sitemaps)
     if (!foundSelfReference && urlEntry['xhtml:link']) {
       const xhtmlLinks = Array.isArray(urlEntry['xhtml:link']) ? urlEntry['xhtml:link'] : [urlEntry['xhtml:link']];
@@ -229,28 +227,30 @@ export class SitemapService {
         }
       }
     }
-    
+
     // If no self-reference found but has alternate language links, this is likely the canonical English version
     if (!foundSelfReference && urlEntry['xhtml:link']) {
-      const hasAlternateLanguages = Array.isArray(urlEntry['xhtml:link']) ? 
-        urlEntry['xhtml:link'].length > 0 : 
-        urlEntry['xhtml:link'];
-      
+      const hasAlternateLanguages = Array.isArray(urlEntry['xhtml:link'])
+        ? urlEntry['xhtml:link'].length > 0
+        : urlEntry['xhtml:link'];
+
       if (hasAlternateLanguages) {
         // This is the canonical version with alternates, so it's likely English
         metadata.language = 'en';
       }
     }
-    
+
     // Final fallback: detect language from URL structure
     if (!metadata.language) {
       const urlObj = new URL(urlEntry.loc);
       const pathSegments = urlObj.pathname.split('/').filter(Boolean);
-      
+
       // If URL has no language indicators and looks like English content, assume 'en'
-      if (pathSegments.length > 0 && 
-          !pathSegments[0].match(/^(ar|bn|de|es|fa|fr|he|hi|id|it|ja|mr|pt|ro|ru|sw|tr|ur|zh)$/) &&
-          urlEntry.loc.match(/^https?:\/\/[^/]+\/[a-z0-9-]+/)) {
+      if (
+        pathSegments.length > 0 &&
+        !pathSegments[0].match(/^(ar|bn|de|es|fa|fr|he|hi|id|it|ja|mr|pt|ro|ru|sw|tr|ur|zh)$/) &&
+        urlEntry.loc.match(/^https?:\/\/[^/]+\/[a-z0-9-]+/)
+      ) {
         metadata.language = 'en';
       }
     }

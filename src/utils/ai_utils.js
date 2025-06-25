@@ -1,6 +1,17 @@
 import fetch from 'node-fetch';
 import logger from '../services/logger_service.js';
 
+/**
+ * Estimate token count for a text string
+ * Uses the common approximation of 1 token ≈ 4 characters
+ * @param {string} text - Text to estimate tokens for
+ * @returns {number} Estimated token count
+ */
+export function estimateTokens(text) {
+  if (!text || typeof text !== 'string') return 0;
+  return Math.ceil(text.length / 4);
+}
+
 export async function aiServiceAvailable({provider = 'ollama', host} = {}) {
   if (provider === 'ollama') {
     const ollamaHost = host || process.env.OLLAMA_HOST || 'http://localhost:11434';

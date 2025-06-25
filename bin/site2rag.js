@@ -19,7 +19,7 @@ import {program} from 'commander';
 import figlet from 'figlet';
 import boxen from 'boxen';
 import chalk from 'chalk';
-import packageJson from '../package.json' with { type: 'json' };
+import packageJson from '../package.json' with {type: 'json'};
 
 /**
  * Detect whether input is a file path or URL
@@ -197,7 +197,9 @@ async function displayHeader() {
     '',
     chalk.red('🔥 ') + chalk.cyan.bold('Website to RAG Knowledge Base Converter ') + chalk.red('🔥'),
     chalk.white('Converting web content to AI-ready markdown with intelligent crawling'),
-    chalk.yellow(`Version ${packageJson.version}`) + chalk.white(' | ') + chalk.cyan('https://github.com/chadananda/site2rag'),
+    chalk.yellow(`Version ${packageJson.version}`) +
+      chalk.white(' | ') +
+      chalk.cyan('https://github.com/chadananda/site2rag'),
     '',
     aiStatus,
     ''
@@ -222,7 +224,10 @@ program
   .version('0.1.0');
 
 program
-  .argument('[input]', 'URL to crawl or file path to process (e.g., document.md, https://example.com)')
+  .argument(
+    '[input]',
+    'URL to crawl or file path to process (e.g., document.md, https://example.com, https://example.com/specific-page)'
+  )
   .option(
     '-o, --output <path>',
     'Output directory for URLs or file path for files (IMPORTANT: Test crawls must use tests/tmp/sites/ subfolders to prevent accidental deletion of project files)'
@@ -256,6 +261,16 @@ program
   .option('--exclude-patterns <patterns>', 'Exclude URLs matching regex patterns (comma-separated)')
   .option('--include-language <lang>', 'Only crawl pages with specific language (e.g., en, es, fr)')
   .option('--include-patterns <patterns>', 'Only include URLs matching regex patterns (comma-separated)')
+  .addHelpText(
+    'after',
+    `
+Examples:
+  $ site2rag example.com                          # Crawl entire site
+  $ site2rag example.com/blog --limit 10          # Start from specific page, crawl up to 10 pages
+  $ site2rag https://example.com/blog/post --limit 1  # Process just one specific page
+  $ site2rag document.md --output enhanced.md     # Process a local markdown file
+`
+  )
   .action(async (input, options, command) => {
     // Display header when running with no arguments (for testing)
     if (process.argv.length === 2) {
@@ -405,10 +420,16 @@ program
 
     // Parse CLI filtering options
     const filtering = {
-      excludePaths: options.excludePaths ? options.excludePaths.split(',').map(p => p.trim()) : existingConfig.filtering?.excludePaths || [],
-      excludePatterns: options.excludePatterns ? options.excludePatterns.split(',').map(p => p.trim()) : existingConfig.filtering?.excludePatterns || [],
+      excludePaths: options.excludePaths
+        ? options.excludePaths.split(',').map(p => p.trim())
+        : existingConfig.filtering?.excludePaths || [],
+      excludePatterns: options.excludePatterns
+        ? options.excludePatterns.split(',').map(p => p.trim())
+        : existingConfig.filtering?.excludePatterns || [],
       includeLanguage: options.includeLanguage || existingConfig.filtering?.includeLanguage || null,
-      includePatterns: options.includePatterns ? options.includePatterns.split(',').map(p => p.trim()) : existingConfig.filtering?.includePatterns || []
+      includePatterns: options.includePatterns
+        ? options.includePatterns.split(',').map(p => p.trim())
+        : existingConfig.filtering?.includePatterns || []
     };
 
     // Update config with current run settings

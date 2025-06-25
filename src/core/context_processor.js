@@ -572,7 +572,7 @@ Text window: ${windowEscaped}`;
  * @param {Function} callAIImpl - AI call implementation
  * @returns {Promise<Object>} Complete entity graph
  */
-async function extractEntitiesWithoutCache(blocks, metadata, aiConfig, callAIImpl) { // eslint-disable-line no-unused-vars
+async function extractEntitiesWithoutCache(blocks, metadata, aiConfig, callAIImpl) {
   console.log(`[ENTITIES] Fallback: Non-cached entity extraction`);
 
   const sentences = blocks.flatMap(block => {
@@ -612,7 +612,7 @@ Be strict and conservative - only extract explicit information.`;
  * @param {boolean} isTestMode - Whether to show detailed logs
  * @returns {Object} - { capacity, windowSize, overlapSize }
  */
-function getOptimalContextCapacity(aiConfig, isTestMode = false) { // eslint-disable-line no-unused-vars
+function getOptimalContextCapacity(aiConfig, isTestMode = false) {
   // eslint-disable-next-line no-unused-vars
   const provider = aiConfig.provider?.toLowerCase() || 'ollama';
   const model = aiConfig.model?.toLowerCase() || '';
@@ -1298,29 +1298,29 @@ IMPORTANT: All context additions must be justified by information found elsewher
  * @param {Function} callAIImpl - Optional AI call implementation for testing
  * @returns {Promise<Array>} Enhanced blocks
  */
-export async function enhanceBlocksDirectly(blocks, metadata, aiConfig, options = {}/*, callAIImpl = callAI*/) {
+export async function enhanceBlocksDirectly(blocks, metadata, aiConfig, options = {} /*, callAIImpl = callAI*/) {
   const isTestMode = options.test || process.env.NODE_ENV === 'test';
-  
+
   // Build full document context
   const fullDocumentText = blocks
     .map(block => block.text || block.content || block.original || block)
     .filter(content => typeof content === 'string')
     .join('\n\n');
-  
+
   // Create word-based batches using the same logic as sliding windows
   const blockIndices = blocks.map((_, index) => index);
   const batches = createParagraphBatches(blockIndices, blocks);
-  
+
   if (isTestMode) {
     debugLogger.direct(`Created ${batches.length} word-based batches for ${blocks.length} blocks`);
   }
-  
+
   const processedBlocks = new Array(blocks.length);
-  
+
   // Use AI session caching for efficiency
   const sessionId = `direct-cache-${Date.now()}`;
   const session = getAISession(sessionId, aiConfig);
-  
+
   // Build static cached context (instructions + metadata + document context)
   const staticContext = `# DOCUMENT CONTEXT DISAMBIGUATION
 ## Document Metadata
@@ -1353,42 +1353,44 @@ IMPORTANT: All context additions must be justified by information found in this 
 
   // Set cached context once for the entire session
   session.setCachedContext(staticContext);
-  
+
   debugLogger.direct(`Set cached context: ${staticContext.length} chars`);
   debugLogger.direct(`Using session caching for ${batches.length} batches`);
 
   const POLITE_DELAY_MS = 500; // Delay between batch submissions
-  
+
   // Create all batch promises with polite delays
   const batchPromises = batches.map((batch, batchIndex) => {
     // Add delay before starting each batch (except the first)
     const delayMs = batchIndex * POLITE_DELAY_MS;
-    
+
     return (async () => {
       // Wait for the polite delay
       if (delayMs > 0) {
         debugLogger.direct(`Batch ${batchIndex + 1} waiting ${delayMs}ms before starting...`);
         await new Promise(wait => setTimeout(wait, delayMs));
       }
-      
+
       if (isTestMode) {
-        debugLogger.direct(`Processing batch ${batchIndex + 1}/${batches.length} (${batch.blocks.length} paragraphs, ~${batch.wordCount} words)`);
+        debugLogger.direct(
+          `Processing batch ${batchIndex + 1}/${batches.length} (${batch.blocks.length} paragraphs, ~${batch.wordCount} words)`
+        );
       }
-      
+
       const batchResults = [];
-      
+
       try {
         const batchPrompt = createBatchProcessingPrompt(batch);
         const boundSessionCall = session.call.bind(session);
         boundSessionCall.session = session; // Add session reference for fallback detection
         const result = await executeWithFallback(boundSessionCall, aiConfig, batchPrompt, BatchEnhancementSchema);
-        
+
         if (result && result.enhanced_paragraphs && result.enhanced_paragraphs.length === batch.blocks.length) {
           for (let i = 0; i < batch.blocks.length; i++) {
             const blockIndex = batch.blocks[i].originalIndex;
             const originalText = batch.blocks[i].originalText;
             const enhancedText = result.enhanced_paragraphs[i].text;
-            
+
             if (validateEnhancement(originalText, enhancedText)) {
               batchResults.push({
                 blockIndex,
@@ -1397,11 +1399,13 @@ IMPORTANT: All context additions must be justified by information found in this 
                   contexted: enhancedText
                 }
               });
-              
+
               if (isTestMode) {
                 const insertions = extractContextInsertions(enhancedText);
                 if (insertions.length > 0) {
-                  console.log(`[TEST_INSERTIONS] Paragraph ${blockIndex + 1} received ${insertions.length} context insertions`);
+                  console.log(
+                    `[TEST_INSERTIONS] Paragraph ${blockIndex + 1} received ${insertions.length} context insertions`
+                  );
                 }
               }
             } else {
@@ -1433,7 +1437,7 @@ IMPORTANT: All context additions must be justified by information found in this 
         if (isTestMode) {
           console.error(`[DIRECT_PROCESSING] Error processing batch ${batchIndex + 1}: ${error.message}`);
         }
-        
+
         // Fallback to original text on error
         for (let i = 0; i < batch.blocks.length; i++) {
           const blockIndex = batch.blocks[i].originalIndex;
@@ -1447,29 +1451,29 @@ IMPORTANT: All context additions must be justified by information found in this 
           });
         }
       }
-      
-      return { batchIndex: batchIndex + 1, results: batchResults };
+
+      return {batchIndex: batchIndex + 1, results: batchResults};
     })();
   });
-  
+
   // Process all batches in parallel
   debugLogger.direct(`Starting parallel processing of ${batches.length} batches with ${POLITE_DELAY_MS}ms delays`);
   const allBatchResults = await Promise.all(batchPromises);
-  
+
   // Merge all results into processedBlocks
   for (const batchResult of allBatchResults) {
-    for (const { blockIndex, block } of batchResult.results) {
+    for (const {blockIndex, block} of batchResult.results) {
       processedBlocks[blockIndex] = block;
     }
   }
-  
+
   // Close the AI session
   closeAISession(sessionId);
-  
+
   if (isTestMode) {
     debugLogger.direct(`Completed processing, closed session ${sessionId}`);
   }
-  
+
   return processedBlocks.filter(block => block !== undefined);
 }
 
@@ -1481,23 +1485,31 @@ IMPORTANT: All context additions must be justified by information found in this 
  * @param {Function} callAIImpl - Optional AI call implementation for testing
  * @returns {Promise<Array>} Enhanced blocks with cache metrics
  */
-export async function enhanceBlocksWithCaching(blocks, metadata, aiConfig, options = {}/*, callAIImpl = callAI*/) {
+export async function enhanceBlocksWithCaching(blocks, metadata, aiConfig, options = {} /*, callAIImpl = callAI*/) {
   debugLogger.ai('=== enhanceBlocksWithCaching called ===');
-  
+
   // Validate inputs
   if (!blocks || !Array.isArray(blocks)) {
     console.error('[CONTEXT] ERROR: Invalid blocks passed to enhanceBlocksWithCaching:', blocks);
     return [];
   }
-  
+
   debugLogger.ai(`Blocks: ${blocks.length}, Provider: ${aiConfig.provider}, Model: ${aiConfig.model}`);
-  
-  // Import the unified V2 implementation with proper caching
-  const {enhanceDocumentUnifiedV2} = await import('./context_processor_unified_v2.js');
-  
-  // Use unified V2 approach for all documents (with proper context caching)
-  debugLogger.ai('Using unified V2 implementation with proper context caching');
-  return await enhanceDocumentUnifiedV2(blocks, metadata, aiConfig, options);
+
+  // Import the simplified sliding window implementation
+  const {enhanceDocumentSimple} = await import('./context_processor_simple.js');
+
+  // Use simplified sliding window approach (no caching, full parallelization)
+  debugLogger.ai('Using simplified sliding window implementation');
+  const enhancedBlocks = await enhanceDocumentSimple(blocks, metadata, aiConfig, options);
+
+  // Convert array format to expected object format
+  return {
+    blocks: enhancedBlocks.map((block, index) => ({
+      original: typeof blocks[index] === 'string' ? blocks[index] : blocks[index].text || blocks[index],
+      contexted: typeof block === 'string' ? block : block.text || block
+    }))
+  };
 }
 
 /**
@@ -1515,7 +1527,7 @@ export async function enhanceBlocksWithCaching(blocks, metadata, aiConfig, optio
  * @param {Object} aiConfig - AI configuration
  * @returns {Array} Array of sliding context windows
  */
-function createSlidingContextWindows(blocks, maxWindowWords, staticContextSize, aiConfig) { // eslint-disable-line no-unused-vars
+function createSlidingContextWindows(blocks, maxWindowWords, staticContextSize, aiConfig) {
   const fullText = blocks.map(block => block.text || block.content || block.original).join(' ');
   const words = fullText.split(/\s+/).filter(w => w.length > 0);
 
@@ -1604,7 +1616,7 @@ function findBlocksInWindow(startWord, windowLength, blocks) {
  * @param {Array} windows - Array of sliding windows
  * @returns {Object} Best window for this block
  */
-function findWindowForBlock(blockIndex, windows) { // eslint-disable-line no-unused-vars
+function findWindowForBlock(blockIndex, windows) {
   // Find window that contains this block (prefer windows where block is more centered)
   const candidateWindows = windows.filter(window => window.coveredBlocks.includes(blockIndex));
 
@@ -1909,7 +1921,7 @@ export function optimizeForTokenLimit(components, tokenLimit) {
  */
 function createKeyedBatchPrompt(keyedBlocks) {
   const blockEntries = Object.entries(keyedBlocks);
-  
+
   return `## Blocks to Enhance
 ${blockEntries.map(([key, text]) => `**${key}:**\n${text}`).join('\n\n')}
 
@@ -1992,7 +2004,9 @@ function createOptimalBatches(keyedBlocks, aiConfig) {
   const batches = [];
   let currentBatch = {blocks: {}, wordCount: 0, blockCount: 0};
 
-  debugLogger.batching(`Target: ${targetWords} words per batch (max ${maxBlocksPerBatch} blocks) for ${aiConfig.provider}/${aiConfig.model}`);
+  debugLogger.batching(
+    `Target: ${targetWords} words per batch (max ${maxBlocksPerBatch} blocks) for ${aiConfig.provider}/${aiConfig.model}`
+  );
 
   for (const [key, text] of Object.entries(keyedBlocks)) {
     const blockWords = text.split(/\s+/).length;
@@ -2003,7 +2017,9 @@ function createOptimalBatches(keyedBlocks, aiConfig) {
       (currentBatch.wordCount + blockWords > targetWords || currentBatch.blockCount >= maxBlocksPerBatch)
     ) {
       const efficiency = Math.round((currentBatch.wordCount / targetWords) * 100);
-      debugLogger.batching(`Batch ${batches.length + 1}: ${currentBatch.wordCount} words, ${currentBatch.blockCount} blocks (${efficiency}% of target)`);
+      debugLogger.batching(
+        `Batch ${batches.length + 1}: ${currentBatch.wordCount} words, ${currentBatch.blockCount} blocks (${efficiency}% of target)`
+      );
 
       batches.push(currentBatch);
       currentBatch = {blocks: {}, wordCount: 0, blockCount: 0};
@@ -2018,7 +2034,9 @@ function createOptimalBatches(keyedBlocks, aiConfig) {
   // Add final batch if it has content
   if (currentBatch.blockCount > 0) {
     const efficiency = Math.round((currentBatch.wordCount / targetWords) * 100);
-    debugLogger.batching(`Batch ${batches.length + 1}: ${currentBatch.wordCount} words, ${currentBatch.blockCount} blocks (${efficiency}% of target)`);
+    debugLogger.batching(
+      `Batch ${batches.length + 1}: ${currentBatch.wordCount} words, ${currentBatch.blockCount} blocks (${efficiency}% of target)`
+    );
     batches.push(currentBatch);
   }
 
@@ -2045,11 +2063,11 @@ async function enhanceKeyedBlocksWithContext(keyedBlocks, indexMapping, metadata
 
   // Import and use V2 AI client for proper message-based caching
   const {getAISessionV2, closeAISessionV2} = await import('./ai_client_v2.js');
-  
+
   // Create AI session with V2 client for proper caching
   const sessionId = `keyed-enhancement-${Date.now()}`;
   const session = getAISessionV2(sessionId, aiConfig);
-  
+
   // Set cached context with ONLY instructions (not the full document)
   const cachedContext = `# KEYED CONTEXT DISAMBIGUATION
 
@@ -2071,7 +2089,7 @@ You will receive batches of text blocks from a document. Each batch contains key
 ## Response Format
 Return a JSON object with "enhanced_blocks" containing the same keys with enhanced text.
 `;
-  
+
   session.setSystemContext(cachedContext);
   debugLogger.keyed(`Set system context: ${cachedContext.length} chars (instructions only)`);
 
@@ -2083,43 +2101,47 @@ Return a JSON object with "enhanced_blocks" containing the same keys with enhanc
     const batchPromises = batches.map((batch, i) => {
       // Add delay before starting each batch (except the first)
       const delayMs = i * POLITE_DELAY_MS;
-      
-      return new Promise((resolve) => {
+
+      return new Promise(resolve => {
         (async () => {
-        // Wait for the polite delay
-        if (delayMs > 0) {
-          debugLogger.keyed(`Batch ${i + 1} waiting ${delayMs}ms before starting...`);
-          await new Promise(wait => setTimeout(wait, delayMs));
-        }
-        
-        debugLogger.keyed(`Processing batch ${i + 1}/${batches.length} (${batch.wordCount} words, ${batch.blockCount} blocks)`);
-        
-        try {
-          // Create batch-specific prompt (only the blocks to process)
-          const batchPrompt = createKeyedBatchPrompt(batch.blocks);
-          
-          // Use session to call AI with cached context
-          const result = await session.call(batchPrompt, KeyedEnhancementSchema);
-          
-          if (result && result.enhanced_blocks) {
-            debugLogger.keyed(`Batch ${i + 1} completed: ${Object.keys(result.enhanced_blocks).length} blocks enhanced`);
-            resolve({ batchIndex: i + 1, enhancedBlocks: result.enhanced_blocks });
-          } else {
-            debugLogger.keyed(`Batch ${i + 1} failed: no enhanced blocks returned`);
-            resolve({ batchIndex: i + 1, enhancedBlocks: {} });
+          // Wait for the polite delay
+          if (delayMs > 0) {
+            debugLogger.keyed(`Batch ${i + 1} waiting ${delayMs}ms before starting...`);
+            await new Promise(wait => setTimeout(wait, delayMs));
           }
-        } catch (error) {
-          debugLogger.keyed(`Batch ${i + 1} error: ${error.message}`);
-          resolve({ batchIndex: i + 1, enhancedBlocks: {}, error });
-        }
+
+          debugLogger.keyed(
+            `Processing batch ${i + 1}/${batches.length} (${batch.wordCount} words, ${batch.blockCount} blocks)`
+          );
+
+          try {
+            // Create batch-specific prompt (only the blocks to process)
+            const batchPrompt = createKeyedBatchPrompt(batch.blocks);
+
+            // Use session to call AI with cached context
+            const result = await session.call(batchPrompt, KeyedEnhancementSchema);
+
+            if (result && result.enhanced_blocks) {
+              debugLogger.keyed(
+                `Batch ${i + 1} completed: ${Object.keys(result.enhanced_blocks).length} blocks enhanced`
+              );
+              resolve({batchIndex: i + 1, enhancedBlocks: result.enhanced_blocks});
+            } else {
+              debugLogger.keyed(`Batch ${i + 1} failed: no enhanced blocks returned`);
+              resolve({batchIndex: i + 1, enhancedBlocks: {}});
+            }
+          } catch (error) {
+            debugLogger.keyed(`Batch ${i + 1} error: ${error.message}`);
+            resolve({batchIndex: i + 1, enhancedBlocks: {}, error});
+          }
         })();
       });
     });
-    
+
     // Process all batches in parallel
     debugLogger.keyed(`Starting parallel processing of ${batches.length} batches with ${POLITE_DELAY_MS}ms delays`);
     const results = await Promise.all(batchPromises);
-    
+
     // Merge all results
     for (const result of results) {
       if (result.enhancedBlocks) {
@@ -2140,7 +2162,7 @@ Return a JSON object with "enhanced_blocks" containing the same keys with enhanc
         if (keyedBlocks[key]) {
           // Check if the block has any context insertions
           const hasInsertions = enhancedText.includes('[[') && enhancedText.includes(']]');
-          
+
           if (hasInsertions) {
             // Only validate blocks with context insertions
             if (validateWordForWordMatch(keyedBlocks[key], enhancedText)) {
@@ -2319,7 +2341,9 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
     // Create keyed object mapping for significant blocks
     const {keyedBlocks, indexMapping} = createKeyedBlockMapping(significantBlocks, 100);
 
-    debugLogger.keyed(`Created keyed mapping for ${Object.keys(keyedBlocks).length} blocks from ${significantBlocks.length} significant blocks`);
+    debugLogger.keyed(
+      `Created keyed mapping for ${Object.keys(keyedBlocks).length} blocks from ${significantBlocks.length} significant blocks`
+    );
 
     if (Object.keys(keyedBlocks).length === 0) {
       throw new Error('No blocks meet the minimum character requirement (100 chars)');
@@ -2490,8 +2514,12 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
   const rawDocs = db.db.prepare("SELECT url, file_path, title FROM pages WHERE content_status = 'raw'").all();
   // Only show in test mode
   if (process.env.NODE_ENV === 'test') {
-    logger.info(`[CONTEXT] Starting optimized context enhancement for ${rawDocs.length} documents`);
+    logger.info(`[CONTEXT] Starting simplified context enhancement for ${rawDocs.length} documents`);
   }
+
+  // Phase 1: Prepare all documents for batch processing
+  const documentsToProcess = [];
+  const docMetadata = new Map(); // Store metadata for writing results back
 
   for (let docIndex = 0; docIndex < rawDocs.length; docIndex++) {
     const doc = rawDocs[docIndex];
@@ -2520,18 +2548,33 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
         }
       }
 
-      // Parse markdown into blocks (simple split, or use a markdown parser for more accuracy)
-      const blocks = content
-        .split(/\n{2,}/)
-        .map(text => ({text}))
-        .filter(block => block.text.trim());
+      // Parse markdown into ALL blocks (keep everything for reassembly)
+      const allBlocks = content.split(/\n{2,}/).map((text, index) => ({text, originalIndex: index}));
 
-      if (blocks.length === 0) {
+      // Identify which blocks are eligible for AI processing
+      const eligibleBlocks = allBlocks.filter(block => {
+        const trimmed = block.text.trim();
+        // Skip empty blocks
+        if (!trimmed) return false;
+        // Skip code blocks (both fenced and indented)
+        if (trimmed.startsWith('```') || trimmed.match(/^ {4}/)) return false;
+        // Skip blocks that are too short (less than 200 chars as requested)
+        if (trimmed.length < 200) return false;
+        return true;
+      });
+
+      // If no eligible blocks, keep original
+      const blocks = eligibleBlocks.length > 0 ? eligibleBlocks : allBlocks;
+
+      if (eligibleBlocks.length === 0) {
         // Only show skip logs in test mode
         if (process.env.NODE_ENV === 'test') {
-          console.log(`[CONTEXT] Skipping ${doc.url} - no content blocks`);
+          console.log(`[CONTEXT] Skipping ${doc.url} - no eligible blocks (total blocks: ${allBlocks.length})`);
         }
-        continue;
+        // If no eligible blocks but we have content, skip AI processing but keep the document
+        if (allBlocks.length === 0) {
+          continue;
+        }
       }
 
       // Use metadata from DB if present, else empty
@@ -2542,125 +2585,89 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
         // Continue with basic metadata if parsing fails
       }
 
-      // OPTIMIZED: Skip entity extraction - go directly to context enhancement
-      // Only show in test mode
-      if (process.env.NODE_ENV === 'test') {
-        console.log(`[CONTEXT] Context enhancement for ${doc.url} (${blocks.length} blocks) - OPTIMIZED MODE`);
-      }
+      // Add document to batch processing list
+      documentsToProcess.push({
+        docId: doc.url,
+        blocks: blocks, // Only eligible blocks for AI
+        allBlocks: allBlocks, // Keep all blocks for reassembly
+        metadata: meta
+      });
 
-      let result;
-      try {
-        // Add timeout handling with graceful degradation - increased timeout for batch processing
-        const enhancementPromise = enhanceBlocksWithCaching(blocks, meta, aiConfig, {test: false});
-        const timeoutPromise = new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('Context enhancement timed out')), 240000); // 4 minute timeout per page
-        });
+      // Store metadata for later use
+      docMetadata.set(doc.url, {
+        filePath: doc.file_path,
+        originalMarkdown: markdown,
+        frontmatterEnd: markdown.startsWith('---') ? markdown.indexOf('---', 3) : -1
+      });
+    } catch (err) {
+      console.error(`[CONTEXT] Failed preparing doc with url=${doc.url}:`, err.message);
+      // Continue with next document instead of failing completely
+    }
+  }
 
-        result = await Promise.race([enhancementPromise, timeoutPromise]);
-      } catch (timeoutError) {
-        if (timeoutError.message.includes('timed out')) {
-          // Only show timeout details in test mode
-          if (process.env.NODE_ENV === 'test') {
-            console.log(`[CONTEXT] ⚠️  Context enhancement timed out for ${doc.url} - leaving raw for retry later`);
-          }
-          // Leave the document raw (don't update database status) so it can be retried later
-          continue;
-        } else {
-          throw timeoutError; // Re-throw other errors
-        }
-      }
+  // Phase 2: Process all documents in batch with simplified sliding window
+  if (documentsToProcess.length === 0) {
+    logger.info('[CONTEXT] No documents to process');
+    if (shouldClose) db.close();
+    return;
+  }
 
-      if (!result || !result.blocks) {
-        // Only show skip logs in test mode
-        if (process.env.NODE_ENV === 'test') {
-          console.log(`[CONTEXT] Skipping ${doc.url} - context enhancement failed`);
-        }
+  logger.info(`[CONTEXT] Processing ${documentsToProcess.length} documents with simplified sliding window approach`);
+
+  // Import the batch processor
+  const {processDocumentsSimple} = await import('./context_processor_simple.js');
+
+  // Process all documents together
+  const results = await processDocumentsSimple(documentsToProcess, aiConfig, progressCallback);
+
+  // Phase 3: Write results back to files and update database
+  for (const [docId, enhancedBlocks] of Object.entries(results)) {
+    try {
+      const metadata = docMetadata.get(docId);
+      if (!metadata) {
+        console.error(`[CONTEXT] No metadata found for ${docId}`);
         continue;
       }
 
-      // Use the enhanced blocks from the optimized caching system
-      const processedBlocks = result.blocks;
+      // Debug: Log block counts
+      if (process.env.NODE_ENV === 'test') {
+        logger.info(`[CONTEXT] Document ${docId}: Processing ${enhancedBlocks.length} blocks`);
+      }
 
-      // Debug: Check what's in the processed blocks
-      const blocksWithInsertions = processedBlocks.filter(
-        b => b.contexted && b.contexted !== b.original && b.contexted.includes('[[')
-      );
-      debugLogger.ai(
-        `[CONTEXT] Document ${doc.url}: ${blocksWithInsertions.length}/${processedBlocks.length} blocks have context insertions`
-      );
-
-      // Reassemble enriched markdown with [[...]] context insertions
-      const contextedMarkdown = processedBlocks.map(b => b.contexted || b.original).join('\n\n');
+      // Reassemble enriched markdown
+      const contextedMarkdown = enhancedBlocks
+        .map(block => (typeof block === 'string' ? block : block.text || block))
+        .join('\n\n');
 
       // Debug: Check if any insertions were made
       const insertionsCount = contextedMarkdown.match(/\[\[.*?\]\]/g)?.length || 0;
-      // Only show insertion count in test mode
       if (process.env.NODE_ENV === 'test') {
-        logger.info(`[CONTEXT] Document ${doc.url}: Found ${insertionsCount} context insertions in final markdown`);
+        logger.info(`[CONTEXT] Document ${docId}: Found ${insertionsCount} context insertions`);
       }
 
       // Preserve frontmatter if present
       let finalMarkdown = contextedMarkdown;
-      if (markdown.startsWith('---')) {
-        const frontmatterEnd = markdown.indexOf('---', 3);
-        if (frontmatterEnd > 0) {
-          const frontmatter = markdown.substring(0, frontmatterEnd + 3);
-          finalMarkdown = frontmatter + '\n\n' + contextedMarkdown;
-        }
+      if (metadata.frontmatterEnd > 0) {
+        const frontmatter = metadata.originalMarkdown.substring(0, metadata.frontmatterEnd + 3);
+        finalMarkdown = frontmatter + '\n\n' + contextedMarkdown;
       }
 
       // Write the enriched content back to the file
-      // Only show file write details in test mode
-      if (process.env.NODE_ENV === 'test') {
-        console.log(`[CONTEXT] Writing enhanced content to file: ${doc.file_path}`);
-      }
-      await fs.promises.writeFile(doc.file_path, finalMarkdown, 'utf8');
-      // Only show file write success in test mode
-      if (process.env.NODE_ENV === 'test') {
-        console.log(`[CONTEXT] File written successfully`);
-      }
+      await fs.promises.writeFile(metadata.filePath, finalMarkdown, 'utf8');
 
       // Update the database to mark as processed
-      // Only show database update details in test mode
-      if (process.env.NODE_ENV === 'test') {
-        console.log(`[CONTEXT] Updating database status for ${doc.url} to 'contexted'`);
-      }
-      try {
-        const updateResult = db.db
-          .prepare('UPDATE pages SET content_status = ? WHERE url = ?')
-          .run('contexted', doc.url);
-        // Only show database update results in test mode
-        if (process.env.NODE_ENV === 'test') {
-          console.log(`[CONTEXT] Database update result:`, updateResult);
-        }
-        if (updateResult.changes === 0) {
-          throw new Error(`No rows updated - URL ${doc.url} not found in database`);
-        }
-      } catch (dbError) {
-        console.error(`[CONTEXT] Database update failed for ${doc.url}:`, dbError);
-        throw dbError; // Re-throw to trigger the catch block above
+      const updateResult = db.db.prepare('UPDATE pages SET content_status = ? WHERE url = ?').run('contexted', docId);
+
+      if (updateResult.changes === 0) {
+        console.error(`[CONTEXT] No rows updated for URL ${docId}`);
       }
 
-      // Only show completion details in test mode
       if (process.env.NODE_ENV === 'test') {
-        console.log(`[CONTEXT] ✓ Completed optimized context enhancement for: ${doc.url}`);
-      }
-      // Only show processing metrics in test mode
-      if (process.env.NODE_ENV === 'test') {
-        console.log(
-          `[CONTEXT] Processing time: ${result.processingTime}ms, Cache hit rate: ${result.cacheMetrics.hitRate}%`
-        );
+        console.log(`[CONTEXT] ✓ Completed context enhancement for: ${docId}`);
       }
     } catch (err) {
-      console.error(`[CONTEXT] Failed processing doc with url=${doc.url}:`, err.message);
-      console.error(`[CONTEXT] Full error:`, err);
-      console.error(`[CONTEXT] Stack trace:`, err.stack);
-      // Continue with next document instead of failing completely
-    }
-    
-    // Update progress callback if provided
-    if (progressCallback) {
-      progressCallback(docIndex + 1, rawDocs.length, doc.url);
+      console.error(`[CONTEXT] Failed writing results for ${docId}:`, err.message);
+      // Continue with next document
     }
   }
 
@@ -2720,3 +2727,54 @@ export function buildEntitySummary(entityGraph) {
 
 // Export utility functions for context delimiter management
 export {removeContextInsertions, extractContextInsertions};
+
+/**
+ * Estimate total AI requests needed for all documents
+ * @param {Array} rawDocs - Array of documents with file paths
+ * @param {Object} aiConfig - AI configuration
+ * @returns {Promise<number>} Estimated total AI requests
+ */
+export async function estimateTotalAIRequests(rawDocs, aiConfig) {
+  let totalRequests = 0;
+
+  // Import the unified V2 estimation function
+  const {estimateDocumentAIRequests} = await import('./context_processor_unified_v2.js');
+
+  for (const doc of rawDocs) {
+    if (!doc.file_path || !fs.existsSync(doc.file_path)) {
+      continue;
+    }
+
+    try {
+      const markdown = await fs.promises.readFile(doc.file_path, 'utf8');
+
+      // Skip frontmatter if present
+      let content = markdown;
+      if (markdown.startsWith('---')) {
+        const frontmatterEnd = markdown.indexOf('---', 3);
+        if (frontmatterEnd > 0) {
+          content = markdown.substring(frontmatterEnd + 3).trim();
+        }
+      }
+
+      // Parse markdown into blocks
+      const blocks = content
+        .split(/\n{2,}/)
+        .map(text => ({text}))
+        .filter(block => block.text.trim());
+
+      if (blocks.length > 0) {
+        // Estimate requests for this document
+        const docRequests = estimateDocumentAIRequests(blocks, aiConfig);
+        totalRequests += docRequests;
+      }
+    } catch (error) {
+      // Skip documents that can't be read
+      debugLogger.ai(`Failed to estimate AI requests for ${doc.url}: ${error.message}`);
+    }
+  }
+
+  // Ensure at least 1 request if we have documents
+  console.log(`[ESTIMATION] Total documents: ${rawDocs.length}, Total estimated AI requests: ${totalRequests}`);
+  return Math.max(1, totalRequests);
+}

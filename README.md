@@ -107,8 +107,9 @@ npx site2rag docs.kubernetes.io
 ```
 
 **Key Features:**
+
 - **📋 Sitemap Discovery**: Automatically finds and parses XML sitemaps
-- **🌍 Language Detection**: Uses hreflang attributes for language filtering  
+- **🌍 Language Detection**: Uses hreflang attributes for language filtering
 - **🎛️ Smart Filtering**: Apply path and pattern filters before downloading
 - **💾 Database-Driven**: Stores URL metadata for efficient re-crawls
 - **⚡ Bandwidth Savings**: Up to 79% reduction in unnecessary downloads
@@ -167,8 +168,7 @@ To use <span data-ctx="REST API authentication">this API</span>, first configure
 Traditional RAG systems fail when chunks lose context. A paragraph mentioning "the company's revenue grew 15%" is useless without knowing which company or time period. `site2rag` solves this with intelligent inline context insertion using `[[...]]` notation:
 
 ```markdown
-Original: "The company achieved remarkable growth last quarter."
-Enhanced: "The company [[Microsoft]] achieved remarkable growth last quarter [[Q4 2023]]."
+Original: "The company achieved remarkable growth last quarter." Enhanced: "The company [[Microsoft]] achieved remarkable growth last quarter [[Q4 2023]]."
 ```
 
 #### How It Works
@@ -490,16 +490,19 @@ npx site2rag docs.example.com --update --auto-fallback
 ### 🚀 Sitemap-First Filtering Examples
 
 **Filter out admin and user-specific content:**
+
 ```bash
 npx site2rag docs.example.com --exclude-paths "/admin,/login,/user,/profile"
 ```
 
 **Crawl only English documentation:**
+
 ```bash
 npx site2rag docs.example.com --include-language en --exclude-paths "/blog,/news"
 ```
 
 **Complex filtering with patterns:**
+
 ```bash
 npx site2rag example.com \
   --exclude-paths "/contact,/terms,/privacy" \
@@ -509,6 +512,7 @@ npx site2rag example.com \
 ```
 
 **Bandwidth-efficient crawling:**
+
 ```bash
 # Only crawl English pages, exclude common non-content paths
 npx site2rag knowledge-site.com \

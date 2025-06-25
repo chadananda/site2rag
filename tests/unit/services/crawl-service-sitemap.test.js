@@ -47,7 +47,7 @@ describe('CrawlService Sitemap Integration', () => {
       })
       // common paths (none found) - 5 HEAD requests for remaining paths
       .mockResolvedValueOnce({ok: false}) // sitemap_index.xml
-      .mockResolvedValueOnce({ok: false}) // sitemaps.xml  
+      .mockResolvedValueOnce({ok: false}) // sitemaps.xml
       .mockResolvedValueOnce({ok: false}) // sitemap/sitemap.xml
       .mockResolvedValueOnce({ok: false}) // wp-sitemap.xml
       .mockResolvedValueOnce({ok: false}) // sitemap/index.xml
@@ -59,12 +59,9 @@ describe('CrawlService Sitemap Integration', () => {
       });
 
     const sitemapUrls = await crawlService.processSitemaps('https://example.com');
-    
-    expect(sitemapUrls).toEqual([
-      'https://example.com/page1',
-      'https://example.com/page2'
-    ]);
-    
+
+    expect(sitemapUrls).toEqual(['https://example.com/page1', 'https://example.com/page2']);
+
     // Verify URLs were added to queue
     expect(crawlService.queuedUrls.has('https://example.com/page1')).toBe(true);
     expect(crawlService.queuedUrls.has('https://example.com/page2')).toBe(true);
@@ -74,7 +71,7 @@ describe('CrawlService Sitemap Integration', () => {
     mockFetchService.fetchUrl.mockRejectedValue(new Error('Network error'));
 
     const sitemapUrls = await crawlService.processSitemaps('https://example.com');
-    
+
     expect(sitemapUrls).toEqual([]);
     expect(crawlService.queuedUrls.size).toBe(0);
   });
@@ -106,7 +103,7 @@ describe('CrawlService Sitemap Integration', () => {
       });
 
     await crawlService.processSitemaps('https://example.com');
-    
+
     // Should only have 2 URLs in queue (no duplicates)
     expect(crawlService.queuedUrls.size).toBe(2);
     expect(crawlService.queuedUrls.has('https://example.com/page1')).toBe(true);

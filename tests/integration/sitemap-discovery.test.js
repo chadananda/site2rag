@@ -19,14 +19,14 @@ describe('Real Site Sitemap Discovery', () => {
       description: 'Educational site - likely has sitemap'
     },
     {
-      name: 'oceanlibrary.com', 
+      name: 'oceanlibrary.com',
       url: 'https://oceanlibrary.com',
       expectSitemap: true,
       description: 'Library site - likely has sitemap'
     },
     {
       name: 'oceanoflights.org',
-      url: 'https://oceanoflights.org', 
+      url: 'https://oceanoflights.org',
       expectSitemap: true,
       description: 'Content site - likely has sitemap'
     },
@@ -41,13 +41,13 @@ describe('Real Site Sitemap Discovery', () => {
   testSites.forEach(site => {
     it(`should discover sitemaps for ${site.name}`, async () => {
       console.log(`\n=== Testing ${site.name} (${site.description}) ===`);
-      
+
       try {
         // Test sitemap discovery
         const sitemapUrls = await sitemapService.discoverSitemapUrls(site.url);
         console.log(`Discovered ${sitemapUrls.length} sitemap files for ${site.name}:`);
         sitemapUrls.forEach(url => console.log(`  - ${url}`));
-        
+
         if (site.expectSitemap) {
           expect(sitemapUrls.length).toBeGreaterThan(0);
         }
@@ -55,7 +55,7 @@ describe('Real Site Sitemap Discovery', () => {
         // Test URL extraction from sitemaps
         const allUrls = await sitemapService.getAllSitemapUrls(site.url);
         console.log(`Extracted ${allUrls.length} URLs from sitemaps for ${site.name}`);
-        
+
         if (allUrls.length > 0) {
           console.log(`Sample URLs from ${site.name}:`);
           allUrls.slice(0, 5).forEach(url => console.log(`  - ${url}`));
@@ -83,10 +83,9 @@ describe('Real Site Sitemap Discovery', () => {
         }
 
         console.log(`✓ ${site.name} sitemap discovery completed`);
-        
       } catch (error) {
         console.error(`Error testing ${site.name}: ${error.message}`);
-        
+
         // For sites not expected to have sitemaps, errors are acceptable
         if (!site.expectSitemap) {
           console.log(`Expected behavior for ${site.name} - no sitemap found`);
@@ -99,23 +98,23 @@ describe('Real Site Sitemap Discovery', () => {
 
   it('should handle robots.txt sitemap declarations correctly', async () => {
     console.log('\n=== Testing robots.txt sitemap extraction ===');
-    
+
     // Test a site known to have sitemap declarations in robots.txt
     const testUrl = 'https://bahai-education.org';
-    
+
     try {
       const robotsUrl = `${testUrl}/robots.txt`;
       const response = await fetchService.fetchWithRetry(robotsUrl);
-      
+
       if (response.ok) {
         const robotsText = await response.text();
         console.log('robots.txt content preview:');
         console.log(robotsText.split('\n').slice(0, 10).join('\n'));
-        
+
         const sitemaps = sitemapService.extractSitemapsFromRobots(robotsText, testUrl);
         console.log(`Found ${sitemaps.length} sitemap declarations in robots.txt:`);
         sitemaps.forEach(sitemap => console.log(`  - ${sitemap}`));
-        
+
         // Verify extracted sitemaps are valid URLs
         sitemaps.forEach(sitemap => {
           expect(() => new URL(sitemap)).not.toThrow();

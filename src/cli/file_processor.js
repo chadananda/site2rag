@@ -7,6 +7,7 @@ import path from 'path';
 import {parseFile, isFileSupported} from '../file/parser.js';
 import {enhanceBlocksWithCaching} from '../core/context_processor.js';
 import {loadAIConfig} from '../core/ai_config.js';
+import logger from '../services/logger_service.js';
 
 /**
  * Process a file with context enhancement
@@ -15,7 +16,7 @@ import {loadAIConfig} from '../core/ai_config.js';
  * @returns {Promise<void>}
  */
 export async function processFile(filePath, options) {
-  console.log(`[FILE_PROCESSOR] Processing: ${filePath}`);
+  logger.info(`Processing: ${filePath}`);
 
   // Validate file
   if (!fs.existsSync(filePath)) {
@@ -28,7 +29,7 @@ export async function processFile(filePath, options) {
 
   try {
     // Parse the file
-    console.log(`[FILE_PROCESSOR] Parsing file...`);
+    logger.debug(`Parsing file...`);
     const parsed = parseFile(filePath);
 
     // Load AI configuration
@@ -40,27 +41,27 @@ export async function processFile(filePath, options) {
     const outputPath = determineOutputPath(filePath, options.output);
 
     if (options.noEnhancement || options.enhancement === false) {
-      console.log(`[FILE_PROCESSOR] No enhancement requested - outputting original content`);
+      logger.info(`No enhancement requested - outputting original content`);
       const originalContent = generateOriginalOutput(parsed);
       fs.writeFileSync(outputPath, originalContent, 'utf8');
-      console.log(`[FILE_PROCESSOR] Original content saved to: ${outputPath}`);
+      logger.info(`Original content saved to: ${outputPath}`);
       return;
     }
 
     // Skip entity extraction - focus on context disambiguation only
-    console.log(`[FILE_PROCESSOR] Skipping entity extraction - using context-only enhancement...`);
+    logger.debug(`Skipping entity extraction - using context-only enhancement...`);
 
     // Enhance content with context
-    console.log(`[FILE_PROCESSOR] Enhancing content with context...`);
+    logger.info(`Enhancing content with context...`);
     const enhancedBlocks = await enhanceContent(parsed.blocks, parsed.metadata, aiConfig, options);
 
     // Generate enhanced output
-    console.log(`[FILE_PROCESSOR] Generating enhanced output...`);
+    logger.debug(`Generating enhanced output...`);
     const enhancedContent = generateEnhancedOutput(parsed, enhancedBlocks, options);
 
     // Write output file
     fs.writeFileSync(outputPath, enhancedContent, 'utf8');
-    console.log(`[FILE_PROCESSOR] Enhanced file saved to: ${outputPath}`);
+    logger.info(`Enhanced file saved to: ${outputPath}`);
 
     // Output statistics
     const originalWordCount = parsed.blocks.reduce((sum, block) => sum + block.word_count, 0);
@@ -70,13 +71,13 @@ export async function processFile(filePath, options) {
     );
     const improvement = enhancedWordCount - originalWordCount;
 
-    console.log(`[FILE_PROCESSOR] Processing complete:`);
-    console.log(`  - Original blocks: ${parsed.blocks.length}`);
-    console.log(`  - Original word count: ${originalWordCount}`);
-    console.log(`  - Enhanced word count: ${enhancedWordCount} (+${improvement})`);
-    console.log(`  - Enhancement improvement: ${((improvement / originalWordCount) * 100).toFixed(1)}%`);
+    logger.info(`Processing complete:`);
+    logger.info(`  - Original blocks: ${parsed.blocks.length}`);
+    logger.info(`  - Original word count: ${originalWordCount}`);
+    logger.info(`  - Enhanced word count: ${enhancedWordCount} (+${improvement}`);
+    logger.info(`  - Enhancement improvement: ${((improvement / originalWordCount) * 100).toFixed(1)}%`);
   } catch (error) {
-    console.error(`[FILE_PROCESSOR] Processing failed: ${error.message}`);
+    logger.error(`Processing failed: ${error.message}`);
     throw error;
   }
 }
@@ -126,7 +127,7 @@ function generateOriginalOutput(parsed) {
  * @returns {Promise<Array>} Enhanced blocks
  */
 async function enhanceContent(blocks, metadata, aiConfig, options) {
-  console.log(`[FILE_PROCESSOR] Using context-optimized enhancement (no entity extraction)...`);
+  logger.debug(`Using context-optimized enhancement (no entity extraction)...`);
   const result = await enhanceBlocksWithCaching(blocks, metadata, aiConfig, options);
   return result.blocks || result; // Handle both response formats
 }
@@ -225,7 +226,7 @@ function calculateWordCountImprovement(originalBlocks, enhancedBlocks) {
  * @returns {Promise<void>}
  */
 export async function processFiles(filePaths, options) {
-  console.log(`[FILE_PROCESSOR] Batch processing ${filePaths.length} files`);
+  logger.info(`Batch processing ${filePaths.length} files`);
 
   const results = [];
 
@@ -234,7 +235,7 @@ export async function processFiles(filePaths, options) {
       await processFile(filePath, options);
       results.push({file: filePath, status: 'success'});
     } catch (error) {
-      console.error(`[FILE_PROCESSOR] Failed to process ${filePath}: ${error.message}`);
+      logger.error(`Failed to process ${filePath}: ${error.message}`);
       results.push({file: filePath, status: 'failed', error: error.message});
     }
   }
@@ -243,16 +244,16 @@ export async function processFiles(filePaths, options) {
   const successful = results.filter(r => r.status === 'success').length;
   const failed = results.filter(r => r.status === 'failed').length;
 
-  console.log(`[FILE_PROCESSOR] Batch processing complete:`);
-  console.log(`  - Successful: ${successful}`);
-  console.log(`  - Failed: ${failed}`);
+  logger.info(`Batch processing complete:`);
+  logger.info(`  - Successful: ${successful}`);
+  logger.info(`  - Failed: ${failed}`);
 
   if (failed > 0) {
-    console.log(`  - Failed files:`);
+    logger.info(`  - Failed files:`);
     results
       .filter(r => r.status === 'failed')
       .forEach(r => {
-        console.log(`    - ${r.file}: ${r.error}`);
+        logger.info(`    - ${r.file}: ${r.error}`);
       });
   }
 }

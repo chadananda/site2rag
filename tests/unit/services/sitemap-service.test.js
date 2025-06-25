@@ -24,11 +24,8 @@ User-agent: Googlebot
 Allow: /public/`;
 
       const sitemaps = sitemapService.extractSitemapsFromRobots(robotsContent, 'https://example.com');
-      
-      expect(sitemaps).toEqual([
-        'https://example.com/sitemap.xml',
-        'https://example.com/news-sitemap.xml'
-      ]);
+
+      expect(sitemaps).toEqual(['https://example.com/sitemap.xml', 'https://example.com/news-sitemap.xml']);
     });
 
     it('should handle relative sitemap URLs', () => {
@@ -36,11 +33,8 @@ Allow: /public/`;
 Sitemap: sitemap-news.xml`;
 
       const sitemaps = sitemapService.extractSitemapsFromRobots(robotsContent, 'https://example.com');
-      
-      expect(sitemaps).toEqual([
-        'https://example.com/sitemap.xml',
-        'https://example.com/sitemap-news.xml'
-      ]);
+
+      expect(sitemaps).toEqual(['https://example.com/sitemap.xml', 'https://example.com/sitemap-news.xml']);
     });
 
     it('should handle case insensitive sitemap declarations', () => {
@@ -48,11 +42,8 @@ Sitemap: sitemap-news.xml`;
 sitemap: https://example.com/other.xml`;
 
       const sitemaps = sitemapService.extractSitemapsFromRobots(robotsContent, 'https://example.com');
-      
-      expect(sitemaps).toEqual([
-        'https://example.com/sitemap.xml',
-        'https://example.com/other.xml'
-      ]);
+
+      expect(sitemaps).toEqual(['https://example.com/sitemap.xml', 'https://example.com/other.xml']);
     });
 
     it('should handle relative URLs by making them absolute', () => {
@@ -60,11 +51,8 @@ sitemap: https://example.com/other.xml`;
 Sitemap: https://example.com/valid.xml`;
 
       const sitemaps = sitemapService.extractSitemapsFromRobots(robotsContent, 'https://example.com');
-      
-      expect(sitemaps).toEqual([
-        'https://example.com/relative-sitemap.xml',
-        'https://example.com/valid.xml'
-      ]);
+
+      expect(sitemaps).toEqual(['https://example.com/relative-sitemap.xml', 'https://example.com/valid.xml']);
     });
   });
 
@@ -85,11 +73,8 @@ Sitemap: https://example.com/valid.xml`;
         .mockResolvedValue({ok: false});
 
       const sitemaps = await sitemapService.discoverSitemapUrls('https://example.com');
-      
-      expect(sitemaps).toEqual([
-        'https://example.com/sitemap.xml',
-        'https://example.com/sitemap_index.xml'
-      ]);
+
+      expect(sitemaps).toEqual(['https://example.com/sitemap.xml', 'https://example.com/sitemap_index.xml']);
     });
 
     it('should handle robots.txt fetch failure gracefully', async () => {
@@ -103,7 +88,7 @@ Sitemap: https://example.com/valid.xml`;
         .mockResolvedValue({ok: false});
 
       const sitemaps = await sitemapService.discoverSitemapUrls('https://example.com');
-      
+
       expect(sitemaps).toEqual(['https://example.com/sitemap.xml']);
     });
 
@@ -117,7 +102,7 @@ Sitemap: https://example.com/valid.xml`;
         .mockResolvedValue({ok: false});
 
       const sitemaps = await sitemapService.discoverSitemapUrls('https://example.com');
-      
+
       expect(sitemaps).toEqual(['https://example.com/sitemap.xml']);
       // Should not make HEAD request for sitemap.xml since it was in robots.txt
       expect(mockFetchService.fetchUrl).toHaveBeenCalledTimes(6); // robots.txt + 5 other common paths
@@ -145,11 +130,8 @@ Sitemap: https://example.com/valid.xml`;
       });
 
       const urls = await sitemapService.parseSitemap('https://example.com/sitemap.xml');
-      
-      expect(urls).toEqual([
-        'https://example.com/page1',
-        'https://example.com/page2'
-      ]);
+
+      expect(urls).toEqual(['https://example.com/page1', 'https://example.com/page2']);
     });
 
     it('should parse sitemap index and fetch nested sitemaps', async () => {
@@ -193,11 +175,8 @@ Sitemap: https://example.com/valid.xml`;
         });
 
       const urls = await sitemapService.parseSitemap('https://example.com/index.xml');
-      
-      expect(urls).toEqual([
-        'https://example.com/page1',
-        'https://example.com/page2'
-      ]);
+
+      expect(urls).toEqual(['https://example.com/page1', 'https://example.com/page2']);
     });
 
     it('should handle fetch errors gracefully', async () => {
@@ -207,7 +186,7 @@ Sitemap: https://example.com/valid.xml`;
       });
 
       const urls = await sitemapService.parseSitemap('https://example.com/nonexistent.xml');
-      
+
       expect(urls).toEqual([]);
     });
 
@@ -219,7 +198,7 @@ Sitemap: https://example.com/valid.xml`;
       });
 
       const urls = await sitemapService.parseSitemap('https://example.com/huge.xml');
-      
+
       expect(urls).toEqual([]);
     });
 
@@ -231,16 +210,16 @@ Sitemap: https://example.com/valid.xml`;
       });
 
       const urls = await sitemapService.parseSitemap('https://example.com/bad.xml');
-      
+
       expect(urls).toEqual([]);
     });
 
     it('should respect max URLs limit', async () => {
       // Create sitemap with many URLs
-      const manyUrls = Array.from({length: 100}, (_, i) => 
-        `  <url><loc>https://example.com/page${i}</loc></url>`
-      ).join('\n');
-      
+      const manyUrls = Array.from({length: 100}, (_, i) => `  <url><loc>https://example.com/page${i}</loc></url>`).join(
+        '\n'
+      );
+
       const sitemapXml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 ${manyUrls}
@@ -255,7 +234,7 @@ ${manyUrls}
       // Set low max for testing
       sitemapService.maxUrls = 10;
       const urls = await sitemapService.parseSitemap('https://example.com/many.xml');
-      
+
       expect(urls).toHaveLength(10);
       expect(urls[0]).toBe('https://example.com/page0');
       expect(urls[9]).toBe('https://example.com/page9');
@@ -267,7 +246,7 @@ ${manyUrls}
       mockFetchService.fetchUrl.mockResolvedValue({ok: false});
 
       const urls = await sitemapService.getAllSitemapUrls('https://example.com');
-      
+
       expect(urls).toEqual([]);
     });
 
@@ -288,7 +267,8 @@ ${manyUrls}
         // robots.txt
         .mockResolvedValueOnce({
           ok: true,
-          text: () => Promise.resolve(`Sitemap: https://example.com/sitemap1.xml
+          text: () =>
+            Promise.resolve(`Sitemap: https://example.com/sitemap1.xml
 Sitemap: https://example.com/sitemap2.xml`)
         })
         // common paths (none found) - 6 HEAD requests
@@ -312,12 +292,8 @@ Sitemap: https://example.com/sitemap2.xml`)
         });
 
       const urls = await sitemapService.getAllSitemapUrls('https://example.com');
-      
-      expect(urls).toEqual([
-        'https://example.com/page1',
-        'https://example.com/page2',
-        'https://example.com/page3'
-      ]);
+
+      expect(urls).toEqual(['https://example.com/page1', 'https://example.com/page2', 'https://example.com/page3']);
     });
 
     it('should filter URLs to same domain only', async () => {
@@ -336,7 +312,7 @@ Sitemap: https://example.com/sitemap2.xml`)
         // common paths (first one is sitemap.xml which is already in robots.txt, so will be skipped)
         // Actually need to provide 6 HEAD requests for the 6 common paths minus sitemap.xml
         .mockResolvedValueOnce({ok: false}) // sitemap_index.xml
-        .mockResolvedValueOnce({ok: false}) // sitemaps.xml  
+        .mockResolvedValueOnce({ok: false}) // sitemaps.xml
         .mockResolvedValueOnce({ok: false}) // sitemap/sitemap.xml
         .mockResolvedValueOnce({ok: false}) // wp-sitemap.xml
         .mockResolvedValueOnce({ok: false}) // sitemap/index.xml
@@ -348,11 +324,8 @@ Sitemap: https://example.com/sitemap2.xml`)
         });
 
       const urls = await sitemapService.getAllSitemapUrls('https://example.com');
-      
-      expect(urls).toEqual([
-        'https://example.com/page1',
-        'https://example.com/page3'
-      ]);
+
+      expect(urls).toEqual(['https://example.com/page1', 'https://example.com/page3']);
     });
   });
 });

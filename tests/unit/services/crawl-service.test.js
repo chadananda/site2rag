@@ -217,7 +217,7 @@ describe('CrawlService', () => {
 
   it('should skip crawling if URL should be skipped', async () => {
     // Mock the crawl method to test URL skipping
-    crawlService.crawl = async (url) => {
+    crawlService.crawl = async url => {
       // Mock shouldSkip to return true
       mockUrlService.shouldSkip.mockReturnValueOnce(true);
 
@@ -236,7 +236,7 @@ describe('CrawlService', () => {
 
   it('should skip crawling if URL does not match patterns', async () => {
     // Mock the crawl method to test pattern matching
-    crawlService.crawl = async (url) => {
+    crawlService.crawl = async url => {
       // Mock matchesPatterns to return false
       mockUrlService.matchesPatterns.mockReturnValueOnce(false);
 
@@ -255,7 +255,7 @@ describe('CrawlService', () => {
 
   it('should skip crawling if URL is not allowed by robots.txt', async () => {
     // Mock the crawl method to test robots.txt checking
-    crawlService.crawl = async (url) => {
+    crawlService.crawl = async url => {
       // Mock canCrawl to return false
       mockFetchService.canCrawl.mockResolvedValueOnce(false);
 

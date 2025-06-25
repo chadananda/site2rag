@@ -61,20 +61,48 @@ export class DebugLogger {
   /**
    * Shorthand methods for common categories
    */
-  batching(message) { this.debug('BATCHING', message); }
-  keyed(message) { this.debug('KEYED', message); }
-  ai(message) { this.debug('AI', message); }
-  context(message) { this.debug('CONTEXT', message); }
-  cache(message) { this.debug('CACHE', message); }
-  validation(message) { this.debug('VALIDATION', message); }
-  entities(message) { this.debug('ENTITIES', message); }
-  insertions(message) { this.debug('INSERTIONS', message); }
-  crawl(message) { this.debug('CRAWL', message); }
-  progress(message) { this.debug('PROGRESS', message); }
-  direct(message) { this.debug('DIRECT_PROCESSING', message); }
-  sliding(message) { this.debug('SLIDING_CACHE', message); }
-  batch(message) { this.debug('BATCH', message); }
-  disambiguation(message) { this.debug('DISAMBIGUATION', message); }
+  batching(message) {
+    this.debug('BATCHING', message);
+  }
+  keyed(message) {
+    this.debug('KEYED', message);
+  }
+  ai(message) {
+    this.debug('AI', message);
+  }
+  context(message) {
+    this.debug('CONTEXT', message);
+  }
+  cache(message) {
+    this.debug('CACHE', message);
+  }
+  validation(message) {
+    this.debug('VALIDATION', message);
+  }
+  entities(message) {
+    this.debug('ENTITIES', message);
+  }
+  insertions(message) {
+    this.debug('INSERTIONS', message);
+  }
+  crawl(message) {
+    this.debug('CRAWL', message);
+  }
+  progress(message) {
+    this.debug('PROGRESS', message);
+  }
+  direct(message) {
+    this.debug('DIRECT_PROCESSING', message);
+  }
+  sliding(message) {
+    this.debug('SLIDING_CACHE', message);
+  }
+  batch(message) {
+    this.debug('BATCH', message);
+  }
+  disambiguation(message) {
+    this.debug('DISAMBIGUATION', message);
+  }
 }
 
 // Export singleton instance

@@ -110,6 +110,7 @@ git add . && git commit -m "feat: add {functionName} utility with comprehensive 
 - **Test data**: Store in `tests/fixtures/` or `tests/data/`
 - **Temporary scripts**: Only in `scripts/` folder, delete when done
 - **Core project files**: Keep root directory clean - only essential project files
+- **Always store planning documents in the `planning/` folder**
 
 ## Session Workflow
 
@@ -220,6 +221,7 @@ Watch for these and stop immediately:
 - **Remember to always add scripts as npm scripts in order to run without asking permission**
 - **Always delete temporary script files when done with them so as to not clog up our project**
 - **Store temporary scripts in tests/tmp/scripts**
+- **Always use npm scripts for testing. If necessary, modify test:quicktest to do what you want to do and then run it with `npm run test:quicktest`. That way you don't have to keep asking permission to run quick tests of functionality.**
 
 ## Commands
 
@@ -257,3 +259,9 @@ Watch for these and stop immediately:
 - **Fallback Order**: gpt4o-mini → gpt4o → opus4 → gpt4-turbo → ollama
 - **Caching Strategy**: Full document context cached per sliding window
 - **Return Format**: Only blocks requiring disambiguation are returned
+
+## Memories
+
+- Set crawling output to a subfolder of --output tests/tmp/sites/ like --output tests/tmp/sites/quicktest
+- Always use npm scripts and avoid bash so that you can run tests and diagnosis without permission or pause
+- **Never add files directly to the tests/tmp folder. All files go in the appropriate subfolder such as tests/tmp/scripts/**

@@ -110,7 +110,15 @@
       "Bash(DEBUG=true timeout 30 node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-v2-final --flat 2 >& 1)",
       "Bash(DEBUG=true timeout 30 node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-v2-fixed --flat 2 >& 1)",
       "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-v2-debug --flat 2 >& 1)",
-      "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-debug-v2 --flat 2 >& 1)"
+      "Bash(DEBUG=true node ./bin/site2rag.js example.com --limit 1 --output ./tests/tmp/test-debug-v2 --flat 2 >& 1)",
+      "Bash(chmod:*)",
+      "Bash(npm run:*)",
+      "Bash(DEBUG=ai,context npm run site2rag -- https://bahai-education.org/the-ocean-adventure --output tests/tmp/debug-test --maxPages 1 --aiProvider openai 2 >& 1)",
+      "Bash(DEBUG=ai,context npm run site2rag -- https://bahai-education.org/the-ocean-adventure --output tests/tmp/debug-ai-test --maxPages 1 --use_gpt4o_mini 2 >& 1)",
+      "Bash(DEBUG=ai,context npm run site2rag -- https://bahai-education.org/the-ocean-adventure --output tests/tmp/debug-ai-test --limit 1 --use_gpt4o_mini 2 >& 1)",
+      "Bash(DEBUG=*)",
+      "Bash(gh pr:*)",
+      "Bash(git fetch:*)"
     ],
     "deny": []
   }

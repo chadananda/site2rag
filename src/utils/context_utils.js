@@ -144,10 +144,10 @@ CRITICAL: Preserve markdown syntax perfectly. Only enhance readable text content
  * Create optimized sliding context windows for paragraph batch processing
  * @param {Array} blocks - Document blocks (paragraphs)
  * @param {number} windowSize - Target words per window based on AI capacity
- * @param {number} overlapSize - Overlap words between windows (50%)
+ * @param {number} overlapWords - Fixed overlap in words between windows
  * @returns {Array} Array of sliding windows with paragraph mappings
  */
-export function createOptimizedSlidingWindows(blocks, windowSize, overlapSize, isTestMode = false) {
+export function createOptimizedSlidingWindows(blocks, windowSize, overlapWords, isTestMode = false) {
   const windows = [];
 
   // Convert blocks to text with paragraph boundaries preserved
@@ -157,15 +157,15 @@ export function createOptimizedSlidingWindows(blocks, windowSize, overlapSize, i
     .join(' ');
 
   const words = fullText.split(/\s+/).filter(w => w.length > 0);
-  const stepSize = windowSize - overlapSize; // Move window by 50%
+  const stepSize = windowSize - overlapWords; // Move window by (windowSize - overlapWords)
 
   if (isTestMode) {
     console.log(
-      `[SLIDING_WINDOWS] Total: ${words.length} words, Window: ${windowSize} words, Step: ${stepSize} words (50% overlap)`
+      `[SLIDING_WINDOWS] Total: ${words.length} words, Window: ${windowSize} words, Step: ${stepSize} words (${overlapWords} word overlap)`
     );
   }
 
-  // Create sliding windows with 50% overlap
+  // Create sliding windows with fixed overlap
   for (let start = 0; start < words.length; start += stepSize) {
     const windowWords = words.slice(start, start + windowSize);
     // For very small documents, create at least one window
@@ -199,7 +199,7 @@ export function createOptimizedSlidingWindows(blocks, windowSize, overlapSize, i
   }
 
   if (isTestMode) {
-    console.log(`[SLIDING_WINDOWS] Created ${windows.length} sliding windows with 50% overlap`);
+    console.log(`[SLIDING_WINDOWS] Created ${windows.length} sliding windows with ${overlapWords} word overlap`);
   }
   return windows;
 }
@@ -214,14 +214,14 @@ export function createOptimizedSlidingWindows(blocks, windowSize, overlapSize, i
 export function createParagraphBatches(blockIndices, allBlocks) {
   const batches = [];
   const targetBatchWords = 500; // Target ~500 words per batch
-  
+
   let currentBatch = [];
   let currentWordCount = 0;
-  
+
   for (const blockIndex of blockIndices) {
     const blockText = allBlocks[blockIndex].text || allBlocks[blockIndex].content || allBlocks[blockIndex].original;
     const blockWords = blockText.split(/\s+/).filter(w => w.length > 0).length;
-    
+
     // If adding this block would exceed target AND we already have blocks, create batch
     if (currentWordCount + blockWords > targetBatchWords && currentBatch.length > 0) {
       // Create batch with current blocks
@@ -230,14 +230,14 @@ export function createParagraphBatches(blockIndices, allBlocks) {
         originalText: allBlocks[idx].text || allBlocks[idx].content || allBlocks[idx].original,
         escapedText: JSON.stringify(allBlocks[idx].text || allBlocks[idx].content || allBlocks[idx].original)
       }));
-      
+
       batches.push({
         batchIndex: batches.length,
         blockIndices: [...currentBatch],
         blocks: batchBlocks,
         wordCount: currentWordCount
       });
-      
+
       // Start new batch with current block
       currentBatch = [blockIndex];
       currentWordCount = blockWords;
@@ -247,7 +247,7 @@ export function createParagraphBatches(blockIndices, allBlocks) {
       currentWordCount += blockWords;
     }
   }
-  
+
   // Create final batch if there are remaining blocks
   if (currentBatch.length > 0) {
     const batchBlocks = currentBatch.map(idx => ({
@@ -255,7 +255,7 @@ export function createParagraphBatches(blockIndices, allBlocks) {
       originalText: allBlocks[idx].text || allBlocks[idx].content || allBlocks[idx].original,
       escapedText: JSON.stringify(allBlocks[idx].text || allBlocks[idx].content || allBlocks[idx].original)
     }));
-    
+
     batches.push({
       batchIndex: batches.length,
       blockIndices: [...currentBatch],
@@ -339,7 +339,12 @@ function normalizeForComparison(text) {
  * @returns {boolean} True if enhancement is valid
  */
 export function validateEnhancement(original, enhanced) {
-  if (!original || !enhanced) return false;
+  if (!original || !enhanced) {
+    return {
+      isValid: false,
+      error: 'Missing original or enhanced text'
+    };
+  }
 
   // Strip [[...]] context additions from enhanced text for comparison
   const enhancedWithoutContext = enhanced.replace(/\s*\[\[.*?\]\]/g, '');
@@ -358,9 +363,16 @@ export function validateEnhancement(original, enhanced) {
       console.log(`[VALIDATION] Original: "${normalizedOriginal}"`);
       console.log(`[VALIDATION] Enhanced (no [[...]]): "${normalizedEnhanced}"`);
     }
+    return {
+      isValid: false,
+      error: 'Enhanced text does not preserve original content'
+    };
   }
 
-  return isValid;
+  return {
+    isValid: true,
+    error: null
+  };
 }
 
 /**

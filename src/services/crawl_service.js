@@ -592,7 +592,7 @@ export class CrawlService {
     if (this.progressService) {
       // Always start with 1 (the initial URL) and update dynamically as URLs are discovered
       const totalUrls = 1;
-      
+
       if (process.env.DEBUG) {
         console.log(`[CRAWL_SERVICE] Starting progress - maxPages: ${this.maxPages}, initial totalUrls: ${totalUrls}`);
       }
@@ -653,13 +653,13 @@ export class CrawlService {
       // Phase 1: Mapping - Discover and store all sitemap URLs with language metadata
       if (this.sitemapService && this.contentService?.db) {
         logger.info('Phase 1: Mapping - Discovering sitemap URLs...');
-        const urlStorageHandler = (urlMetadata) => {
+        const urlStorageHandler = urlMetadata => {
           this.contentService.db.upsertSitemapUrl(urlMetadata);
         };
         const totalDiscovered = await this.sitemapService.discoverAndStoreSitemapUrls(url, urlStorageHandler);
         logger.info(`Mapping complete: ${totalDiscovered} URLs discovered and stored`);
       }
-      
+
       logger.info('Phase 2: Crawling - Starting selective crawl...');
       await this.crawl(url, 0);
       logger.info(`Crawl completed with ${this.foundUrls.length} URLs found`);
@@ -779,7 +779,7 @@ export class CrawlService {
 
     // Add to queue
     this.queuedUrls.add(normalizedUrl);
-    
+
     // Only add to eligible URLs if not in sitemap-first mode
     // In sitemap mode, eligible URLs are already determined from the sitemap
     if (!this._sitemapFirstMode) {
@@ -787,7 +787,7 @@ export class CrawlService {
       if (!this.eligibleUrls.has(normalizedUrl)) {
         this.eligibleUrls.add(normalizedUrl);
       }
-      
+
       // Update progress bar with eligible URLs only
       if (this.progressService) {
         const totalEligible = this.eligibleUrls.size;
@@ -815,32 +815,32 @@ export class CrawlService {
    */
   async crawlFromSitemap(startUrl) {
     logger.info(`Using sitemap-first crawling with language filter: ${this.urlFilter.includeLanguage}`);
-    
+
     // Add the start URL to eligible URLs
     this.eligibleUrls.add(startUrl);
-    
+
     // Always process the home page first
     await this.processUrlDirectly(startUrl);
-    
+
     // Get ALL unprocessed URLs from sitemap database (we'll filter them ourselves)
     const filters = {
       language: this.urlFilter.includeLanguage,
       unprocessedOnly: true,
       limit: 1000 // Get enough URLs to account for heavy filtering
     };
-    
+
     const allSitemapUrls = this.contentService.db.getFilteredSitemapUrls(filters);
     logger.info(`Found ${allSitemapUrls.length} language-filtered URLs from sitemap database`);
-    
+
     // Filter URLs that pass path/pattern filters and count them
     const validUrls = allSitemapUrls.filter(sitemapUrl => this.urlFilter.shouldCrawlUrl(sitemapUrl.url));
     logger.info(`After path/pattern filtering: ${validUrls.length} valid URLs to crawl`);
-    
+
     // Add all valid URLs to eligible set
     for (const sitemapUrl of validUrls) {
       this.eligibleUrls.add(sitemapUrl.url);
     }
-    
+
     // Update progress bar with final eligible count
     if (this.progressService) {
       const totalEligible = this.eligibleUrls.size;
@@ -850,29 +850,29 @@ export class CrawlService {
       });
       logger.info(`Set progress total to ${totalEligible} eligible URLs from sitemap`);
     }
-    
+
     // Process each valid URL directly
     for (const sitemapUrl of validUrls) {
       if (this.foundUrls.length >= this.maxPages) {
         logger.info(`Reached page limit of ${this.maxPages}`);
         break;
       }
-      
+
       // Process the URL directly
       await this.processUrlDirectly(sitemapUrl.url);
-      
+
       // Mark as processed in sitemap database
       this.contentService.db.markSitemapUrlProcessed(sitemapUrl.url);
     }
-    
+
     // Mark remaining invalid URLs as processed so they don't get checked again
     const invalidUrls = allSitemapUrls.filter(sitemapUrl => !this.urlFilter.shouldCrawlUrl(sitemapUrl.url));
     for (const sitemapUrl of invalidUrls) {
       this.contentService.db.markSitemapUrlProcessed(sitemapUrl.url);
     }
-    logger.info(`Marked ${invalidUrls.length} filtered URLs as processed`)
+    logger.info(`Marked ${invalidUrls.length} filtered URLs as processed`);
   }
-  
+
   /**
    * Process a single URL directly without crawl complexity
    * @param {string} url - URL to process
@@ -961,8 +961,8 @@ export class CrawlService {
       if (this.options.flat) {
         // Flat structure - all files in root
         const urlObj = new URL(normalizedUrl);
-        const filename = urlObj.pathname === '/' ? 'index.md' : 
-          `${urlObj.pathname.split('/').filter(Boolean).join('-')}.md`;
+        const filename =
+          urlObj.pathname === '/' ? 'index.md' : `${urlObj.pathname.split('/').filter(Boolean).join('-')}.md`;
         filePath = path.join(outputPath, filename);
       } else {
         // Directory structure matching URL path
@@ -1016,7 +1016,6 @@ export class CrawlService {
 
       // Mark download as complete
       this.progressService.completeUrl(normalizedUrl, 'success');
-
     } catch (err) {
       logger.error(`Error processing ${normalizedUrl}: ${err.message}`);
       this.progressService.completeUrl(normalizedUrl, 'error');
@@ -1034,7 +1033,7 @@ export class CrawlService {
       this._sitemapFirstMode = true; // Mark that we're in sitemap-first mode
       return await this.crawlFromSitemap(url);
     }
-    
+
     // Normalize URL
     let normalizedUrl = url;
     if (this.urlService && this.urlService.normalizeUrl) {
@@ -1081,7 +1080,7 @@ export class CrawlService {
         return;
       }
     }
-    
+
     // Add to eligible URLs set AFTER all filtering checks pass
     // But not in sitemap-first mode where eligible URLs are predetermined
     if (!this._sitemapFirstMode) {
@@ -1976,15 +1975,17 @@ ${markdownContent}`;
         }
 
         links_to_crawl = links;
-        
+
         // Immediately update progress bar with all discovered links
         if (this.progressService && links.length > 0) {
           // Count how many new URLs we're discovering (not already visited or queued)
           let newUrlCount = 0;
           for (const link of links) {
             const linkString = typeof link === 'object' ? link.href : link;
-            const normalizedLink = this.urlService?.normalizeUrl ? this.urlService.normalizeUrl(linkString) : linkString;
-            
+            const normalizedLink = this.urlService?.normalizeUrl
+              ? this.urlService.normalizeUrl(linkString)
+              : linkString;
+
             // Only count if not already visited or queued
             if (!this.visitedUrls.has(normalizedLink) && !this.queuedUrls.has(normalizedLink)) {
               // Apply same filtering rules as queueUrl
@@ -2009,20 +2010,20 @@ ${markdownContent}`;
               }
             }
           }
-          
+
           if (newUrlCount > 0) {
             logger.info(`Discovered ${newUrlCount} new eligible URLs from ${normalizedUrl}`);
-            
+
             // In sitemap-first mode, don't update the total - it's already set from sitemap
             if (!this._sitemapFirstMode) {
               // Only update progress total if we're not in sitemap-first mode
               const totalEligible = this.eligibleUrls.size;
-              
+
               this.progressService.updateStats({
                 totalUrls: totalEligible,
                 queuedUrls: this.queuedUrls.size
               });
-              
+
               logger.info(`Updated total eligible to: ${totalEligible}`);
             } else {
               // In sitemap mode, just update the queue count
@@ -2030,7 +2031,7 @@ ${markdownContent}`;
                 queuedUrls: this.queuedUrls.size
               });
             }
-            
+
             if (this.debug) {
               logger.debug(`[ELIGIBLE] Current eligible URLs count: ${this.eligibleUrls.size}`);
               logger.debug(`[ELIGIBLE] Links found: ${links.length}, New eligible: ${newUrlCount}`);
@@ -2082,13 +2083,13 @@ ${markdownContent}`;
     try {
       const urlObj = new URL(url);
       const urlHostname = urlObj.hostname;
-      
+
       // Get base domain if not already set
       if (!this.baseDomain && this.startUrl) {
         const startUrlObj = new URL(this.startUrl);
         this.baseDomain = startUrlObj.hostname;
       }
-      
+
       return this.baseDomain && urlHostname === this.baseDomain;
     } catch (err) {
       return false;
@@ -2349,7 +2350,7 @@ ${markdownContent}`;
       const sitemapUrls = await this.sitemapService.getAllSitemapUrls(domain);
       if (sitemapUrls.length > 0) {
         logger.info(`Found ${sitemapUrls.length} URLs in sitemaps`);
-        
+
         // Filter sitemap URLs and only add eligible ones to the queue
         let eligibleCount = 0;
         for (const url of sitemapUrls) {
@@ -2365,10 +2366,10 @@ ${markdownContent}`;
             }
           }
         }
-        
+
         logger.info(`Filtered to ${eligibleCount} eligible URLs from ${sitemapUrls.length} sitemap URLs`);
         logger.info(`Total eligible URLs after sitemap processing: ${this.eligibleUrls.size}`);
-        
+
         // Update progress bar total with eligible URLs only
         if (this.progressService) {
           const totalEligible = this.eligibleUrls.size;
@@ -2378,7 +2379,7 @@ ${markdownContent}`;
           });
           logger.info(`Updated progress total to ${totalEligible} eligible URLs`);
         }
-        
+
         return sitemapUrls;
       } else {
         logger.info('No sitemap URLs found');

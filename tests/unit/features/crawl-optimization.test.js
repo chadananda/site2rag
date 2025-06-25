@@ -12,18 +12,18 @@ describe('Crawl Optimization Features', () => {
 
   beforeEach(() => {
     testDbPath = join(process.cwd(), 'tests', 'tmp', 'crawl-optimization.sqlite');
-    
+
     // Create test directory
     const testDir = join(process.cwd(), 'tests', 'tmp');
     if (!fs.existsSync(testDir)) {
       fs.mkdirSync(testDir, {recursive: true});
     }
-    
+
     // Clean up existing test database
     if (fs.existsSync(testDbPath)) {
       fs.unlinkSync(testDbPath);
     }
-    
+
     crawlDB = new CrawlDB(testDbPath);
     fastChangeDetector = new FastChangeDetector({
       db: crawlDB,
@@ -37,7 +37,7 @@ describe('Crawl Optimization Features', () => {
     if (crawlDB) {
       crawlDB.close();
     }
-    
+
     // Clean up test database
     if (fs.existsSync(testDbPath)) {
       fs.unlinkSync(testDbPath);
@@ -47,7 +47,7 @@ describe('Crawl Optimization Features', () => {
   describe('Fast Change Detection', () => {
     it('should detect likely static pages', () => {
       const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      
+
       // Add old page that hasn't changed
       crawlDB.upsertPage('https://example.com/static', {
         title: 'Static Page',
@@ -55,14 +55,14 @@ describe('Crawl Optimization Features', () => {
         last_crawled: oneWeekAgo,
         content_status: 'contexted'
       });
-      
+
       const shouldSkip = fastChangeDetector.shouldSkipUrl('https://example.com/static');
       expect(shouldSkip).toBe(true);
     });
 
     it('should not skip recently crawled pages', () => {
       const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
-      
+
       // Add recently crawled page
       crawlDB.upsertPage('https://example.com/recent', {
         title: 'Recent Page',
@@ -70,14 +70,14 @@ describe('Crawl Optimization Features', () => {
         last_crawled: oneHourAgo,
         content_status: 'contexted'
       });
-      
+
       const shouldSkip = fastChangeDetector.shouldSkipUrl('https://example.com/recent');
       expect(shouldSkip).toBe(false);
     });
 
     it('should not skip pages that need processing', () => {
       const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      
+
       // Add old page with raw status (needs processing)
       crawlDB.upsertPage('https://example.com/raw', {
         title: 'Raw Page',
@@ -85,7 +85,7 @@ describe('Crawl Optimization Features', () => {
         last_crawled: oneWeekAgo,
         content_status: 'raw'
       });
-      
+
       const shouldSkip = fastChangeDetector.shouldSkipUrl('https://example.com/raw');
       expect(shouldSkip).toBe(false);
     });
@@ -97,16 +97,16 @@ describe('Crawl Optimization Features', () => {
         fastRecheckHours: 72, // 3 days
         enableTimeFilters: true
       });
-      
+
       const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-      
+
       crawlDB.upsertPage('https://example.com/conservative', {
         title: 'Conservative Test',
         content: 'Testing conservative mode',
         last_crawled: twoWeeksAgo,
         content_status: 'contexted'
       });
-      
+
       const shouldSkip = conservativeDetector.shouldSkipUrl('https://example.com/conservative');
       expect(shouldSkip).toBe(true);
     });
@@ -118,16 +118,16 @@ describe('Crawl Optimization Features', () => {
         fastRecheckHours: 12, // 12 hours
         enableTimeFilters: true
       });
-      
+
       const twoDaysAgo = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
-      
+
       crawlDB.upsertPage('https://example.com/aggressive', {
         title: 'Aggressive Test',
         content: 'Testing aggressive mode',
         last_crawled: twoDaysAgo,
         content_status: 'contexted'
       });
-      
+
       const shouldSkip = aggressiveDetector.shouldSkipUrl('https://example.com/aggressive');
       expect(shouldSkip).toBe(true);
     });
@@ -137,16 +137,16 @@ describe('Crawl Optimization Features', () => {
         db: crawlDB,
         enableTimeFilters: false
       });
-      
+
       const oneWeekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      
+
       crawlDB.upsertPage('https://example.com/nofilter', {
         title: 'No Filter Test',
         content: 'Testing without time filters',
         last_crawled: oneWeekAgo,
         content_status: 'contexted'
       });
-      
+
       const shouldSkip = noFilterDetector.shouldSkipUrl('https://example.com/nofilter');
       expect(shouldSkip).toBe(false);
     });
@@ -156,14 +156,14 @@ describe('Crawl Optimization Features', () => {
     it('should cache and reuse AI enhancement results', () => {
       // Mock cache system
       const mockCache = new Map();
-      
+
       // Simulate caching AI enhancement for similar content
       const content1 = 'The organization was founded in 1844';
       // const content2 = 'The organization was established in 1844'; // Very similar
-      
+
       const enhancement1 = 'The [[Bahai]] organization was founded in 1844';
       mockCache.set(content1, enhancement1);
-      
+
       // Check if similar content can reuse cached result
       expect(mockCache.has(content1)).toBe(true);
       expect(mockCache.get(content1)).toBe(enhancement1);
@@ -176,11 +176,12 @@ describe('Crawl Optimization Features', () => {
         misses: 0,
         total: 0
       };
-      
+
       // Simulate cache operations
       function checkCache() {
         cacheStats.total++;
-        if (Math.random() > 0.3) { // 70% hit rate
+        if (Math.random() > 0.3) {
+          // 70% hit rate
           cacheStats.hits++;
           return 'cached-result';
         } else {
@@ -188,12 +189,12 @@ describe('Crawl Optimization Features', () => {
           return null;
         }
       }
-      
+
       // Run multiple cache checks
       for (let i = 0; i < 100; i++) {
         checkCache(`test-key-${i}`);
       }
-      
+
       const hitRate = (cacheStats.hits / cacheStats.total) * 100;
       expect(cacheStats.total).toBe(100);
       expect(hitRate).toBeGreaterThan(0);
@@ -204,7 +205,7 @@ describe('Crawl Optimization Features', () => {
       // Test sliding window cache optimization
       const windowCache = new Map();
       const maxCacheSize = 10;
-      
+
       function addToCache(key, value) {
         if (windowCache.size >= maxCacheSize) {
           // Remove oldest entry (FIFO)
@@ -213,12 +214,12 @@ describe('Crawl Optimization Features', () => {
         }
         windowCache.set(key, value);
       }
-      
+
       // Add items to cache
       for (let i = 0; i < 15; i++) {
         addToCache(`window-${i}`, `value-${i}`);
       }
-      
+
       expect(windowCache.size).toBe(maxCacheSize);
       expect(windowCache.has('window-5')).toBe(true); // Should have been evicted
       expect(windowCache.has('window-14')).toBe(true); // Should be present
@@ -229,7 +230,7 @@ describe('Crawl Optimization Features', () => {
     it('should use ETags for conditional requests', () => {
       const url = 'https://example.com/etag-test';
       const etag = '"unique-etag-value"';
-      
+
       // Store page with ETag
       crawlDB.upsertPage(url, {
         title: 'ETag Test',
@@ -237,17 +238,17 @@ describe('Crawl Optimization Features', () => {
         etag: etag,
         content_status: 'contexted'
       });
-      
+
       const page = crawlDB.getPage(url);
       expect(page.etag).toBe(etag);
-      
+
       // In a real scenario, this would be used for If-None-Match header
     });
 
     it('should use Last-Modified dates for conditional requests', () => {
       const url = 'https://example.com/lastmod-test';
       const lastModified = 'Wed, 21 Oct 2015 07:28:00 GMT';
-      
+
       // Store page with Last-Modified
       crawlDB.upsertPage(url, {
         title: 'Last-Modified Test',
@@ -255,16 +256,16 @@ describe('Crawl Optimization Features', () => {
         lastModified: lastModified,
         content_status: 'contexted'
       });
-      
+
       const page = crawlDB.getPage(url);
       expect(page.lastModified).toBe(lastModified);
-      
+
       // In a real scenario, this would be used for If-Modified-Since header
     });
 
     it('should handle 304 Not Modified responses', () => {
       const url = 'https://example.com/not-modified';
-      
+
       // Store page with previous crawl data
       crawlDB.upsertPage(url, {
         title: 'Not Modified Test',
@@ -273,7 +274,7 @@ describe('Crawl Optimization Features', () => {
         links: ['https://example.com/link1', 'https://example.com/link2'],
         content_status: 'contexted'
       });
-      
+
       // Simulate 304 response - page data should remain the same
       const page = crawlDB.getPage(url);
       expect(page.content_status).toBe('contexted');
@@ -285,18 +286,18 @@ describe('Crawl Optimization Features', () => {
     it('should batch database operations for performance', async () => {
       const batchSize = 100;
       const urls = [];
-      
+
       // Prepare batch of URLs
       for (let i = 0; i < batchSize; i++) {
         urls.push(`https://example.com/batch-${i}`);
       }
-      
+
       // Simulate batch processing
       const startTime = Date.now();
-      
+
       // In a real implementation, this would use a transaction
       crawlDB.db.exec('BEGIN TRANSACTION');
-      
+
       for (const url of urls) {
         crawlDB.upsertPage(url, {
           title: `Batch Page ${url}`,
@@ -304,16 +305,16 @@ describe('Crawl Optimization Features', () => {
           content_status: 'raw'
         });
       }
-      
+
       crawlDB.db.exec('COMMIT');
-      
+
       const endTime = Date.now();
       const duration = endTime - startTime;
-      
+
       // Verify all pages were inserted
       const count = crawlDB.countPagesByStatus('raw');
       expect(count).toBe(batchSize);
-      
+
       // Performance should be reasonable (less than 1 second for 100 inserts)
       expect(duration).toBeLessThan(1000);
     });
@@ -327,10 +328,10 @@ describe('Crawl Optimization Features', () => {
         'https://example.com/page?utm_source=test', // Query parameter
         'https://example.com/page#section' // Fragment
       ];
-      
+
       // Normalize URLs for deduplication
       const normalizedUrls = new Set();
-      
+
       urls.forEach(url => {
         try {
           const urlObj = new URL(url);
@@ -344,7 +345,7 @@ describe('Crawl Optimization Features', () => {
           // Handle invalid URLs
         }
       });
-      
+
       // Should deduplicate to fewer unique URLs
       expect(normalizedUrls.size).toBeLessThan(urls.length);
       expect(normalizedUrls.size).toBeGreaterThan(0);
@@ -358,10 +359,10 @@ describe('Crawl Optimization Features', () => {
         {url: 'https://example.com/blog/post-1', priority: 5},
         {url: 'https://example.com/admin/dashboard', priority: 1} // Admin - lowest priority
       ];
-      
+
       // Sort by priority (descending)
       const sortedPages = pages.sort((a, b) => b.priority - a.priority);
-      
+
       expect(sortedPages[0].url).toBe('https://example.com/');
       expect(sortedPages[sortedPages.length - 1].url).toBe('https://example.com/admin/dashboard');
     });

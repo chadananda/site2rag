@@ -40,7 +40,7 @@ export class UrlFilterService {
       logger.info(`URL excluded by path filter: ${url}`);
       return false;
     }
-    // 2. Check exclude patterns  
+    // 2. Check exclude patterns
     if (this.isPatternExcluded(url)) {
       logger.info(`URL excluded by pattern filter: ${url}`);
       return false;
@@ -111,14 +111,16 @@ export class UrlFilterService {
    * @returns {RegExp[]} - Array of compiled regex objects
    */
   compilePatterns(patterns) {
-    return patterns.map(pattern => {
-      try {
-        return new RegExp(pattern, 'i'); // Case-insensitive
-      } catch (e) {
-        logger.warn(`Invalid regex pattern: ${pattern} - ${e.message}`);
-        return null;
-      }
-    }).filter(Boolean);
+    return patterns
+      .map(pattern => {
+        try {
+          return new RegExp(pattern, 'i'); // Case-insensitive
+        } catch (e) {
+          logger.warn(`Invalid regex pattern: ${pattern} - ${e.message}`);
+          return null;
+        }
+      })
+      .filter(Boolean);
   }
   /**
    * Get current filter configuration for debugging
@@ -136,10 +138,11 @@ export class UrlFilterService {
    * Log filter configuration on initialization
    */
   logFilterConfig() {
-    const hasFilters = this.excludePaths.length > 0 || 
-                      this.excludePatterns.length > 0 || 
-                      this.includeLanguage || 
-                      this.includePatterns.length > 0;
+    const hasFilters =
+      this.excludePaths.length > 0 ||
+      this.excludePatterns.length > 0 ||
+      this.includeLanguage ||
+      this.includePatterns.length > 0;
     if (hasFilters) {
       logger.info('URL filtering enabled:');
       if (this.excludePaths.length > 0) {

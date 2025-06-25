@@ -24,12 +24,14 @@ We implement an intelligent context disambiguation system that adds explanatory 
 Following Anthropic's methodology, we enhance each text chunk with relevant context from the surrounding document. Unlike their approach of prepending context, we use inline insertions that preserve readability:
 
 **Traditional Contextualization:**
+
 ```
 Context: This chunk is from ACME Corp's Q2 2023 report.
 Content: The company's revenue grew by 3% over the previous quarter.
 ```
 
 **Our Inline Approach:**
+
 ```
 The company [[ACME Corp]] revenue grew by 3% over the previous quarter [[Q1 2023: $314M]].
 ```
@@ -37,6 +39,7 @@ The company [[ACME Corp]] revenue grew by 3% over the previous quarter [[Q1 2023
 ### 2. Context Preservation
 
 Our system maintains document coherence through:
+
 - **Sliding windows** with 50% overlap for context continuity
 - **Full document caching** when possible for maximum context availability
 - **Keyed block tracking** to preserve document structure
@@ -74,16 +77,17 @@ We optimize usage of each LLM's context window through careful capacity manageme
 
 ```javascript
 // Calculate safe operating capacity (80% of model limit)
-capacity = model_context_window * 0.8
+capacity = model_context_window * 0.8;
 
 // Reserve space for static content
-static_content = instructions + metadata + extra_context_file
+static_content = instructions + metadata + extra_context_file;
 
 // Available capacity for document content
-window_capacity = capacity - static_content
+window_capacity = capacity - static_content;
 ```
 
 **Model-Specific Capacities (80% utilization):**
+
 - GPT-4 Turbo: ~100,000 tokens → ~75,000 words window capacity
 - Claude 3 Opus: ~160,000 tokens → ~120,000 words window capacity
 - Llama 3.2: ~3,000 tokens → ~2,000 words window capacity
@@ -94,11 +98,11 @@ window_capacity = capacity - static_content
 
 ```javascript
 if (document_size <= window_capacity) {
-    // Single window contains entire document (typical case)
-    windows = [{ start: 0, end: document_size, content: full_document }]
+  // Single window contains entire document (typical case)
+  windows = [{start: 0, end: document_size, content: full_document}];
 } else {
-    // Create sliding windows with 50% overlap
-    windows = create_sliding_windows(document, window_capacity, 0.5)
+  // Create sliding windows with 50% overlap
+  windows = create_sliding_windows(document, window_capacity, 0.5);
 }
 ```
 
@@ -107,6 +111,7 @@ if (document_size <= window_capacity) {
 #### 2.2 Block Preparation
 
 1. **Convert to Keyed Blocks:**
+
    ```javascript
    {
      "block_0": "# Introduction\n\nThis document describes...",
@@ -130,6 +135,7 @@ if (document_size <= window_capacity) {
 #### 3.1 Cache Architecture
 
 **Per-Window Caching:**
+
 ```
 CACHED (once per window):
 ├── Instructions (disambiguation rules)
@@ -147,17 +153,14 @@ All batches within a window are processed **in parallel**:
 
 ```javascript
 // Cache setup (happens once)
-session.setCachedContext(instructions + metadata + window_text)
+session.setCachedContext(instructions + metadata + window_text);
 
 // Parallel batch processing
-const results = await Promise.all(
-    batches.map(batch => 
-        session.call(createBatchPrompt(batch))
-    )
-)
+const results = await Promise.all(batches.map(batch => session.call(createBatchPrompt(batch))));
 ```
 
 **Benefits:**
+
 - 10x speedup for typical documents
 - Reduced API costs through caching
 - Better context consistency
@@ -178,18 +181,18 @@ The AI follows strict guidelines for context insertion:
 
 ```javascript
 for (const [key, enhanced_text] of enhanced_blocks) {
-    if (has_insertions(enhanced_text)) {
-        if (validate_word_preservation(original[key], enhanced_text)) {
-            // Accept enhancement
-            result[key] = enhanced_text
-        } else {
-            // Retry with stricter prompt
-            result[key] = retry_enhancement(original[key])
-        }
+  if (has_insertions(enhanced_text)) {
+    if (validate_word_preservation(original[key], enhanced_text)) {
+      // Accept enhancement
+      result[key] = enhanced_text;
     } else {
-        // No insertions, pass through original
-        result[key] = original[key]
+      // Retry with stricter prompt
+      result[key] = retry_enhancement(original[key]);
     }
+  } else {
+    // No insertions, pass through original
+    result[key] = original[key];
+  }
 }
 ```
 
@@ -208,29 +211,29 @@ When processing large documents:
 
 ```javascript
 function calculateCapacity(aiConfig) {
-    const model_limits = {
-        'gpt-4-turbo': { context: 128000, safe_capacity: 102400 },
-        'claude-3-opus': { context: 200000, safe_capacity: 160000 },
-        'llama-3.2': { context: 4096, safe_capacity: 3276 }
-    }
-    
-    const limit = model_limits[aiConfig.model] || model_limits.default
-    const capacity_tokens = limit.safe_capacity
-    
-    // Reserve tokens
-    const instruction_tokens = 1000
-    const response_buffer = 500
-    const metadata_tokens = 200
-    
-    // Calculate available window capacity
-    const window_tokens = capacity_tokens - instruction_tokens - response_buffer - metadata_tokens
-    const window_words = Math.floor(window_tokens * 0.75) // Conservative token-to-word ratio
-    
-    return {
-        total_capacity: capacity_tokens,
-        window_capacity: window_words,
-        overlap_size: Math.floor(window_words * 0.5)
-    }
+  const model_limits = {
+    'gpt-4-turbo': {context: 128000, safe_capacity: 102400},
+    'claude-3-opus': {context: 200000, safe_capacity: 160000},
+    'llama-3.2': {context: 4096, safe_capacity: 3276}
+  };
+
+  const limit = model_limits[aiConfig.model] || model_limits.default;
+  const capacity_tokens = limit.safe_capacity;
+
+  // Reserve tokens
+  const instruction_tokens = 1000;
+  const response_buffer = 500;
+  const metadata_tokens = 200;
+
+  // Calculate available window capacity
+  const window_tokens = capacity_tokens - instruction_tokens - response_buffer - metadata_tokens;
+  const window_words = Math.floor(window_tokens * 0.75); // Conservative token-to-word ratio
+
+  return {
+    total_capacity: capacity_tokens,
+    window_capacity: window_words,
+    overlap_size: Math.floor(window_words * 0.5)
+  };
 }
 ```
 
@@ -262,20 +265,20 @@ Based on our implementation and Anthropic's research:
 
 ### Retrieval Accuracy Improvements
 
-| Approach | Failure Rate | Improvement |
-|----------|-------------|-------------|
-| Traditional RAG | 5.7% | Baseline |
-| With Context Enhancement | 3.7% | 35% reduction |
-| With Parallel Processing | 3.7% | 35% reduction + 10x speed |
-| With Reranking | 1.9% | 67% reduction |
+| Approach                 | Failure Rate | Improvement               |
+| ------------------------ | ------------ | ------------------------- |
+| Traditional RAG          | 5.7%         | Baseline                  |
+| With Context Enhancement | 3.7%         | 35% reduction             |
+| With Parallel Processing | 3.7%         | 35% reduction + 10x speed |
+| With Reranking           | 1.9%         | 67% reduction             |
 
 ### Processing Efficiency
 
 | Document Size | Windows | Batches | Serial Time | Parallel Time | Speedup |
-|--------------|---------|---------|-------------|---------------|---------|
-| 5K words | 1 | 10 | 30s | 3s | 10x |
-| 20K words | 1 | 40 | 120s | 12s | 10x |
-| 100K words | 6 | 200 | 600s | 72s | 8.3x |
+| ------------- | ------- | ------- | ----------- | ------------- | ------- |
+| 5K words      | 1       | 10      | 30s         | 3s            | 10x     |
+| 20K words     | 1       | 40      | 120s        | 12s           | 10x     |
+| 100K words    | 6       | 200     | 600s        | 72s           | 8.3x    |
 
 ### Token Usage Optimization
 
@@ -290,11 +293,13 @@ Based on our implementation and Anthropic's research:
 Our context-enhanced chunks provide superior retrieval results:
 
 **Original Chunk:**
+
 ```
 "Revenue increased by 15% compared to the previous period, exceeding analyst expectations."
 ```
 
 **Enhanced Chunk:**
+
 ```
 "Revenue [[Apple Inc. Q4 2023: $89.5B]] increased by 15% compared to the previous period [[Q3 2023: $77.8B]], exceeding analyst expectations [[consensus: $87.2B]]."
 ```
@@ -309,6 +314,7 @@ Our context-enhanced chunks provide superior retrieval results:
 ### Vector Embedding Impact
 
 Context enhancement improves vector embeddings by:
+
 - Providing more semantic information per chunk
 - Creating more distinctive vector representations
 - Improving clustering of related content

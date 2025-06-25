@@ -22,7 +22,7 @@ describe('AI Utils', () => {
   beforeEach(async () => {
     mockFetch = vi.mocked((await import('node-fetch')).default);
     vi.clearAllMocks();
-    
+
     // Reset environment variables
     delete process.env.OLLAMA_HOST;
   });
@@ -39,7 +39,7 @@ describe('AI Utils', () => {
       });
 
       const result = await aiServiceAvailable({provider: 'ollama'});
-      
+
       expect(result).toBe(true);
       expect(mockFetch).toHaveBeenCalledWith('http://localhost:11434/api/tags', {timeout: 2000});
     });
@@ -48,7 +48,7 @@ describe('AI Utils', () => {
       mockFetch.mockRejectedValue(new Error('Connection refused'));
 
       const result = await aiServiceAvailable({provider: 'ollama'});
-      
+
       expect(result).toBe(false);
     });
 
@@ -59,7 +59,7 @@ describe('AI Utils', () => {
       });
 
       const result = await aiServiceAvailable({provider: 'ollama'});
-      
+
       expect(result).toBe(false);
     });
 
@@ -67,10 +67,10 @@ describe('AI Utils', () => {
       mockFetch.mockResolvedValue({ok: true});
 
       await aiServiceAvailable({
-        provider: 'ollama', 
+        provider: 'ollama',
         host: 'http://custom-host:11434'
       });
-      
+
       expect(mockFetch).toHaveBeenCalledWith('http://custom-host:11434/api/tags', {timeout: 2000});
     });
 
@@ -79,7 +79,7 @@ describe('AI Utils', () => {
       mockFetch.mockResolvedValue({ok: true});
 
       await aiServiceAvailable({provider: 'ollama'});
-      
+
       expect(mockFetch).toHaveBeenCalledWith('http://env-host:11434/api/tags', {timeout: 2000});
     });
 
@@ -87,13 +87,13 @@ describe('AI Utils', () => {
       mockFetch.mockResolvedValue({ok: true});
 
       await aiServiceAvailable();
-      
+
       expect(mockFetch).toHaveBeenCalledWith('http://localhost:11434/api/tags', {timeout: 2000});
     });
 
     it('should return false for unknown providers', async () => {
       const result = await aiServiceAvailable({provider: 'unknown-provider'});
-      
+
       expect(result).toBe(false);
       expect(mockFetch).not.toHaveBeenCalled();
     });
@@ -102,7 +102,7 @@ describe('AI Utils', () => {
       mockFetch.mockResolvedValue({ok: true});
 
       const result = await aiServiceAvailable({});
-      
+
       expect(result).toBe(true); // Should default to ollama
       expect(mockFetch).toHaveBeenCalled();
     });
@@ -119,23 +119,24 @@ describe('AI Utils', () => {
     it('should classify blocks and return indices to remove', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({
-          response: JSON.stringify([0, 2, 3]) // Remove nav, aside, footer - keep main
-        })
+        json: () =>
+          Promise.resolve({
+            response: JSON.stringify([0, 2, 3]) // Remove nav, aside, footer - keep main
+          })
       });
 
       const result = await classifyBlocksWithAI(mockBlocks, {
         provider: 'ollama',
         model: 'llama2'
       });
-      
+
       expect(result).toEqual([0, 2, 3]);
       expect(mockFetch).toHaveBeenCalled();
     });
 
     it('should handle empty blocks array', async () => {
       const result = await classifyBlocksWithAI([], {provider: 'ollama'});
-      
+
       expect(result).toEqual([]);
       expect(mockFetch).not.toHaveBeenCalled();
     });
@@ -144,20 +145,21 @@ describe('AI Utils', () => {
       mockFetch.mockRejectedValue(new Error('AI service unavailable'));
 
       const result = await classifyBlocksWithAI(mockBlocks, {provider: 'ollama'});
-      
+
       expect(result).toEqual([]); // Should return empty array on error
     });
 
     it('should handle invalid JSON response', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({
-          response: 'invalid json response'
-        })
+        json: () =>
+          Promise.resolve({
+            response: 'invalid json response'
+          })
       });
 
       const result = await classifyBlocksWithAI(mockBlocks, {provider: 'ollama'});
-      
+
       expect(result).toEqual([]); // Should return empty array on parse error
     });
 
@@ -169,20 +171,21 @@ describe('AI Utils', () => {
       });
 
       const result = await classifyBlocksWithAI(mockBlocks, {provider: 'ollama'});
-      
+
       expect(result).toEqual([]);
     });
 
     it('should use default provider when not specified', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({
-          response: JSON.stringify([])
-        })
+        json: () =>
+          Promise.resolve({
+            response: JSON.stringify([])
+          })
       });
 
       await classifyBlocksWithAI(mockBlocks);
-      
+
       expect(mockFetch).toHaveBeenCalled();
       // Should use ollama as default provider
     });
@@ -190,13 +193,14 @@ describe('AI Utils', () => {
     it('should validate returned indices are within bounds', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({
-          response: JSON.stringify([0, 5, 10]) // Indices 5,10 are out of bounds for 4 blocks
-        })
+        json: () =>
+          Promise.resolve({
+            response: JSON.stringify([0, 5, 10]) // Indices 5,10 are out of bounds for 4 blocks
+          })
       });
 
       const result = await classifyBlocksWithAI(mockBlocks, {provider: 'ollama'});
-      
+
       // Should filter out out-of-bounds indices
       expect(result).toEqual([0]);
     });
@@ -204,22 +208,24 @@ describe('AI Utils', () => {
     it('should handle malformed response data', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({
-          response: JSON.stringify(['invalid', 'indices', null])
-        })
+        json: () =>
+          Promise.resolve({
+            response: JSON.stringify(['invalid', 'indices', null])
+          })
       });
 
       const result = await classifyBlocksWithAI(mockBlocks, {provider: 'ollama'});
-      
+
       expect(result).toEqual([]); // Should handle non-numeric indices gracefully
     });
 
     it('should construct proper prompt for AI classification', async () => {
       mockFetch.mockResolvedValue({
         ok: true,
-        json: () => Promise.resolve({
-          response: JSON.stringify([])
-        })
+        json: () =>
+          Promise.resolve({
+            response: JSON.stringify([])
+          })
       });
 
       await classifyBlocksWithAI(mockBlocks, {
@@ -229,7 +235,7 @@ describe('AI Utils', () => {
 
       const fetchCall = mockFetch.mock.calls[0];
       const requestBody = JSON.parse(fetchCall[1].body);
-      
+
       expect(requestBody.prompt).toContain('navigation');
       expect(requestBody.prompt).toContain('main content');
       expect(requestBody.model).toBe('test-model');

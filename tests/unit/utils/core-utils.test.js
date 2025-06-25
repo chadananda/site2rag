@@ -76,7 +76,9 @@ describe('Core Utils', () => {
       });
 
       it('should normalize duplicate slashes in path', () => {
-        expect(normalizeUrl('https://example.com//path//to//resource', baseUrl)).toBe('https://example.com/path/to/resource');
+        expect(normalizeUrl('https://example.com//path//to//resource', baseUrl)).toBe(
+          'https://example.com/path/to/resource'
+        );
       });
     });
   });
@@ -93,9 +95,9 @@ describe('Core Utils', () => {
 
       mockResponse = {
         headers: {
-          get: vi.fn((key) => {
+          get: vi.fn(key => {
             const headers = {
-              'etag': '"test-etag"',
+              etag: '"test-etag"',
               'last-modified': 'Wed, 21 Oct 2015 07:28:00 GMT'
             };
             return headers[key] || null;
@@ -107,9 +109,9 @@ describe('Core Utils', () => {
     describe('Previous Crawl Handling', () => {
       it('should return empty headers when no previous data exists', async () => {
         mockCrawlState.getPage.mockReturnValue(null);
-        
+
         const result = await handlePreviousCrawl(mockCrawlState, 'https://example.com/page');
-        
+
         expect(result).toEqual({headers: {}});
       });
 
@@ -118,9 +120,9 @@ describe('Core Utils', () => {
           etag: '"previous-etag"',
           lastModified: 'Tue, 20 Oct 2015 07:28:00 GMT'
         });
-        
+
         const result = await handlePreviousCrawl(mockCrawlState, 'https://example.com/page');
-        
+
         expect(result.headers['If-None-Match']).toBe('"previous-etag"');
         expect(result.headers['If-Modified-Since']).toBe('Tue, 20 Oct 2015 07:28:00 GMT');
       });
@@ -131,15 +133,11 @@ describe('Core Utils', () => {
         const visited = new Set(['https://example.com/visited']);
         const found = [];
         const prevData = {
-          links: [
-            'https://example.com/link1',
-            'https://example.com/link2',
-            'https://example.com/visited'
-          ]
+          links: ['https://example.com/link1', 'https://example.com/link2', 'https://example.com/visited']
         };
-        
+
         await handleNotModified('https://example.com/page', prevData, visited, found);
-        
+
         expect(visited.has('https://example.com/page')).toBe(true);
         expect(found).toContain('https://example.com/link1');
         expect(found).toContain('https://example.com/link2');
@@ -151,9 +149,9 @@ describe('Core Utils', () => {
       it('should update crawl state with response headers and links', async () => {
         const url = 'https://example.com/page';
         const links = ['https://example.com/link1', 'https://example.com/link2'];
-        
+
         await updateCrawlState(url, mockResponse, links, mockCrawlState);
-        
+
         expect(mockCrawlState.upsertPage).toHaveBeenCalledWith(url, {
           etag: '"test-etag"',
           lastModified: 'Wed, 21 Oct 2015 07:28:00 GMT',
@@ -198,10 +196,10 @@ describe('Core Utils', () => {
       it('should generate full selector paths for elements', () => {
         const {load} = require('cheerio');
         const $ = load(mockHtml);
-        
+
         const navElement = $('nav').first();
         const selector = generateFullSelectorPath(navElement, $);
-        
+
         expect(selector).toContain('nav');
         expect(selector).toContain('main-nav');
       });
@@ -209,7 +207,7 @@ describe('Core Utils', () => {
       it('should analyze selector path specificity', () => {
         const selector = 'nav.main-nav#navigation ul li a';
         const analysis = analyzeSelectorPath(selector);
-        
+
         expect(analysis.specificity).toBeGreaterThan(0);
         expect(analysis.hasId).toBe(true);
         expect(analysis.hasClass).toBe(true);
