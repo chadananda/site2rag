@@ -189,8 +189,8 @@ export function createFallbackConfig(options) {
     return null; // Fallback not enabled
   }
 
-  // Default fallback order optimized for speed/cost (gpt4o-mini is ideal for context disambiguation)
-  const defaultOrder = ['gpt4o-mini', 'gpt4o', 'opus4', 'gpt4-turbo', 'ollama'];
+  // Default fallback order - start with Haiku for better instruction following
+  const defaultOrder = ['haiku', 'opus4', 'gpt4o', 'gpt4-turbo', 'ollama'];
 
   // Parse custom fallback order if provided
   let fallbackOrder = defaultOrder;

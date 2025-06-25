@@ -45,7 +45,8 @@ const MIN_BLOCK_CHARS = process.env.SITE2RAG_MIN_BLOCK_CHARS ? parseInt(process.
  * @returns {boolean} True if model needs simplified prompts
  */
 function isSimplifiedPromptModel(aiConfig) {
-  const simpleModels = ['gpt-4o-mini', 'gpt-3.5-turbo', 'gpt-3.5', 'claude-3-haiku'];
+  const simpleModels = ['gpt-4o-mini', 'gpt-3.5-turbo', 'gpt-3.5'];
+  // Note: We do NOT include Haiku here - it should use the detailed prompts
   return aiConfig.model && simpleModels.some(m => aiConfig.model.includes(m));
 }
 

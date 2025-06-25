@@ -348,16 +348,30 @@ export function validateEnhancement(original, enhanced) {
 
   // Check for forbidden general knowledge patterns FIRST
   const forbiddenPatterns = [
+    // Definitions
     /\[\[personal computer\]\]/i,
+    /\[\[PC\]\]/i,
+    // Geography
     /\[\[a city in[^\]]*\]\]/i,
     /\[\[a country in[^\]]*\]\]/i,
-    /\[\[a.+House of Worship\]\]/i,
-    /\[\[a.+text\]\]/i,
-    /\[\[a.+historical text\]\]/i,
+    /\[\[.+city\]\]/i,
+    /\[\[.+country\]\]/i,
+    // Religious descriptions
+    /\[\[.+House of Worship\]\]/i,
+    /\[\[.+Bahá'í text\]\]/i,
+    /\[\[.+historical text\]\]/i,
+    /\[\[.+religious text\]\]/i,
+    /\[\[.+community member\]\]/i,
+    /\[\[.+temple\]\]/i,
+    // Explanations
     /\[\[the possibility of[^\]]*\]\]/i,
     /\[\[disagreement[^\]]*\]\]/i,
-    /\[\[a.+temple\]\]/i,
-    /\[\[.+definition[^\]]*\]\]/i
+    /\[\[.+definition[^\]]*\]\]/i,
+    // Single words that are not clarifications
+    /\[\[successfully\]\]/i,
+    /\[\[the\]\]/i,
+    /\[\[a\]\]/i,
+    /\[\[an\]\]/i
   ];
 
   for (const pattern of forbiddenPatterns) {
