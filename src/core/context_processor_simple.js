@@ -260,27 +260,30 @@ function createWindowRequest(window, metadata, docId, aiConfig) {
   let prompt;
   if (useSimplifiedPrompt) {
     // Simplified prompt for models like GPT-4o-mini - NO JSON for better results
-    prompt = `You must ONLY add clarifications using information EXPLICITLY STATED in this specific document.
+    prompt = `Add [[clarifications]] to make each paragraph stand alone. Use ONLY information from THIS document.
 
-FORBIDDEN - DO NOT DO ANY OF THESE:
-❌ NO definitions: "PC [[personal computer]]" - WRONG!
-❌ NO locations: "S̱híráz [[a city in Iran]]" - WRONG!
-❌ NO explanations: "controversy [[disagreement]]" - WRONG!
-❌ NO descriptions: "Lotus Temple [[a Bahá'í House of Worship]]" - WRONG!
-❌ NO general knowledge: "Dawn-Breakers [[a Bahá'í historical text]]" - WRONG!
-❌ NO duplicates in same paragraph
+WHAT TO CLARIFY:
+• "I" → "I [[Chad Jones]]" (using author from metadata)
+• "we/our" → "we [[specific team/group mentioned in doc]]"
+• "this/that" → "this [[specific thing referenced]]"
+• "it" → "it [[the specific item]]"
+• "the project" → "the project [[Ocean]]"
+• "the software" → "the software [[Ocean]]"
+• Generic terms like "the CDs" when specific type is known
 
-ONLY ALLOWED:
-✓ Use the document's own words/names
-✓ Use metadata values (author, title, etc.)
-✓ Reference earlier parts of THIS document
+❌ FORBIDDEN - NEVER ADD:
+• Definitions: "PC [[personal computer]]" ✗
+• Locations: "S̱híráz [[a city in Iran]]" ✗
+• Explanations: "controversy [[disagreement]]" ✗
+• External facts: "Lotus Temple [[a Bahá'í House of Worship]]" ✗
+• Info not in document: "Dawn-Breakers [[a Bahá'í text]]" ✗
 
-EXAMPLES FROM THIS DOCUMENT:
-- "I" → "I [[Chad Jones]]" (using author from metadata)
-- "this" → "this [[Ocean project]]" (if document calls it "Ocean project")
-- "we" → "we [[the Ocean team]]" (ONLY if document mentions "Ocean team")
+✓ GOOD EXAMPLES:
+• "I started this" → "I [[Chad Jones]] started this [[Ocean project]]"
+• "We developed it" → "We [[the Ocean team]] developed it [[Ocean]]"
+• "This was amazing" → "This [[visiting the Lotus Temple]] was amazing"
 
-CRITICAL: If the document doesn't explicitly state what something is, leave it alone!
+Only disambiguate if genuinely unclear. Skip if already clear from context.
 
 ========= DOCUMENT META-DATA:
 
@@ -307,28 +310,31 @@ Return JSON with "enhanced_blocks" containing the same text with [[clarification
 Example: {"enhanced_blocks": {"0": "Text with [[clarification]]...", "1": "Another text..."}}`;
   } else {
     // More detailed prompt for advanced models
-    prompt = `STRICT DISAMBIGUATION RULES - VIOLATIONS WILL BE REJECTED
+    prompt = `Disambiguate pronouns and vague references. Use ONLY information from THIS document.
 
-You MUST follow these rules EXACTLY:
+TARGET THESE AMBIGUOUS REFERENCES:
+1. Pronouns: I, we, our, they, their, he, she, it
+2. Demonstratives: this, that, these, those
+3. Generic terms: the project, the software, the team, the CDs
+4. Unclear references that need context
 
-1. ONLY use information EXPLICITLY WRITTEN in this document
-2. NEVER add knowledge from outside this document
-3. NEVER define or explain what things are
-4. NEVER duplicate clarifications in the same paragraph
+APPLY THESE CLARIFICATIONS:
+• "I" → "I [[Chad Jones]]" (from metadata author)
+• "we/our" → "we [[the Ocean team]]" or specific group from doc
+• "this/that" → add what it refers to from context
+• "the project" → "the project [[Ocean]]"
+• "it" → specify what "it" refers to
 
-❌ FORBIDDEN EXAMPLES (DO NOT DO):
-- "PC" → "PC [[personal computer]]" - WRONG! That's a definition
-- "S̱híráz" → "S̱híráz [[a city in Iran]]" - WRONG! That's external knowledge
-- "Lotus Temple" → "Lotus Temple [[a Bahá'í House of Worship]]" - WRONG! Not from document
-- "controversy" → "controversy [[disagreement]]" - WRONG! That's an explanation
-- "Dawn-Breakers" → "Dawn-Breakers [[a Bahá'í text]]" - WRONG! General knowledge
+STRICT FORBIDDEN LIST:
+✗ "PC" → "PC [[personal computer]]" - NO definitions!
+✗ "S̱híráz" → "S̱híráz [[a city in Iran]]" - NO geography!
+✗ "Lotus Temple" → "Lotus Temple [[a Bahá'í House of Worship]]" - NO descriptions!
+✗ Any info not explicitly in THIS document
 
-✓ ONLY ALLOWED:
-- "I" → "I [[Chad Jones]]" - OK, using author from metadata
-- "this" → "this [[Ocean project]]" - OK, if document calls it "Ocean project"
-- "we" → "we [[the Ocean team]]" - OK, ONLY if document mentions "Ocean team"
-
-REMEMBER: Leave it alone if the document doesn't explicitly say what it is!
+EXAMPLES:
+✓ "I started this project" → "I [[Chad Jones]] started this project [[Ocean]]"
+✓ "We achieved it" → "We [[the Ocean team]] achieved it [[distributing Ocean globally]]"
+✓ "This was incredible" → "This [[the response from communities]] was incredible"
 
 Return JSON: {"enhanced_blocks": {"0": "text with [[context]]", "1": "text with [[context]]", ...}}
 
