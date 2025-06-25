@@ -242,6 +242,7 @@ export function extractMainContent($, body, options = {}) {
     // Create a clean container for the content
     const contentContainer = $('<div class="site2rag-content-container"></div>');
     contentContainer.append(mainContent.clone());
+    
     // Remove any nested navigation elements
     contentContainer.find('nav, header, footer, [role="navigation"]').each((i, el) => {
       const $el = $(el);
@@ -380,9 +381,30 @@ export function extractMainContent($, body, options = {}) {
  */
 export function isLikelyNavigationOrBoilerplate($, element) {
   const $el = $(element);
+  
+  // First check if this is author-related content that should be preserved
+  const className = $el.attr('class') || '';
+  const idName = $el.attr('id') || '';
+  const fullName = (className + ' ' + idName).toLowerCase();
+  const text = $el.text().trim().toLowerCase();
+  
+  // Preserve author-related sections
+  const authorPatterns = ['author', 'byline', 'writer', 'contributor', 'bio', 'about-author', 'author-info'];
+  for (const pattern of authorPatterns) {
+    if (fullName.includes(pattern) || text.includes('about the author') || text.includes('about ' + pattern)) {
+      return false; // Not navigation/boilerplate - keep it
+    }
+  }
+  
   // Check tag name
   const tagName = $el.prop('tagName')?.toLowerCase();
   if (['nav', 'header', 'footer', 'aside'].includes(tagName)) {
+    // But still preserve if it contains author info
+    for (const pattern of authorPatterns) {
+      if (fullName.includes(pattern) || text.includes('about the author')) {
+        return false;
+      }
+    }
     return true;
   }
   // Check role attribute
@@ -390,10 +412,7 @@ export function isLikelyNavigationOrBoilerplate($, element) {
   if (['navigation', 'banner', 'contentinfo'].includes(role)) {
     return true;
   }
-  // Check class/id patterns
-  const className = $el.attr('class') || '';
-  const idName = $el.attr('id') || '';
-  const fullName = (className + ' ' + idName).toLowerCase();
+  // Check class/id patterns for navigation
   const navPatterns = [
     'nav',
     'navigation',
@@ -413,11 +432,16 @@ export function isLikelyNavigationOrBoilerplate($, element) {
   ];
   for (const pattern of navPatterns) {
     if (fullName.includes(pattern)) {
+      // Double-check it's not author-related
+      for (const authorPattern of authorPatterns) {
+        if (fullName.includes(authorPattern)) {
+          return false; // It's author-related, keep it
+        }
+      }
       return true;
     }
   }
   // Check link density
-  const text = $el.text().trim();
   const textLength = text.length;
   if (textLength > 20) {
     const links = $el.find('a').length;
@@ -425,6 +449,10 @@ export function isLikelyNavigationOrBoilerplate($, element) {
     const linkDensity = textLength > 0 ? linkText / textLength : 0;
     // High link density indicates navigation
     if (linkDensity > 0.5) {
+      // But still check for author content
+      if (text.includes('about the author') || text.includes('by ')) {
+        return false;
+      }
       return true;
     }
   }
@@ -1040,70 +1068,304 @@ export class ContentService {
    * @returns {Object} - Extracted metadata
    */
   extractMetadata($) {
-    // Basic metadata - get only the FIRST title element to avoid concatenation
+    // Initialize core metadata structure
     const metadata = {
+      title: '',
+      author: '',
+      description: '',
+      keywords: [],
+      datePublished: '',
+      dateModified: '',
+      publisher: '',
+      license: '',
+      language: $('html').attr('lang') || 'en',
+      url: $('link[rel="canonical"]').attr('href') || ''
+    };
+
+    // Extract JSON-LD structured data first (richest source)
+    const jsonLdData = this.extractJsonLd($);
+    
+    // Basic meta tags
+    const basicMeta = {
       title: $('title').first().text().trim(),
       description: $('meta[name="description"]').attr('content') || '',
       keywords: $('meta[name="keywords"]').attr('content') || '',
-      author: $('meta[name="author"]').attr('content') || '',
-      language: $('html').attr('lang') || '',
-      canonical: $('link[rel="canonical"]').attr('href') || ''
+      author: $('meta[name="author"]').attr('content') || ''
     };
 
     // Open Graph metadata
-    metadata.og_title = $('meta[property="og:title"]').attr('content') || '';
-    metadata.og_description = $('meta[property="og:description"]').attr('content') || '';
-    metadata.og_image = $('meta[property="og:image"]').attr('content') || '';
-    metadata.og_type = $('meta[property="og:type"]').attr('content') || '';
-    metadata.og_site_name = $('meta[property="og:site_name"]').attr('content') || '';
-
-    // Twitter card metadata
-    metadata.twitter_card = $('meta[name="twitter:card"]').attr('content') || '';
-    metadata.twitter_title = $('meta[name="twitter:title"]').attr('content') || '';
-    metadata.twitter_description = $('meta[name="twitter:description"]').attr('content') || '';
-    metadata.twitter_image = $('meta[name="twitter:image"]').attr('content') || '';
+    const ogMeta = {
+      title: $('meta[property="og:title"]').attr('content') || '',
+      description: $('meta[property="og:description"]').attr('content') || '',
+      site_name: $('meta[property="og:site_name"]').attr('content') || ''
+    };
 
     // Dublin Core metadata
-    metadata.dc_title = $('meta[name="DC.title"]').attr('content') || '';
-    metadata.dc_creator = $('meta[name="DC.creator"]').attr('content') || '';
-    metadata.dc_subject = $('meta[name="DC.subject"]').attr('content') || '';
-    metadata.dc_description = $('meta[name="DC.description"]').attr('content') || '';
+    const dcMeta = {
+      creator: $('meta[name="DC.creator"]').attr('content') || '',
+      subject: $('meta[name="DC.subject"]').attr('content') || ''
+    };
 
-    // Publication metadata
-    metadata.published_date =
-      $('meta[name="article:published_time"]').attr('content') ||
-      $('meta[property="article:published_time"]').attr('content') ||
-      $('meta[name="published_date"]').attr('content') ||
-      $('meta[name="date"]').attr('content') ||
-      '';
+    // Article metadata
+    const articleMeta = {
+      author: $('meta[property="article:author"]').attr('content') || '',
+      section: $('meta[property="article:section"]').attr('content') || '',
+      published_time: $('meta[property="article:published_time"]').attr('content') || 
+                      $('meta[name="article:published_time"]').attr('content') || '',
+      modified_time: $('meta[property="article:modified_time"]').attr('content') ||
+                     $('meta[name="article:modified_time"]').attr('content') || ''
+    };
 
-    metadata.modified_date =
-      $('meta[name="article:modified_time"]').attr('content') ||
-      $('meta[property="article:modified_time"]').attr('content') ||
-      $('meta[name="modified_date"]').attr('content') ||
-      $('meta[name="last-modified"]').attr('content') ||
-      '';
-
-    // Additional metadata - scan all meta tags to capture anything we missed
-    $('meta').each((i, el) => {
-      const name = $(el).attr('name') || $(el).attr('property');
-      const content = $(el).attr('content');
-
-      if (name && content && !metadata[name.replace(/[:.]/g, '_')]) {
-        // Convert names with dots or colons to underscores for valid YAML
-        const safeName = name.replace(/[:.]/g, '_').toLowerCase();
-        metadata[safeName] = content;
-      }
+    // Extract article tags for keywords
+    const articleTags = [];
+    $('meta[property="article:tag"]').each((i, el) => {
+      const tag = $(el).attr('content');
+      if (tag) articleTags.push(tag.trim());
     });
 
-    // Remove empty values
+    // Build final metadata with fallback chain
+    // Title fallback chain
+    metadata.title = jsonLdData.headline || jsonLdData.name || basicMeta.title || ogMeta.title || '';
+
+    // Author fallback chain (including byline search)
+    metadata.author = this.extractAuthor($, jsonLdData, basicMeta, dcMeta, articleMeta);
+
+    // Description fallback
+    metadata.description = jsonLdData.description || basicMeta.description || ogMeta.description || '';
+
+    // Keywords - combine from multiple sources and return as array
+    metadata.keywords = this.extractKeywords(basicMeta.keywords, jsonLdData.keywords, articleTags, dcMeta.subject);
+
+    // Dates
+    metadata.datePublished = jsonLdData.datePublished || articleMeta.published_time || '';
+    metadata.dateModified = jsonLdData.dateModified || articleMeta.modified_time || '';
+
+    // Publisher
+    metadata.publisher = jsonLdData.publisher?.name || ogMeta.site_name || '';
+
+    // License
+    metadata.license = jsonLdData.license || '';
+
+    // URL fallback
+    metadata.url = metadata.url || jsonLdData.url || jsonLdData.mainEntityOfPage || '';
+
+    // Category/section
+    if (articleMeta.section) {
+      metadata.section = articleMeta.section;
+    }
+    
+    // Additional metadata from JSON-LD Person objects
+    if (jsonLdData.personData && jsonLdData.personData.length > 0) {
+      // Find the Person data that matches the author
+      const authorPerson = jsonLdData.personData.find(p => 
+        p.name === metadata.author || 
+        (metadata.author && p.name && p.name.includes(metadata.author))
+      );
+      
+      if (authorPerson) {
+        // Author bio/description
+        if (authorPerson.description) {
+          metadata.authorDescription = authorPerson.description;
+        }
+        // Author job title
+        if (authorPerson.jobTitle) {
+          metadata.authorJobTitle = authorPerson.jobTitle;
+        }
+        // Author image
+        if (authorPerson.image) {
+          metadata.authorImage = authorPerson.image;
+        }
+        // Author URL
+        if (authorPerson.url) {
+          metadata.authorUrl = authorPerson.url;
+        }
+        // Author organization
+        if (authorPerson.worksFor && authorPerson.worksFor.name) {
+          metadata.authorOrganization = authorPerson.worksFor.name;
+        }
+      }
+    }
+    
+    // Additional metadata from PodcastEpisode
+    if (jsonLdData.timeRequired) {
+      metadata.audioDuration = jsonLdData.timeRequired;
+    }
+    
+    // Article image
+    if (jsonLdData.image) {
+      if (typeof jsonLdData.image === 'string') {
+        metadata.image = jsonLdData.image;
+      } else if (jsonLdData.image.url) {
+        metadata.image = jsonLdData.image.url;
+      }
+    }
+    
+    // Publisher logo
+    if (jsonLdData.publisher && jsonLdData.publisher.logo && jsonLdData.publisher.logo.url) {
+      metadata.publisherLogo = jsonLdData.publisher.logo.url;
+    }
+
+    // Remove empty values and return
     Object.keys(metadata).forEach(key => {
-      if (!metadata[key]) {
+      const value = metadata[key];
+      if (value === '' || (Array.isArray(value) && value.length === 0)) {
         delete metadata[key];
       }
     });
 
     return metadata;
+  }
+
+  /**
+   * Extract JSON-LD structured data
+   * @param {Object} $ - Cheerio instance
+   * @returns {Object} - Merged JSON-LD data
+   */
+  extractJsonLd($) {
+    const jsonLdData = {};
+    
+    $('script[type="application/ld+json"]').each((i, script) => {
+      try {
+        const data = JSON.parse($(script).html());
+        
+        // Handle both single objects and arrays
+        const items = Array.isArray(data) ? data : [data];
+        
+        for (const item of items) {
+          // Extract based on @type
+          if (item['@type'] === 'Article' || item['@type'] === 'NewsArticle' || 
+              item['@type'] === 'BlogPosting' || item['@type'] === 'WebPage') {
+            // Article-like content
+            Object.assign(jsonLdData, {
+              headline: item.headline || jsonLdData.headline,
+              description: item.description || jsonLdData.description,
+              datePublished: item.datePublished || jsonLdData.datePublished,
+              dateModified: item.dateModified || jsonLdData.dateModified,
+              url: item.url || jsonLdData.url,
+              mainEntityOfPage: item.mainEntityOfPage || jsonLdData.mainEntityOfPage,
+              keywords: item.keywords || jsonLdData.keywords,
+              image: item.image || jsonLdData.image
+            });
+            
+            // Extract author
+            if (item.author) {
+              if (typeof item.author === 'string') {
+                jsonLdData.author = item.author;
+              } else if (item.author.name) {
+                jsonLdData.author = item.author.name;
+              }
+            }
+            
+            // Extract publisher
+            if (item.publisher && item.publisher.name) {
+              jsonLdData.publisher = item.publisher;
+            }
+          } else if (item['@type'] === 'PodcastEpisode') {
+            // Podcast metadata
+            Object.assign(jsonLdData, {
+              name: item.name || jsonLdData.name,
+              description: item.description || jsonLdData.description,
+              datePublished: item.datePublished || jsonLdData.datePublished,
+              license: item.license || jsonLdData.license,
+              timeRequired: item.timeRequired || jsonLdData.timeRequired
+            });
+            
+            if (item.author && item.author.name) {
+              jsonLdData.author = item.author.name;
+            }
+          } else if (item['@type'] === 'Person' && item.name) {
+            // Store person data for potential author info
+            jsonLdData.personData = jsonLdData.personData || [];
+            jsonLdData.personData.push(item);
+          }
+        }
+      } catch (e) {
+        // Skip invalid JSON-LD
+        logger.debug(`[METADATA] Invalid JSON-LD: ${e.message}`);
+      }
+    });
+    
+    return jsonLdData;
+  }
+
+  /**
+   * Extract author using fallback chain
+   * @param {Object} $ - Cheerio instance
+   * @param {Object} jsonLdData - JSON-LD data
+   * @param {Object} basicMeta - Basic meta tags
+   * @param {Object} dcMeta - Dublin Core metadata
+   * @param {Object} articleMeta - Article metadata
+   * @returns {string} - Author name
+   */
+  extractAuthor($, jsonLdData, basicMeta, dcMeta, articleMeta) {
+    // 1. Try JSON-LD first
+    if (jsonLdData.author) return jsonLdData.author;
+    
+    // 2. Try meta tags
+    if (basicMeta.author) return basicMeta.author;
+    if (articleMeta.author) return articleMeta.author;
+    if (dcMeta.creator) return dcMeta.creator;
+    
+    // 3. Try rel="author" link
+    const authorLink = $('link[rel="author"]').attr('href');
+    if (authorLink) {
+      const authorText = $('link[rel="author"]').attr('title') || authorLink.split('/').pop();
+      if (authorText && authorText !== 'author') return authorText;
+    }
+    
+    // 4. Try to find byline in content (first 500 chars)
+    const bodyText = $('body').text().substring(0, 500);
+    const bylineMatch = bodyText.match(/[Bb]y\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
+    if (bylineMatch && bylineMatch[1]) {
+      return bylineMatch[1];
+    }
+    
+    return '';
+  }
+
+  /**
+   * Extract and combine keywords from multiple sources
+   * @param {string} metaKeywords - Keywords from meta tag
+   * @param {Array|string} jsonLdKeywords - Keywords from JSON-LD
+   * @param {Array} articleTags - Article tags
+   * @param {string} dcSubject - Dublin Core subject
+   * @returns {Array} - Array of unique keywords
+   */
+  extractKeywords(metaKeywords, jsonLdKeywords, articleTags, dcSubject) {
+    const keywords = new Set();
+    
+    // Process meta keywords (comma-separated)
+    if (metaKeywords) {
+      metaKeywords.split(',').forEach(k => {
+        const trimmed = k.trim();
+        if (trimmed) keywords.add(trimmed);
+      });
+    }
+    
+    // Process JSON-LD keywords (might be array or string)
+    if (jsonLdKeywords) {
+      if (Array.isArray(jsonLdKeywords)) {
+        jsonLdKeywords.forEach(k => keywords.add(k.trim()));
+      } else if (typeof jsonLdKeywords === 'string') {
+        jsonLdKeywords.split(',').forEach(k => {
+          const trimmed = k.trim();
+          if (trimmed) keywords.add(trimmed);
+        });
+      }
+    }
+    
+    // Add article tags
+    articleTags.forEach(tag => keywords.add(tag));
+    
+    // Process DC subject (comma or semicolon separated)
+    if (dcSubject) {
+      dcSubject.split(/[,;]/).forEach(s => {
+        const trimmed = s.trim();
+        if (trimmed) keywords.add(trimmed);
+      });
+    }
+    
+    return Array.from(keywords);
   }
 
   /**

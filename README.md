@@ -126,6 +126,25 @@ Traditional scrapers use crude CSS selectors. `site2rag` uses **local AI** to un
 ❌ Traditional: "Remove all .sidebar elements" ✅ site2rag AI: "This sidebar contains valuable API references - keep it!"
 ```
 
+### Enhanced Metadata Extraction 📊
+
+**NEW in v0.4.3**: Comprehensive metadata extraction from multiple sources:
+
+- **JSON-LD structured data** - Extracts Article, Person, PodcastEpisode schemas
+- **Author biographical information** - Captures author bios from Person JSON-LD
+- **Multi-source keyword aggregation** - Combines keywords from meta tags, article tags, and JSON-LD
+- **Fallback chains** - Title: JSON-LD → meta → OG; Author: JSON-LD → meta → Dublin Core → byline
+- **Rich metadata fields** - Author bio, job title, organization, published/modified dates
+
+### Document Download Support 📄
+
+**NEW in v0.4.3**: Automatically downloads searchable documents linked in pages:
+
+- **PDF, Word, OpenDocument** formats supported
+- **External CDN support** - Downloads PDFs even from S3, CloudFlare, etc.
+- **Smart deduplication** - Won't download the same document twice
+- **Organized storage** - Documents saved in `assets/documents/` directory
+
 **Before** (raw HTML):
 
 ```html
@@ -148,6 +167,13 @@ Traditional scrapers use crude CSS selectors. `site2rag` uses **local AI** to un
 ---
 source_url: 'https://docs.example.com/getting-started'
 title: 'Getting Started Guide'
+author: 'John Doe'
+authorDescription: 'John Doe is a senior software engineer with 10+ years of experience in API design'
+authorJobTitle: 'Senior Software Engineer'
+authorOrganization: 'Tech Corp'
+datePublished: '2025-06-20T00:00:00Z'
+dateModified: '2025-06-25T12:00:00Z'
+keywords: ['api', 'authentication', 'getting-started', 'rest-api']
 processing: ['ai_content_classification', 'context_injection']
 ---
 

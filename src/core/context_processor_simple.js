@@ -223,11 +223,13 @@ export function simplifyMetadata(metadata) {
     throw new Error('Metadata is required for context processing');
   }
 
-  // Validate and extract essential fields
+  // Pass through all metadata fields now that they're clean
+  // The AI can use any of this context for better disambiguation
   const simplified = {
+    ...metadata,
+    // Ensure critical fields have defaults
     title: metadata.title || 'Unknown Document',
-    url: metadata.url || 'Unknown URL',
-    description: metadata.description || ''
+    url: metadata.url || 'Unknown URL'
   };
 
   // Ensure we have at least a title or URL for context
@@ -252,41 +254,44 @@ function createWindowRequest(window, metadata, docId, aiConfig) {
   const useSimplifiedPrompt = isSimplifiedPromptModel(aiConfig);
   const simplifiedMetadata = simplifyMetadata(metadata);
 
+  // Debug log the metadata being used
+  debugLogger.ai(`Creating prompt with metadata: author="${simplifiedMetadata.author}", org="${simplifiedMetadata.authorOrganization}"`);
+  
   let prompt;
   if (useSimplifiedPrompt) {
     // Simplified prompt for models like GPT-4o-mini - NO JSON for better results
-    prompt = `Add [[clarifications]] to make paragraphs understandable when read in isolation.
+    prompt = `You must ONLY add clarifications using information EXPLICITLY STATED in this specific document.
 
-Document: "${simplifiedMetadata.title}"
+FORBIDDEN - DO NOT DO ANY OF THESE:
+❌ NO definitions: "PC [[personal computer]]" - WRONG!
+❌ NO locations: "S̱híráz [[a city in Iran]]" - WRONG!
+❌ NO explanations: "controversy [[disagreement]]" - WRONG!
+❌ NO descriptions: "Lotus Temple [[a Bahá'í House of Worship]]" - WRONG!
+❌ NO general knowledge: "Dawn-Breakers [[a Bahá'í historical text]]" - WRONG!
+❌ NO duplicates in same paragraph
 
-RULE: Only clarify pronouns and vague references. Add [[complete phrases]], never [[single words]].
+ONLY ALLOWED:
+✓ Use the document's own words/names
+✓ Use metadata values (author, title, etc.)
+✓ Reference earlier parts of THIS document
 
-CLARIFY THESE:
-• I/me/my → I [[the author]]
-• we/us/our → we [[the development team]]
-• it → it [[the Ocean software]]
-• this/that → this [[specific thing it refers to]]
-• them/they (objects) → them [[the CDs/software/etc]]
-• vague: "the project" → the project [[Ocean software]]
+EXAMPLES FROM THIS DOCUMENT:
+- "I" → "I [[Chad Jones]]" (using author from metadata)
+- "this" → "this [[Ocean project]]" (if document calls it "Ocean project")
+- "we" → "we [[the Ocean team]]" (ONLY if document mentions "Ocean team")
 
-NEVER CLARIFY:
-• Proper nouns (Bahá'í, Ocean, Google, Mr. Shah)
-• Clear terms that don't need context
-• Adverbs/adjectives (never "successfully")
-• Incomplete phrases (never just [[the]])
-
-EXAMPLES:
-✓ "This was fantastic" → "This [[Ocean software project]] was fantastic"
-✓ "We distributed them" → "We distributed them [[the Ocean CDs]]"
-✗ "successfully won" → "[[successfully]] won" (WRONG - no adverbs)
-
-KEY: Focus on pronouns (I, we, it, they, them, this, that) and truly vague nouns.
+CRITICAL: If the document doesn't explicitly state what something is, leave it alone!
 
 ========= DOCUMENT META-DATA:
 
-Title: ${simplifiedMetadata.title}
-URL: ${simplifiedMetadata.url}
-Description: ${simplifiedMetadata.description}
+${Object.entries(simplifiedMetadata)
+  .filter(([, value]) => value && value !== '')
+  .map(([key, value]) => {
+    // Format key nicely (camelCase to Title Case)
+    const formattedKey = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()).trim();
+    return `${formattedKey}: ${value}`;
+  })
+  .join('\n')}
 
 ========= PREVIOUS CONTEXT:
 
@@ -302,36 +307,41 @@ Return JSON with "enhanced_blocks" containing the same text with [[clarification
 Example: {"enhanced_blocks": {"0": "Text with [[clarification]]...", "1": "Another text..."}}`;
   } else {
     // More detailed prompt for advanced models
-    prompt = `You are enhancing paragraphs for a search index where each will be viewed independently.
+    prompt = `STRICT DISAMBIGUATION RULES - VIOLATIONS WILL BE REJECTED
 
-TASK: Insert [[context]] after pronouns and unclear references so each paragraph stands alone.
+You MUST follow these rules EXACTLY:
 
-RULES:
-1. NEVER replace words - only INSERT [[clarification]] after them
-2. Process ALL paragraphs in the input JSON
-3. Use information from PREVIOUS CONTEXT section below
+1. ONLY use information EXPLICITLY WRITTEN in this document
+2. NEVER add knowledge from outside this document
+3. NEVER define or explain what things are
+4. NEVER duplicate clarifications in the same paragraph
 
-DISAMBIGUATE:
-- All pronouns (I, me, my, we, us, our, he, him, his, she, her, they, them, their, it, its)
-- Demonstratives (this, that, these, those)
-- Vague references ("the project" when you know it's "Ocean software")
+❌ FORBIDDEN EXAMPLES (DO NOT DO):
+- "PC" → "PC [[personal computer]]" - WRONG! That's a definition
+- "S̱híráz" → "S̱híráz [[a city in Iran]]" - WRONG! That's external knowledge
+- "Lotus Temple" → "Lotus Temple [[a Bahá'í House of Worship]]" - WRONG! Not from document
+- "controversy" → "controversy [[disagreement]]" - WRONG! That's an explanation
+- "Dawn-Breakers" → "Dawn-Breakers [[a Bahá'í text]]" - WRONG! General knowledge
 
-EXAMPLES:
-"I began my journey" → "I [[the author]] began my [[the author's]] journey"
-"This was successful" → "This [[the Ocean project]] was successful"
-"We achieved our goals" → "We [[the development team]] achieved our [[the team's]] goals"
+✓ ONLY ALLOWED:
+- "I" → "I [[Chad Jones]]" - OK, using author from metadata
+- "this" → "this [[Ocean project]]" - OK, if document calls it "Ocean project"
+- "we" → "we [[the Ocean team]]" - OK, ONLY if document mentions "Ocean team"
 
-DO NOT: Replace words ("My journey" → "The author's journey" ✗)
-DO: Insert after words ("My [[the author's]] journey" ✓)
+REMEMBER: Leave it alone if the document doesn't explicitly say what it is!
 
 Return JSON: {"enhanced_blocks": {"0": "text with [[context]]", "1": "text with [[context]]", ...}}
 
 ========= DOCUMENT META-DATA:
 
-Title: ${simplifiedMetadata.title}
-URL: ${simplifiedMetadata.url}
-Description: ${simplifiedMetadata.description}
-Description: ${simplifiedMetadata.description}
+${Object.entries(simplifiedMetadata)
+  .filter(([, value]) => value && value !== '')
+  .map(([key, value]) => {
+    // Format key nicely (camelCase to Title Case)
+    const formattedKey = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()).trim();
+    return `${formattedKey}: ${value}`;
+  })
+  .join('\n')}
 
 ========= PREVIOUS CONTEXT:
 

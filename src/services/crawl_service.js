@@ -948,8 +948,18 @@ export class CrawlService {
 
       // Generate frontmatter
       const frontmatter = Object.entries(enhancedMetadata)
-        .filter(([key, value]) => value !== null && value !== undefined && value !== '')
-        .map(([key, value]) => `${key}: ${typeof value === 'string' ? JSON.stringify(value) : value}`)
+        .filter(([key, value]) => value !== null && value !== undefined && value !== '' && 
+                                 !(Array.isArray(value) && value.length === 0))
+        .map(([key, value]) => {
+          if (Array.isArray(value)) {
+            // Format arrays as YAML lists
+            return `${key}:\n${value.map(item => `  - ${JSON.stringify(item)}`).join('\n')}`;
+          } else if (typeof value === 'string') {
+            return `${key}: ${JSON.stringify(value)}`;
+          } else {
+            return `${key}: ${value}`;
+          }
+        })
         .join('\n');
 
       const fullMarkdown = `---\n${frontmatter}\n---\n\n${markdown}`;
@@ -989,6 +999,9 @@ export class CrawlService {
       // Write the markdown file
       fs.writeFileSync(filePath, fullMarkdown, 'utf8');
       logger.crawl(`Saved: ${filePath}`);
+
+      // Extract and download PDFs from the page
+      await this.downloadPDFsFromPage($, normalizedUrl, outputPath);
 
       // Calculate content hash
       const contentHash = this.calculateContentHash(markdown);
@@ -2388,6 +2401,94 @@ ${markdownContent}`;
     } catch (error) {
       logger.warn(`Error processing sitemaps for ${domain}: ${error.message}`);
       return [];
+    }
+  }
+
+  /**
+   * Download searchable documents (PDFs, Word docs) found on a page
+   * @param {Object} $ - Cheerio instance of the page
+   * @param {string} pageUrl - URL of the page containing documents
+   * @param {string} outputPath - Base output directory
+   * @private
+   */
+  async downloadPDFsFromPage($, pageUrl, outputPath) {
+    try {
+      // Find all searchable document links (PDFs, Word docs, etc.)
+      const documentLinks = [];
+      // Only download document types that contain searchable text content
+      const downloadableExtensions = ['.pdf', '.doc', '.docx', '.odt', '.rtf'];
+      
+      $('a[href]').each((i, el) => {
+        const href = $(el).attr('href');
+        if (href) {
+          // Check if the link has a searchable document extension
+          const hasDownloadableExt = downloadableExtensions.some(ext => 
+            href.toLowerCase().endsWith(ext) || href.toLowerCase().includes(ext + '?')
+          );
+          
+          if (hasDownloadableExt) {
+            const linkText = $(el).text().trim();
+            documentLinks.push({ url: href, text: linkText });
+          }
+        }
+      });
+
+      if (documentLinks.length === 0) {
+        return; // No downloadable documents found
+      }
+
+      logger.info(`[DOCS] Found ${documentLinks.length} searchable documents on ${pageUrl}`);
+
+      // Create documents directory if it doesn't exist
+      const documentsDir = path.join(outputPath, 'documents');
+      if (!fs.existsSync(documentsDir)) {
+        fs.mkdirSync(documentsDir, { recursive: true });
+      }
+
+      // Download each document
+      for (const docInfo of documentLinks) {
+        try {
+          // Resolve absolute URL
+          const absoluteUrl = new URL(docInfo.url, pageUrl).href;
+          
+          // Skip if we've already downloaded this document
+          const urlHash = this.calculateContentHash(absoluteUrl);
+          const fileExt = path.extname(new URL(absoluteUrl).pathname) || '.pdf';
+          const expectedFilename = `doc-${urlHash}${fileExt}`;
+          const expectedPath = path.join(documentsDir, expectedFilename);
+          
+          if (fs.existsSync(expectedPath)) {
+            logger.info(`[DOCS] Already downloaded: ${expectedFilename}`);
+            continue;
+          }
+
+          logger.info(`[DOCS] Downloading: ${absoluteUrl}`);
+          
+          // Download the PDF using fileService
+          const result = await this.fileService.downloadDocument(absoluteUrl, pageUrl, outputPath);
+          
+          if (result.success) {
+            logger.info(`[DOCS] Downloaded successfully: ${result.filename}`);
+            
+            // Create a metadata file for the document
+            const metadataPath = result.fullPath.replace(/\.[^.]+$/, '-metadata.json');
+            const pdfMetadata = {
+              sourceUrl: absoluteUrl,
+              pageUrl: pageUrl,
+              linkText: docInfo.text,
+              downloadedAt: new Date().toISOString(),
+              filename: result.filename
+            };
+            fs.writeFileSync(metadataPath, JSON.stringify(pdfMetadata, null, 2));
+          } else {
+            logger.warn(`[DOCS] Failed to download ${absoluteUrl}: ${result.error}`);
+          }
+        } catch (error) {
+          logger.error(`[DOCS] Error downloading document ${docInfo.url}: ${error.message}`);
+        }
+      }
+    } catch (error) {
+      logger.error(`[DOCS] Error in downloadPDFsFromPage: ${error.message}`);
     }
   }
 }

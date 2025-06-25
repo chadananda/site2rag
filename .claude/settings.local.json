@@ -118,7 +118,10 @@
       "Bash(DEBUG=ai,context npm run site2rag -- https://bahai-education.org/the-ocean-adventure --output tests/tmp/debug-ai-test --limit 1 --use_gpt4o_mini 2 >& 1)",
       "Bash(DEBUG=*)",
       "Bash(gh pr:*)",
-      "Bash(git fetch:*)"
+      "Bash(git fetch:*)",
+      "Bash(git tag:*)",
+      "Bash(git push:*)",
+      "Bash(SITE2RAG_DEBUG=ai node tests/tmp/scripts/test-ai-disambiguation.js 2 >& 1)"
     ],
     "deny": []
   }

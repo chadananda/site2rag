@@ -77,15 +77,22 @@ services/fetch_service.js
 
 services/content_service.js
 ├── ContentService.processHtml(html, url)           [AI calls + complex logic]
+├── ContentService.extractMetadata($) → metadata    [JSON-LD + meta extraction]
+├── ContentService.extractJsonLd($) → jsonLdData    [Structured data parsing]
+├── ContentService.extractAuthor($, ...) → string   [Author fallback chain]
+├── ContentService.extractKeywords(...) → array     [Keyword aggregation]
 ├── scoreContentElement($, element) → number        [Complex heuristics]
 ├── isLikelyNavigationOrBoilerplate($, el) → bool  [Complex heuristics]
 ├── handleFrameworkWrappers($, body, opts) → obj    [Complex DOM analysis]
-└── extractMainContent($, body, opts) → element     [Complex extraction]
+├── extractMainContent($, body, opts) → element     [Complex extraction]
+└── cleanupContent($, content, opts) → element      [Remove scripts/styles]
 
 services/crawl_service.js
 ├── FastChangeDetector.checkForChanges()            [DATABASE + NETWORK]
 ├── FastChangeDetector.generateConditionalHeaders() [HTTP optimization]
-└── CrawlService.crawlSite(startUrl) → urls[]       [ORCHESTRATES EVERYTHING]
+├── CrawlService.crawlSite(startUrl) → urls[]       [ORCHESTRATES EVERYTHING]
+├── CrawlService.downloadPDFsFromPage(links, url)   [Document download logic]
+└── CrawlService.isBinaryContentType(type) → bool   [Binary detection]
 ```
 
 ---

@@ -4,9 +4,9 @@ import fs from 'fs';
 import path from 'path';
 
 const DEFAULT_AI_CONFIG = {
-  provider: 'ollama',
-  host: 'http://localhost:11434',
-  model: 'qwen2.5:14b'
+  provider: 'anthropic',
+  model: 'claude-3-5-haiku-20241022',
+  timeout: 20000
 };
 
 function loadJsonIfExists(file) {
@@ -49,6 +49,13 @@ export function loadAIConfig(projectRoot = process.cwd()) {
   if (process.env.AI_PROVIDER) config.provider = process.env.AI_PROVIDER;
   if (process.env.AI_HOST) config.host = process.env.AI_HOST;
   if (process.env.AI_MODEL) config.model = process.env.AI_MODEL;
+
+  // Add API key for Anthropic provider
+  if (config.provider === 'anthropic' && process.env.ANTHROPIC_API_KEY) {
+    config.apiKey = process.env.ANTHROPIC_API_KEY;
+  } else if (config.provider === 'openai' && process.env.OPENAI_API_KEY) {
+    config.apiKey = process.env.OPENAI_API_KEY;
+  }
 
   return config;
 }
