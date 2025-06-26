@@ -62,7 +62,7 @@ export function loadAIConfig(projectRoot = process.cwd()) {
     
     // Set default timeout if not specified
     if (!config.timeout) {
-      config.timeout = 20000;
+      config.timeout = 60000; // Increase to 60 seconds for large prompts
     }
   }
 
@@ -85,7 +85,7 @@ export function getLLMConfigFromFlags(options) {
       provider: 'anthropic',
       model: 'claude-3-5-haiku-20241022',
       apiKey: process.env.ANTHROPIC_API_KEY,
-      timeout: 20000
+      timeout: 60000
     };
   }
 
@@ -97,7 +97,7 @@ export function getLLMConfigFromFlags(options) {
       provider: 'openai',
       model: 'gpt-4o',
       apiKey: process.env.OPENAI_API_KEY,
-      timeout: 30000
+      timeout: 60000
     };
   }
 
@@ -107,7 +107,7 @@ export function getLLMConfigFromFlags(options) {
       provider: 'ollama',
       host: 'http://localhost:11434',
       model: 'qwen2.5:14b',
-      timeout: 20000
+      timeout: 60000
     };
   }
 

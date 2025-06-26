@@ -60,8 +60,8 @@ export class ProgressService {
     // Get terminal width for full-width progress bar
     const terminalWidth = process.stdout.columns || 80;
     // Use 2/3 of available width for the progress bar to align with header
-    const minBarSize = 30; // Minimum size for small terminals
-    const maxBarSize = Math.floor(((terminalWidth - 25) * 2) / 3); // 2/3 of available width
+    const minBarSize = 35; // Minimum size for small terminals (increased by 15%)
+    const maxBarSize = Math.floor(((terminalWidth - 25) * 2) / 3 * 1.15); // 2/3 of available width + 15%
     const barSize = Math.max(minBarSize, maxBarSize);
 
     // Create multibar container with simplified format
@@ -158,7 +158,7 @@ export class ProgressService {
 
     // Create a single-bar instance instead of multibar to avoid double line issues
     const terminalWidth = process.stdout.columns || 80;
-    const barSize = Math.max(30, Math.floor(((terminalWidth - 25) * 2) / 3));
+    const barSize = Math.max(35, Math.floor(((terminalWidth - 25) * 2) / 3 * 1.15));
 
     this.multibar = new cliProgress.SingleBar(
       {
@@ -258,13 +258,12 @@ export class ProgressService {
         chalk.hex('#FF8C00')(`Version ${this.version} | https://github.com/chadananda/site${chalk.yellow('2')}rag`),
       {
         padding: 1,
-        margin: 1,
+        margin: 0, // Remove margin to align with progress bars
         borderStyle: 'double',
         borderColor: 'red',
         backgroundColor: '#111',
         textAlignment: 'center', // Center text inside the box
-        float: 'left', // Keep box left-aligned
-        align: 'center'
+        float: 'left' // Keep box left-aligned
       }
     );
 
@@ -301,7 +300,7 @@ export class ProgressService {
 
     // Create new progress bar for processing
     const terminalWidth = process.stdout.columns || 80;
-    const barSize = Math.max(30, Math.floor(((terminalWidth - 25) * 2) / 3));
+    const barSize = Math.max(35, Math.floor(((terminalWidth - 25) * 2) / 3 * 1.15));
 
     this.multibar = new cliProgress.SingleBar(
       {

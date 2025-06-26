@@ -157,9 +157,12 @@ export class SiteProcessor {
     this.visited = new Set();
     this.found = [];
 
-    // Start parallel AI processor if enhancement is enabled
+    // Enable parallel AI processor with proper database coordination
     let parallelProcessor = null;
+    const ENABLE_PARALLEL_PROCESSING = true; // Re-enabled with database task coordination
+    
     if (
+      ENABLE_PARALLEL_PROCESSING &&
       this.options.enhancement &&
       this.options.aiConfig &&
       this.options.aiConfig.provider
@@ -262,19 +265,15 @@ export class SiteProcessor {
         // Check how many documents need processing from this crawl session only
         const crawledUrls = Array.from(this.crawlService.foundUrls);
         const placeholders = crawledUrls.map(() => '?').join(',');
-        const rawDocs = placeholders ? 
-          dbInstance.db.prepare(`SELECT url FROM pages WHERE content_status = 'raw' AND url IN (${placeholders})`).all(...crawledUrls) :
+        const unprocessedDocs = placeholders ? 
+          dbInstance.db.prepare(`SELECT url FROM pages WHERE content_status IN ('raw', 'failed') AND url IN (${placeholders})`).all(...crawledUrls) :
           [];
 
-        if (rawDocs.length > 0) {
-          logger.info(`[CONTEXT] Found ${rawDocs.length} pages from this crawl to process`);
-        } else {
-          logger.info(`[CONTEXT] All pages already processed by parallel processor`);
-        }
-
-        if (rawDocs.length > 0) {
+        if (unprocessedDocs.length > 0) {
+          logger.info(`[CONTEXT] Found ${unprocessedDocs.length} unprocessed pages from this crawl`);
+          
           // Estimate ~5 windows per document as initial guess (will update dynamically)
-          const estimatedRequests = rawDocs.length * 5;
+          const estimatedRequests = unprocessedDocs.length * 5;
           
           // Pass the AI config to display provider/model info
           this.crawlService.progressService.startProcessing(estimatedRequests, this.options.aiConfig);
@@ -289,6 +288,8 @@ export class SiteProcessor {
 
           // Complete processing progress
           this.crawlService.progressService.completeProcessing();
+        } else {
+          logger.info(`[CONTEXT] All pages already processed by parallel processor`);
         }
 
         // Log insertion tracking summary if test mode was enabled

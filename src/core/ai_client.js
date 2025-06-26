@@ -141,7 +141,7 @@ async function makeAICall(prompt, aiConfig, expectPlainText = false) {
       model,
       prompt,
       stream: false,
-      format: 'json', // Request JSON format
+      ...(expectPlainText ? {} : {format: 'json'}), // Only request JSON format when not expecting plain text
       options: {
         temperature: 0.1, // Lower temperature for more structured output
         top_p: 0.9,
@@ -199,6 +199,11 @@ async function makeAICall(prompt, aiConfig, expectPlainText = false) {
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error(`AI call timed out after ${timeoutMs}ms`)), timeoutMs);
     });
+
+    // Log large prompts for debugging
+    if (prompt.length > 5000) {
+      debugLogger.ai(`[ANTHROPIC] Large prompt detected: ${prompt.length} chars`);
+    }
 
     // Create the fetch promise
     const fetchPromise = fetch('https://api.anthropic.com/v1/messages', {

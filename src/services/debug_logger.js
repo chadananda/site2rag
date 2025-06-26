@@ -7,6 +7,9 @@ export class DebugLogger {
     this.isTestMode = process.env.NODE_ENV === 'test';
     this.isDebugMode = process.env.DEBUG === 'true' || process.env.NODE_ENV === 'development';
     this.isProduction = !this.isTestMode && !this.isDebugMode;
+    
+    // Support namespace-based debugging like DEBUG=ai
+    this.debugNamespaces = process.env.DEBUG ? process.env.DEBUG.split(',').map(n => n.trim().toLowerCase()) : [];
   }
 
   /**
@@ -15,7 +18,13 @@ export class DebugLogger {
    * @param {string} message - Log message
    */
   debug(category, message) {
-    if (this.isTestMode || this.isDebugMode) {
+    const categoryLower = category.toLowerCase();
+    const shouldLog = this.isTestMode || 
+                     this.isDebugMode || 
+                     this.debugNamespaces.includes(categoryLower) ||
+                     this.debugNamespaces.includes('*');
+                     
+    if (shouldLog) {
       console.log(`[${category}] ${message}`);
     }
   }

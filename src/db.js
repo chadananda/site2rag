@@ -423,6 +423,90 @@ export class CrawlDB {
   }
 
   /**
+   * Atomically claim pages for AI processing
+   * @param {number} limit - Maximum number of pages to claim
+   * @param {string} processorId - Unique identifier for the processor
+   * @returns {Array} Array of claimed page objects
+   */
+  claimPagesForProcessing(limit = 5, processorId = 'default') {
+    // Use a transaction to ensure atomicity
+    const transaction = this.db.transaction(() => {
+      // Find unclaimed raw pages
+      const pages = this.db.prepare(`
+        SELECT url, file_path, title 
+        FROM pages 
+        WHERE content_status = 'raw' 
+        AND file_path IS NOT NULL
+        LIMIT ?
+      `).all(limit);
+      
+      if (pages.length === 0) return [];
+      
+      // Mark them as processing with processor ID
+      const urls = pages.map(p => p.url);
+      const placeholders = urls.map(() => '?').join(',');
+      const timestamp = new Date().toISOString();
+      
+      this.db.prepare(`
+        UPDATE pages 
+        SET content_status = 'processing',
+            last_context_attempt = ?,
+            context_error = ?
+        WHERE url IN (${placeholders})
+      `).run(timestamp, `processor:${processorId}`, ...urls);
+      
+      return pages;
+    });
+    
+    return transaction();
+  }
+
+  /**
+   * Mark a page as successfully processed
+   * @param {string} url - Page URL
+   */
+  markPageContexted(url) {
+    this.db.prepare(`
+      UPDATE pages 
+      SET content_status = 'contexted',
+          context_error = NULL
+      WHERE url = ?
+    `).run(url);
+  }
+
+  /**
+   * Mark a page as failed processing
+   * @param {string} url - Page URL
+   * @param {string} error - Error message
+   */
+  markPageFailed(url, error) {
+    this.db.prepare(`
+      UPDATE pages 
+      SET content_status = 'failed',
+          context_error = ?
+      WHERE url = ?
+    `).run(error, url);
+  }
+
+  /**
+   * Reset stuck processing pages (for recovery)
+   * @param {number} staleMinutes - Minutes after which processing is considered stuck
+   */
+  resetStuckProcessing(staleMinutes = 10) {
+    const staleTime = new Date(Date.now() - staleMinutes * 60 * 1000).toISOString();
+    
+    const result = this.db.prepare(`
+      UPDATE pages 
+      SET content_status = 'raw',
+          context_error = 'reset_from_stuck_processing'
+      WHERE content_status = 'processing'
+      AND last_context_attempt < ?
+    `).run(staleTime);
+    
+    return result.changes;
+  }
+
+  /**
    * Close the database connection
    */
   close() {

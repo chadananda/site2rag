@@ -96,7 +96,24 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
     db = dbOrPath;
   }
 
-  const rawDocs = db.db.prepare("SELECT url, file_path, title FROM pages WHERE content_status = 'raw'").all();
+  // Reset any stuck processing pages first
+  const resetCount = db.resetStuckProcessing(5);
+  if (resetCount > 0) {
+    logger.info(`[CONTEXT] Reset ${resetCount} stuck processing pages before batch processing`);
+  }
+
+  // Use the database's atomic claim mechanism for batch processing
+  const batchProcessorId = `batch-${Date.now()}`;
+  const allRawPages = [];
+  
+  // Claim pages in batches until no more are available
+  while (true) {
+    const batch = db.claimPagesForProcessing(50, batchProcessorId);
+    if (batch.length === 0) break;
+    allRawPages.push(...batch);
+  }
+  
+  const rawDocs = allRawPages;
   
   if (process.env.NODE_ENV === 'test') {
     logger.info(`[CONTEXT] Starting simplified context enhancement for ${rawDocs.length} documents`);
@@ -192,7 +209,7 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
       await fs.promises.writeFile(metadata.filePath, finalMarkdown, 'utf8');
 
       // Update the database to mark as processed
-      db.db.prepare('UPDATE pages SET content_status = ? WHERE url = ?').run('contexted', docId);
+      db.markPageContexted(docId);
 
       if (process.env.NODE_ENV === 'test') {
         const insertionsCount = (contextedMarkdown.match(/\[\[.*?\]\]/g) || []).length;
@@ -200,6 +217,8 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
       }
     } catch (err) {
       console.error(`[CONTEXT] Failed writing results for ${docId}:`, err.message);
+      // Mark as failed so it can be retried
+      db.markPageFailed(docId, err.message);
     }
   }
 

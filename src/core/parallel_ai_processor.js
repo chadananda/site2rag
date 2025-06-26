@@ -15,9 +15,9 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
   let isRunning = false;
   let intervalId = null;
   let processedUrls = new Set();
-  let currentlyProcessing = new Set();
   let totalAIRequests = 0;
   let completedAIRequests = 0;
+  const processorId = `parallel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
   async function processPage(page) {
     try {
@@ -92,8 +92,8 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
 
         await fs.promises.writeFile(page.file_path, finalMarkdown, 'utf8');
 
-        // Update database
-        db.db.prepare('UPDATE pages SET content_status = ? WHERE url = ?').run('contexted', page.url);
+        // Update database - mark as successfully processed
+        db.markPageContexted(page.url);
 
         const insertionsCount = contextedMarkdown.match(/\[\[.*?\]\]/g)?.length || 0;
         logger.info(`[AI-PARALLEL] Enhanced ${page.url} with ${insertionsCount} insertions`);
@@ -104,6 +104,8 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
       return false;
     } catch (error) {
       logger.error(`[AI-PARALLEL] Error processing ${page.url}: ${error.message}`);
+      // Mark as failed so it can be retried later
+      db.markPageFailed(page.url, error.message);
       return false;
     }
   }
@@ -112,37 +114,27 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
     if (!isRunning) return;
 
     try {
-      // Find new raw pages that haven't been processed yet
-      const rawPages = db.db
-        .prepare(
-          `
-        SELECT url, file_path, title 
-        FROM pages 
-        WHERE content_status = 'raw' 
-        AND file_path IS NOT NULL
-        LIMIT 5
-      `
-        )
-        .all();
+      // Reset any stuck processing pages first (older than 5 minutes)
+      const resetCount = db.resetStuckProcessing(5);
+      if (resetCount > 0) {
+        logger.info(`[AI-PARALLEL] Reset ${resetCount} stuck processing pages`);
+      }
 
-      // Filter out pages we've already processed or are currently processing
-      const newPages = rawPages.filter(page => !processedUrls.has(page.url) && !currentlyProcessing.has(page.url));
+      // Atomically claim pages for processing
+      const claimedPages = db.claimPagesForProcessing(5, processorId);
 
-      if (newPages.length > 0) {
-        logger.info(`[AI-PARALLEL] Found ${newPages.length} new pages to process`);
-
-        // Mark as processing to avoid duplicate work
-        newPages.forEach(page => currentlyProcessing.add(page.url));
+      if (claimedPages.length > 0) {
+        logger.info(`[AI-PARALLEL] Claimed ${claimedPages.length} pages for processing`);
 
         // Process each page independently
-        const promises = newPages.map(async page => {
+        const promises = claimedPages.map(async page => {
           try {
             const success = await processPage(page);
             if (success) {
               processedUrls.add(page.url);
             }
-          } finally {
-            currentlyProcessing.delete(page.url);
+          } catch (error) {
+            logger.error(`[AI-PARALLEL] Failed to process ${page.url}: ${error.message}`);
           }
         });
 
@@ -185,7 +177,7 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
     getStats() {
       return {
         processed: processedUrls.size,
-        currentlyProcessing: currentlyProcessing.size,
+        processorId,
         isRunning
       };
     }

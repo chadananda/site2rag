@@ -71,7 +71,7 @@ const WINDOW_SIZES = {
 // - 1500/800: 1 disambiguation (quality degrades)
 
 // Content filtering thresholds
-const MIN_BLOCK_CHARS = process.env.SITE2RAG_MIN_BLOCK_CHARS ? parseInt(process.env.SITE2RAG_MIN_BLOCK_CHARS) : 100; // Skip very short blocks to save tokens
+const MIN_BLOCK_CHARS = process.env.SITE2RAG_MIN_BLOCK_CHARS ? parseInt(process.env.SITE2RAG_MIN_BLOCK_CHARS) : 20; // Skip only extremely short blocks (less than ~3 words)
 
 
 /**
@@ -131,18 +131,29 @@ export function cleanTextForContext(text) {
 
 /**
  * Create sliding windows from document blocks
- * Each window has context from previous window and new blocks to process
+ * Each window is completely independent with its own context for parallel processing
  * @param {Array} blocks - Document blocks
  * @returns {Array} Windows with context and blocks to process
  */
 function createSlidingWindows(blocks) {
   const windows = [];
   let processedBlockIndex = 0;
-  let previousText = ''; // Accumulate text for context
+  const globalProcessedBlocks = new Set(); // Track all blocks that have been added to any window
 
   // Use optimal window sizes for all models
   const CONTEXT_WORDS = WINDOW_SIZES.MINI.context;
   const PROCESS_WORDS = WINDOW_SIZES.MINI.process;
+
+  // Pre-process all blocks to create a cleaned text array for context generation
+  const allCleanedBlocks = blocks.map((block, idx) => {
+    const blockText = typeof block === 'string' ? block : block.text || block;
+    return {
+      original: blockText,
+      cleaned: cleanTextForContext(blockText),
+      index: idx,
+      words: blockText.split(/\s+/).length
+    };
+  });
 
   while (processedBlockIndex < blocks.length) {
     // Collect blocks for this window
@@ -150,48 +161,58 @@ function createSlidingWindows(blocks) {
     const blockIndices = []; // Track which original indices we're processing
     let windowWords = 0;
     const startIndex = processedBlockIndex;
+    let currentWindowIndex = processedBlockIndex;
 
-    while (processedBlockIndex < blocks.length && windowWords < PROCESS_WORDS) {
-      const block = blocks[processedBlockIndex];
+    while (currentWindowIndex < blocks.length && windowWords < PROCESS_WORDS) {
+      const block = blocks[currentWindowIndex];
       const blockText = typeof block === 'string' ? block : block.text || block;
 
-      // Skip headers (lines starting with #) from processing but include in context
+      // Skip headers (lines starting with #) from processing but not from iteration
       if (blockText.trim().startsWith('#')) {
-        // Add cleaned version to context but don't process
-        previousText += ' ' + cleanTextForContext(blockText);
-        processedBlockIndex++;
+        currentWindowIndex++;
         continue;
       }
 
       // Skip code blocks entirely (they don't need disambiguation)
       if (blockText.trim().startsWith('```') || /^(\s{4}|\t)/.test(blockText)) {
-        // Add placeholder to context for continuity
-        previousText += ' [code block] ';
-        processedBlockIndex++;
+        currentWindowIndex++;
         continue;
       }
 
       // Skip empty blocks and blocks that are too short
       if (blockText.trim().length < MIN_BLOCK_CHARS) {
-        // Still add cleaned version to context for continuity
-        previousText += ' ' + cleanTextForContext(blockText);
-        processedBlockIndex++;
+        debugLogger.ai(`Skipping short block (${blockText.trim().length} chars): "${blockText.substring(0, 50)}..."`);
+        currentWindowIndex++;
         continue;
       }
 
       // Track original index - use originalIndex if available (from filtered blocks), otherwise use current index
-      const originalIdx = block.originalIndex !== undefined ? block.originalIndex : processedBlockIndex;
+      const originalIdx = block.originalIndex !== undefined ? block.originalIndex : currentWindowIndex;
       const key = String(originalIdx);
+      
+      // Check if this block was already processed in a previous window
+      if (windowBlocks[key]) {
+        debugLogger.ai(`WARNING: Block ${originalIdx} already in current window!`);
+      }
+      
+      // Check if this block was processed in any previous window
+      if (globalProcessedBlocks.has(originalIdx)) {
+        debugLogger.ai(`ERROR: Block ${originalIdx} was already processed in a previous window! This will cause duplicate processing.`);
+      }
+      globalProcessedBlocks.add(originalIdx);
+      
       windowBlocks[key] = blockText;
       blockIndices.push(originalIdx);
 
       windowWords += blockText.split(/\s+/).length;
-      processedBlockIndex++;
+      currentWindowIndex++;
     }
 
-    // Skip empty windows but ensure we process remaining short blocks
+    // Update processedBlockIndex to continue from where we left off
+    processedBlockIndex = currentWindowIndex;
+
+    // Skip empty windows
     if (Object.keys(windowBlocks).length === 0) {
-      // If we're not at the end, continue to next block
       if (processedBlockIndex < blocks.length) {
         processedBlockIndex++;
         continue;
@@ -199,37 +220,54 @@ function createSlidingWindows(blocks) {
       break;
     }
 
-    // Get context from previous text (last 1000 words)
-    const contextWords = previousText.split(/\s+/).filter(w => w.length > 0);
-    const contextStart = Math.max(0, contextWords.length - CONTEXT_WORDS);
-    const context = contextWords.slice(contextStart).join(' ');
+    // Build context independently for this window
+    // Include ALL text before the current window's start, up to CONTEXT_WORDS limit
+    let contextWords = [];
+    let wordCount = 0;
+    
+    // Work backwards from the start of the current window to build context
+    for (let i = startIndex - 1; i >= 0 && wordCount < CONTEXT_WORDS; i--) {
+      const cleanedBlock = allCleanedBlocks[i];
+      const blockWords = cleanedBlock.cleaned.split(/\s+/).filter(w => w.length > 0);
+      
+      // If adding this block would exceed the limit, only add partial
+      if (wordCount + blockWords.length > CONTEXT_WORDS) {
+        const wordsToTake = CONTEXT_WORDS - wordCount;
+        // Take the last N words from this block
+        contextWords.unshift(...blockWords.slice(-wordsToTake));
+        break;
+      } else {
+        contextWords.unshift(...blockWords);
+        wordCount += blockWords.length;
+      }
+    }
+
+    const context = contextWords.join(' ');
 
     // Create window
-    windows.push({
+    const newWindow = {
       windowIndex: windows.length,
       startBlockIndex: startIndex,
-      endBlockIndex: processedBlockIndex - 1,
+      endBlockIndex: currentWindowIndex - 1,
       blockIndices: blockIndices, // Store actual indices processed
-      context: context,
+      context: context || '(This is the beginning of the document)',
       blocks: windowBlocks,
       blockCount: Object.keys(windowBlocks).length,
       wordCount: windowWords
-    });
-
-    // Update previous text for next window's context
-    // Add cleaned version of the text we just processed
-    const processedText = Object.values(windowBlocks)
-      .map(block => cleanTextForContext(block))
-      .join(' ');
-
-    // More efficient context accumulation
-    const newContextWords = [...contextWords, ...processedText.split(/\s+/).filter(w => w.length > 0)];
-    // Keep only recent words for context
-    if (newContextWords.length > CONTEXT_WORDS * 2) {
-      previousText = newContextWords.slice(-CONTEXT_WORDS * 2).join(' ');
-    } else {
-      previousText = newContextWords.join(' ');
+    };
+    
+    // Debug log window details
+    debugLogger.ai(`Window ${newWindow.windowIndex}: Processing blocks ${blockIndices.join(', ')} (${newWindow.blockCount} blocks, ${newWindow.wordCount} words)`);
+    
+    // Log the first few words of each block for debugging
+    if (process.env.DEBUG) {
+      for (const [idx, text] of Object.entries(windowBlocks)) {
+        const preview = text.substring(0, 50).replace(/\n/g, ' ');
+        debugLogger.ai(`  Block ${idx}: "${preview}..."`);
+      }
     }
+    
+    windows.push(newWindow);
   }
 
   return windows;
@@ -279,49 +317,62 @@ function createWindowRequest(window, metadata, docId) {
   debugLogger.ai(`Creating prompt with metadata: author="${simplifiedMetadata.author}", org="${simplifiedMetadata.authorOrganization}"`);
 
   // Use the simplified prompt for all models - it's clearer and more effective
-  const prompt = `Add [[disambiguation]] to ambiguous references using ONLY information already stated in this document.
+  const prompt = `Add [[disambiguation]] to make each paragraph understandable when read in isolation.
 
-PURPOSE: Each paragraph will be indexed separately for search. When someone searches for "Sarah Chen mobile app", they should find relevant paragraphs even if the paragraph only says "I launched it yesterday." Without disambiguation, that paragraph would be unsearchable.
+CORE PRINCIPLE: If someone found just this paragraph in search results, would they understand what every reference means?
 
-GOAL: Make each paragraph standalone and searchable by resolving what pronouns and vague terms refer to.
+For each paragraph, ask yourself:
+1. What references would be unclear if this paragraph stood alone?
+2. Is the clarifying information available in the metadata or previous context?
+3. Is the context already clear from the paragraph itself?
+4. If unclear AND information exists, add [[the clarification]] after the ambiguous reference
 
-## TARGET FOR DISAMBIGUATION:
-- Pronouns: I, we, they, he, she, it, them
-- Demonstratives: this, that, these, those
-- Vague references: "the project", "the team", "the system", "the company"
-- Unclear antecedents where the referent is ambiguous
+## AMBIGUOUS REFERENCES TO CHECK:
+- Pronouns: I, we, they, he, she, it, them, our, my, his, her, their
+- Demonstratives: this, that, these, those  
+- Partial names: first names only, last names only
+- Generic terms: the project, the system, the company, the software
+- Proper nouns without context: product names, place names, organization names
+- Abbreviations and acronyms: FBI, API, CEO, NGO, etc.
 
-## DISAMBIGUATION RULES:
-1. Use ONLY names, entities, and concepts explicitly mentioned in THIS document
-2. Add [[clarification]] immediately after the ambiguous reference
-3. Disambiguate each reference only ONCE per paragraph
-4. Skip if the referent is clear from immediate context (within same paragraph)
-5. CRITICAL: If you cannot find the disambiguation in the provided document or it's meta-data, DO NOT disambiguate
-6. FORBIDDEN: Never use your general knowledge about what something is (e.g., knowing Google is a search engine)
+## HOW TO DISAMBIGUATE:
+Find what each ambiguous reference refers to in the context, then add that clarification:
+- Pronouns → [[who or what they refer to]]
+- Demonstratives → [[what they point to]]
+- Partial names → [[complete name if available]]
+- Generic terms → [[the specific thing being referenced]]
+- Unfamiliar proper nouns → [[brief description of what they are]]
+- Abbreviations/acronyms → [[full form]] if previously defined
 
-## DISAMBIGUATION TEST:
-Ask yourself: "If this paragraph were the only search result, would someone understand what/who is being referenced?"
+## IMPORTANT:
+- Use ONLY information from the document metadata and previous context
+- Add just enough context to make the reference clear
+- Preserve the original text exactly - only add [[clarifications]]
 
-If NO → Add disambiguation
-If YES → Leave as-is
+## CRITICAL RULES:
 
-## EXAMPLES:
-✓ "I completed the analysis" → "I [[Sarah Chen]] completed the analysis"
-   (Searcher needs to know WHO completed analysis)
-✓ "We launched it yesterday" → "We [[the dev team]] launched it [[the mobile app]] yesterday"
-   (Searcher needs to know WHO launched WHAT)
-✓ "This approach worked" → "This approach [[microservices architecture]] worked"
-   (Searcher needs to know WHICH approach)
-✓ "They approved our proposal" → "They [[the board]] approved our proposal [[for Q4 expansion]]"
-   (Searcher needs to know WHO approved WHAT proposal)
+1. **ONE DISAMBIGUATION PER TERM PER PARAGRAPH**
+   - Disambiguate each term ONLY on its FIRST occurrence
+   - WRONG: "I [[John]] went to the store. I [[John]] bought milk."
+   - RIGHT: "I [[John]] went to the store. I bought milk."
+
+2. **ONLY USE INFORMATION THAT EXISTS**
+   - ONLY use clarifications found in metadata or previous context
+   - NEVER guess or invent information
+   - If you can't find what something refers to, LEAVE IT ALONE
+   
+3. **CHECK IF CONTEXT IS ALREADY PRESENT**
+   - Before adding disambiguation, check if the paragraph already contains the needed context
+   - Don't add redundant information
 
 ## DO NOT DISAMBIGUATE:
-✗ Clear references: "Sarah completed her analysis" (already clear)
-✗ Immediately obvious: "The car broke down. It needs repair." (clear within paragraph)
-✗ External knowledge: Don't add info not in the document
-✗ Definitions: Don't explain what things are, only identify what specific thing is referenced
+- References that are already clear within the paragraph
+- When the needed context is already present in the same paragraph
+- Common knowledge (what a car is, what email means, etc.)
+- When clarifying information is NOT available in the provided context
+- NEVER invent or guess clarifications - if it's not explicitly stated, leave it alone
 
-Focus on using document content and meta-data to make ambiguous references searchable, not educational.
+Make every paragraph independently understandable while preserving exact original text.
 
 ========= DOCUMENT META-DATA:
 
@@ -414,7 +465,9 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
   }
 
   // Phase 2: Process all requests in parallel with rate limiting
-  const limiter = pLimit(10); // Process up to 10 requests concurrently
+  // Reduce concurrency for external APIs to avoid rate limits
+  const concurrency = aiConfig.provider === 'anthropic' ? 3 : 10;
+  const limiter = pLimit(concurrency); // Process requests with provider-specific concurrency
   const completedRequests = {count: 0}; // Use object for atomic-like updates
   const results = {};
 
@@ -447,6 +500,11 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
           debugLogger.ai(`Token savings estimate: ${tokenSavingsEstimate}% reduction`);
         }
 
+        // Add delay for Anthropic to avoid rate limits
+        if (aiConfig.provider === 'anthropic' && completedRequests.count > 0) {
+          await new Promise(resolve => setTimeout(resolve, 200)); // 200ms delay between requests
+        }
+        
         // Call AI with the request
         const response = await callAI(request.prompt, PlainTextResponseSchema, aiConfig);
         
@@ -580,6 +638,9 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
   const allResults = await Promise.all(requestPromises);
 
   // Phase 3: Reassemble results by document
+  // Also check for duplicate block processing
+  const processedBlocksMap = new Map(); // Track which blocks were processed in which windows
+  
   for (const result of allResults) {
     if (!results[result.docId]) {
       results[result.docId] = {
@@ -588,6 +649,18 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
       };
     }
     results[result.docId].windows.push(result);
+    
+    // Check for duplicate block processing
+    if (result.blockIndices) {
+      for (const blockIndex of result.blockIndices) {
+        const key = `${result.docId}-${blockIndex}`;
+        if (processedBlocksMap.has(key)) {
+          debugLogger.ai(`WARNING: Block ${blockIndex} in doc ${result.docId} processed in multiple windows: ${processedBlocksMap.get(key)} and ${result.windowIndex}`);
+        } else {
+          processedBlocksMap.set(key, result.windowIndex);
+        }
+      }
+    }
   }
 
   // Sort windows and create final block arrays
@@ -609,18 +682,19 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
 
     // Replace blocks that were enhanced
     for (const window of docResult.windows) {
-      // Get the enhanced blocks in order
-      const enhancedBlocksArray = Object.values(window.enhancedBlocks);
-
       // Use blockIndices to know which blocks to replace
-      if (window.blockIndices && window.blockIndices.length === enhancedBlocksArray.length) {
-        for (let i = 0; i < window.blockIndices.length; i++) {
-          const originalIndex = window.blockIndices[i];
-          finalBlocks[originalIndex] = enhancedBlocksArray[i];
+      if (window.blockIndices && window.enhancedBlocks) {
+        // Process blocks in the order they were sent (using blockIndices)
+        for (const originalIndex of window.blockIndices) {
+          const key = String(originalIndex);
+          if (window.enhancedBlocks[key]) {
+            debugLogger.ai(`Replacing block ${originalIndex} from window ${window.windowIndex}`);
+            finalBlocks[originalIndex] = window.enhancedBlocks[key];
+          }
         }
       } else {
         // Fallback if blockIndices is missing (shouldn't happen with new code)
-        debugLogger.ai(`Warning: blockIndices missing or mismatched for window ${window.windowIndex}`);
+        debugLogger.ai(`Warning: blockIndices or enhancedBlocks missing for window ${window.windowIndex}`);
         // Use the old logic as fallback
         let blockCounter = 0;
         for (

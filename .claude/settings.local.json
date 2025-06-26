@@ -125,7 +125,10 @@
       "Bash(SITE2RAG_DEBUG=ai npm run test:bahai-filtered 2 >& 1)",
       "Bash(SITE2RAG_DEBUG=ai node tests/tmp/scripts/test-ai-haiku.js 2 >& 1)",
       "Bash(SITE2RAG_DEBUG=ai rm -rf ./tests/tmp/sites/bahai-haiku-test2)",
-      "Bash(env)"
+      "Bash(env)",
+      "Bash(test:*)",
+      "Bash(ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\" npm run test:bahai 2 >& 1)",
+      "Bash(DEBUG=true npm run test:quicktest:haiku 2 >& 1)"
     ],
     "deny": []
   }
