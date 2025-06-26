@@ -251,17 +251,18 @@ Watch for these and stop immediately:
 
 ## AI Context Processing Configuration
 
-- **Batch Size**: 4000 words per batch (reduces network overhead when sending full context)
-- **Concurrency**: 10 parallel AI calls (no artificial delays)
-- **Minimum Block Size**: 200 characters (filters out trivial content)
-- **Window Overlap**: Fixed 1000 words (not percentage-based)
-- **Primary Provider**: GPT-4o-mini (optimized for speed/cost on disambiguation tasks)
-- **Fallback Order**: gpt4o-mini → gpt4o → opus4 → gpt4-turbo → ollama
-- **Caching Strategy**: Full document context cached per sliding window
-- **Return Format**: Only blocks requiring disambiguation are returned
+- **Window Size**: 1200 word context + 600 word processing windows (optimized for mini models)
+- **Concurrency**: 10 parallel AI calls with rate limiting
+- **Minimum Block Size**: 100 characters (filters out trivial content)
+- **Response Format**: Plain text with blank line separators (no JSON)
+- **Primary Provider**: Claude 3.5 Haiku (default, best for disambiguation)
+- **Fallback Order**: haiku → gpt4o-mini → gpt4o → opus4 → gpt4-turbo → ollama
+- **Validation**: Strict - only `[[context]]` insertions allowed, original text preserved
+- **Processing**: Headers and code blocks skipped, only content blocks enhanced
 
 ## Memories
 
 - Set crawling output to a subfolder of --output tests/tmp/sites/ like --output tests/tmp/sites/quicktest
 - Always use npm scripts and avoid bash so that you can run tests and diagnosis without permission or pause
 - **Never add files directly to the tests/tmp folder. All files go in the appropriate subfolder such as tests/tmp/scripts/**
+- Always use npm scripts for testing, for temporary tests, modify test:quicktest

@@ -162,17 +162,13 @@ export class SiteProcessor {
     if (
       this.options.enhancement &&
       this.options.aiConfig &&
-      (this.options.aiConfig.provider || this.options.aiConfig.type === 'fallback')
+      this.options.aiConfig.provider
     ) {
       const {createParallelAIProcessor} = await import('./core/parallel_ai_processor.js');
       const dbInstance = this.contentService.db;
 
       if (dbInstance) {
-        // Use the actual AI config (for fallback, use the first available LLM)
-        const actualAIConfig =
-          this.options.aiConfig.type === 'fallback' ? this.options.aiConfig.availableLLMs[0] : this.options.aiConfig;
-
-        parallelProcessor = createParallelAIProcessor(dbInstance, actualAIConfig);
+        parallelProcessor = createParallelAIProcessor(dbInstance, this.options.aiConfig);
         parallelProcessor.start();
         logger.info('[AI] Started parallel AI processor - will process pages as they are crawled');
       }
@@ -248,7 +244,7 @@ export class SiteProcessor {
       (this.options.aiConfig.provider || this.options.aiConfig.type === 'fallback')
     ) {
       try {
-        const {runContextEnrichment, insertionTracker} = await import('./core/context_processor.js');
+        const {runContextEnrichment, insertionTracker} = await import('./core/context_enrichment.js');
         const dbInstance = this.contentService.db;
 
         // Start insertion tracking session if test mode is enabled
@@ -256,12 +252,11 @@ export class SiteProcessor {
           insertionTracker.enabled = true;
           const sessionId = `${this.options.startUrl.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}`;
 
-          // Get the actual LLM config for tracking
-          const trackingConfig =
-            this.options.aiConfig.type === 'fallback' ? this.options.aiConfig.availableLLMs[0] : this.options.aiConfig;
-
-          insertionTracker.startSession(sessionId, trackingConfig);
-          logger.info(`Started LLM enhancement session: ${trackingConfig.provider}/${trackingConfig.model}`);
+          // Pass the aiConfig to tracking
+          insertionTracker.startSession(sessionId, this.options.aiConfig);
+          
+          // Log the config info
+          logger.info(`Started LLM enhancement session: ${this.options.aiConfig.provider}/${this.options.aiConfig.model}`);
         }
 
         // Check how many documents need processing (skip ones already processed by parallel processor)
@@ -276,7 +271,9 @@ export class SiteProcessor {
         if (rawDocs.length > 0) {
           // Estimate ~5 windows per document as initial guess (will update dynamically)
           const estimatedRequests = rawDocs.length * 5;
-          this.crawlService.progressService.startProcessing(estimatedRequests);
+          
+          // Pass the AI config to display provider/model info
+          this.crawlService.progressService.startProcessing(estimatedRequests, this.options.aiConfig);
 
           // Progress callback will receive actual AI request counts
           const progressCallback = (current, total) => {
@@ -284,18 +281,7 @@ export class SiteProcessor {
           };
 
           // Run the main context enrichment for all raw pages
-          if (this.options.aiConfig.type === 'fallback') {
-            // For fallback config, use the first available LLM
-            const firstLLM = this.options.aiConfig.availableLLMs[0];
-            // Only show in test mode
-            if (process.env.NODE_ENV === 'test') {
-              logger.info(`[CONTEXT] Using first fallback LLM: ${firstLLM.fallbackName}`);
-            }
-            await runContextEnrichment(dbInstance, firstLLM, progressCallback);
-          } else {
-            // Regular AI config
-            await runContextEnrichment(dbInstance, this.options.aiConfig, progressCallback);
-          }
+          await runContextEnrichment(dbInstance, this.options.aiConfig, progressCallback);
 
           // Complete processing progress
           this.crawlService.progressService.completeProcessing();
@@ -319,7 +305,7 @@ export class SiteProcessor {
 
     // Context enhancement cleanup - retry failed/rate-limited pages
     try {
-      const {enhanceSinglePage} = await import('./core/context_processor.js');
+      const {enhanceSinglePage} = await import('./core/context_enrichment.js');
       const dbInstance = this.contentService.db;
 
       if (dbInstance && this.options.aiConfig && this.options.aiConfig.provider) {

@@ -3,11 +3,7 @@
 import fs from 'fs';
 import path from 'path';
 
-const DEFAULT_AI_CONFIG = {
-  provider: 'anthropic',
-  model: 'claude-3-5-haiku-20241022',
-  timeout: 20000
-};
+// No default AI processing - config must be explicitly provided
 
 function loadJsonIfExists(file) {
   try {
@@ -33,28 +29,41 @@ export function loadAIConfig(projectRoot = process.cwd()) {
   const projectConfigPath = path.join(projectRoot, '.site2rag', 'crawl.json');
   const globalConfigPath = path.join(process.env.HOME || process.env.USERPROFILE, '.site2rag', 'config.json');
 
-  let config = {...DEFAULT_AI_CONFIG};
+  // Start with null config (no AI processing by default)
+  let config = null;
 
-  // Merge global config
+  // Check global config
   const globalConfig = loadJsonIfExists(globalConfigPath);
   if (globalConfig && globalConfig.ai) {
-    config = {...config, ...globalConfig.ai};
+    config = {...globalConfig.ai};
   }
-  // Merge project config
+  
+  // Check project config (overrides global)
   const projectConfig = loadJsonIfExists(projectConfigPath);
   if (projectConfig && projectConfig.ai) {
-    config = {...config, ...projectConfig.ai};
+    config = {...(config || {}), ...projectConfig.ai};
   }
-  // Merge env vars
-  if (process.env.AI_PROVIDER) config.provider = process.env.AI_PROVIDER;
-  if (process.env.AI_HOST) config.host = process.env.AI_HOST;
-  if (process.env.AI_MODEL) config.model = process.env.AI_MODEL;
+  
+  // Check env vars (highest priority)
+  if (process.env.AI_PROVIDER || process.env.AI_MODEL) {
+    config = config || {};
+    if (process.env.AI_PROVIDER) config.provider = process.env.AI_PROVIDER;
+    if (process.env.AI_HOST) config.host = process.env.AI_HOST;
+    if (process.env.AI_MODEL) config.model = process.env.AI_MODEL;
+  }
 
-  // Add API key for Anthropic provider
-  if (config.provider === 'anthropic' && process.env.ANTHROPIC_API_KEY) {
-    config.apiKey = process.env.ANTHROPIC_API_KEY;
-  } else if (config.provider === 'openai' && process.env.OPENAI_API_KEY) {
-    config.apiKey = process.env.OPENAI_API_KEY;
+  // If we have a config, add API keys
+  if (config) {
+    if (config.provider === 'anthropic' && process.env.ANTHROPIC_API_KEY) {
+      config.apiKey = process.env.ANTHROPIC_API_KEY;
+    } else if (config.provider === 'openai' && process.env.OPENAI_API_KEY) {
+      config.apiKey = process.env.OPENAI_API_KEY;
+    }
+    
+    // Set default timeout if not specified
+    if (!config.timeout) {
+      config.timeout = 20000;
+    }
   }
 
   return config;
@@ -68,18 +77,6 @@ export function loadAIConfig(projectRoot = process.cwd()) {
 export function getLLMConfigFromFlags(options) {
   // Check for LLM-specific flags and validate API keys
   // Commander.js uses underscore format, not camelCase
-  if (options.use_opus4 || options.useOpus4) {
-    if (!process.env.ANTHROPIC_API_KEY) {
-      throw new Error('ANTHROPIC_API_KEY environment variable is required for --use_opus4');
-    }
-    return {
-      provider: 'anthropic',
-      model: 'claude-3-5-sonnet-20241022',
-      apiKey: process.env.ANTHROPIC_API_KEY,
-      timeout: 30000
-    };
-  }
-
   if (options.use_haiku || options.useHaiku) {
     if (!process.env.ANTHROPIC_API_KEY) {
       throw new Error('ANTHROPIC_API_KEY environment variable is required for --use_haiku');
@@ -104,190 +101,16 @@ export function getLLMConfigFromFlags(options) {
     };
   }
 
-  if (options.use_gpt4o_mini || options.useGpt4oMini) {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY environment variable is required for --use_gpt4o_mini');
-    }
+  if (options.use_ollama || options.useOllama) {
+    // Ollama runs locally, no API key needed
     return {
-      provider: 'openai',
-      model: 'gpt-4o-mini',
-      apiKey: process.env.OPENAI_API_KEY,
-      timeout: 60000 // 60s timeout for complex prompts with large context
-    };
-  }
-
-  if (options.use_gpt4_turbo || options.useGpt4Turbo) {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY environment variable is required for --use_gpt4_turbo');
-    }
-    return {
-      provider: 'openai',
-      model: 'gpt-4-turbo',
-      apiKey: process.env.OPENAI_API_KEY,
-      timeout: 45000
-    };
-  }
-
-  if (options.use_o1_mini || options.useO1Mini) {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY environment variable is required for --use_o1_mini');
-    }
-    return {
-      provider: 'openai',
-      model: 'o1-mini',
-      apiKey: process.env.OPENAI_API_KEY,
-      timeout: 60000 // o1 models are slower
-    };
-  }
-
-  if (options.use_mistral_large || options.useMistralLarge) {
-    if (!process.env.MISTRAL_API_KEY) {
-      throw new Error('MISTRAL_API_KEY environment variable is required for --use_mistral_large');
-    }
-    return {
-      provider: 'mistral',
-      model: 'mistral-large-latest',
-      apiKey: process.env.MISTRAL_API_KEY,
-      timeout: 30000
-    };
-  }
-
-  if (options.use_perplexity || options.usePerplexity) {
-    if (!process.env.PERPLEXITY_API_KEY) {
-      throw new Error('PERPLEXITY_API_KEY environment variable is required for --use_perplexity');
-    }
-    return {
-      provider: 'perplexity',
-      model: 'llama-3.1-sonar-large-128k-online',
-      apiKey: process.env.PERPLEXITY_API_KEY,
-      timeout: 30000
-    };
-  }
-
-  if (options.use_r1_grok || options.useR1Grok) {
-    if (!process.env.XAI_API_KEY) {
-      throw new Error('XAI_API_KEY environment variable is required for --use_r1_grok');
-    }
-    return {
-      provider: 'xai',
-      model: 'grok-beta',
-      apiKey: process.env.XAI_API_KEY,
-      timeout: 30000
+      provider: 'ollama',
+      host: 'http://localhost:11434',
+      model: 'qwen2.5:14b',
+      timeout: 20000
     };
   }
 
   return null; // No LLM flag specified
 }
 
-/**
- * Create fallback LLM configuration based on quality ranking and API key availability
- * @param {object} options - CLI options object
- * @returns {object|null} - Fallback config or null if not enabled
- */
-export function createFallbackConfig(options) {
-  if (!options.autoFallback && !options.auto_fallback) {
-    return null; // Fallback not enabled
-  }
-
-  // Default fallback order - start with Haiku for better instruction following
-  const defaultOrder = ['haiku', 'opus4', 'gpt4o', 'gpt4-turbo', 'ollama'];
-
-  // Parse custom fallback order if provided
-  let fallbackOrder = defaultOrder;
-  if (options.fallbackOrder || options.fallback_order) {
-    const customOrder = (options.fallbackOrder || options.fallback_order).split(',').map(s => s.trim());
-    fallbackOrder = customOrder;
-  }
-
-  console.log(`🔄 Auto-fallback enabled, trying: ${fallbackOrder.join(' → ')}`);
-
-  // Create list of available LLMs with their configs
-  const availableLLMs = [];
-
-  for (const llm of fallbackOrder) {
-    try {
-      let config = null;
-
-      switch (llm.toLowerCase()) {
-        case 'gpt4o':
-          if (process.env.OPENAI_API_KEY) {
-            config = {
-              provider: 'openai',
-              model: 'gpt-4o',
-              apiKey: process.env.OPENAI_API_KEY,
-              timeout: 60000, // 60s for large context windows
-              fallbackName: 'gpt4o'
-            };
-          }
-          break;
-
-        case 'gpt4o-mini':
-          if (process.env.OPENAI_API_KEY) {
-            config = {
-              provider: 'openai',
-              model: 'gpt-4o-mini',
-              apiKey: process.env.OPENAI_API_KEY,
-              timeout: 60000, // 60s for large context windows with gpt4o-mini
-              fallbackName: 'gpt4o-mini'
-            };
-          }
-          break;
-
-        case 'opus4':
-          if (process.env.ANTHROPIC_API_KEY) {
-            config = {
-              provider: 'anthropic',
-              model: 'claude-3-5-sonnet-20241022',
-              apiKey: process.env.ANTHROPIC_API_KEY,
-              timeout: 30000,
-              fallbackName: 'opus4'
-            };
-          }
-          break;
-
-        case 'gpt4-turbo':
-          if (process.env.OPENAI_API_KEY) {
-            config = {
-              provider: 'openai',
-              model: 'gpt-4-turbo',
-              apiKey: process.env.OPENAI_API_KEY,
-              timeout: 45000,
-              fallbackName: 'gpt4-turbo'
-            };
-          }
-          break;
-
-        case 'ollama':
-          // Always available (local)
-          config = {
-            provider: 'ollama',
-            host: 'http://localhost:11434',
-            model: 'qwen2.5:14b',
-            timeout: 20000,
-            fallbackName: 'ollama'
-          };
-          break;
-      }
-
-      if (config) {
-        availableLLMs.push(config);
-        console.log(`  ✅ ${config.fallbackName}: ${config.provider}/${config.model} available`);
-      } else {
-        console.log(`  ❌ ${llm}: API key missing or invalid`);
-      }
-    } catch (error) {
-      console.log(`  ❌ ${llm}: Configuration error - ${error.message}`);
-    }
-  }
-
-  if (availableLLMs.length === 0) {
-    console.log('⚠️  No LLMs available for fallback');
-    return null;
-  }
-
-  return {
-    type: 'fallback',
-    availableLLMs,
-    fallbackOrder
-  };
-}

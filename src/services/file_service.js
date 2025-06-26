@@ -119,6 +119,12 @@ This file contains HTML blocks that were removed during content processing.
     if (!cleanPath || cleanPath === '_') {
       return 'index.md';
     }
+    // Check if this is a binary file (PDF, DOCX, etc.)
+    const binaryExtensions = ['.pdf', '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.zip', '.rar'];
+    const hasBinaryExtension = binaryExtensions.some(ext => cleanPath.toLowerCase().endsWith(ext));
+    if (hasBinaryExtension) {
+      return cleanPath; // Keep original extension for binary files
+    }
     // Add .md extension if not present
     return cleanPath.endsWith('.md') ? cleanPath : `${cleanPath}.md`;
   }
@@ -243,7 +249,9 @@ This file contains HTML blocks that were removed during content processing.
         try {
           absoluteUrl = new URL(url, baseUrl).href;
         } catch (error) {
-          logger.warn(`[DOCUMENT] Error resolving URL: ${url}`, error);
+          if (logger.debug || logger.verbose) {
+            logger.warn(`[DOCUMENT] Error resolving URL: ${url}`, error);
+          }
           return {success: false, error: 'Invalid URL'};
         }
       }
@@ -251,7 +259,9 @@ This file contains HTML blocks that were removed during content processing.
       // Fetch the document
       const response = await fetch(absoluteUrl);
       if (!response.ok) {
-        logger.warn(`[DOCUMENT] Failed to download document: ${response.status} ${response.statusText}`);
+        if (logger.debug || logger.verbose) {
+          logger.warn(`[DOCUMENT] Failed to download document: ${response.status} ${response.statusText}`);
+        }
         return {success: false, error: `HTTP error: ${response.status}`};
       }
 

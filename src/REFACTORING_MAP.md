@@ -250,8 +250,17 @@ services/crawl_service.js (ORCHESTRATOR)
 ### **Light Testing** (High Risk)
 
 ```
-🔴 core/context_processor.js   [AI processing - complex]
+🔴 core/context_processor_simple.js [AI processing - sliding window disambiguation]
+├── cleanTextForContext(text) → string              [Removes markdown/code/links]
+├── simplifyMetadata(metadata) → object             [Passes through clean metadata]
+├── strictValidateEnhancement(orig, enhanced) → obj [Validates only [[]] insertions]
+├── processDocumentsSimple(docs, config) → results  [Main processing function]
+└── enhanceDocumentSimple(blocks, meta, config)     [Single doc wrapper]
+
 🔴 core/ai_client.js           [External service dependent]
+├── callAI(prompt, schema, config) → validated      [Schema-aware AI calls]
+├── AISession class                                  [Context caching sessions]
+└── makeAICall(prompt, config) → string             [Raw AI provider calls]
 ```
 
 ---

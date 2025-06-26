@@ -120,7 +120,7 @@ export function cleanupInactiveSessions() {
  * @param {object} aiConfig - AI config (provider, host, model, etc)
  * @returns {Promise<string>} - Raw response text
  */
-async function makeAICall(prompt, aiConfig) {
+async function makeAICall(prompt, aiConfig, expectPlainText = false) {
   const provider = aiConfig.provider || 'ollama';
 
   debugLogger.ai(`makeAICall - Provider: ${provider}`);
@@ -260,7 +260,7 @@ async function makeAICall(prompt, aiConfig) {
         max_tokens: 4000,
         temperature: 0.1,
         top_p: 0.9,
-        response_format: {type: 'json_object'} // Request JSON response
+        ...(expectPlainText ? {} : {response_format: {type: 'json_object'}}) // Only request JSON format when not expecting plain text
       })
     });
 
@@ -423,12 +423,23 @@ export async function callAI(prompt, schema, aiConfig) {
         await delay(1000 * attempt); // Exponential backoff on retries
       }
       try {
-        debugLogger.ai(`Attempt ${attempt}: Making AI call...`);
-        const responseText = await makeAICall(prompt, aiConfig);
+        // Check if we're expecting plain text before making the call
+        const expectPlainText = schema._def && schema._def.typeName === 'ZodString';
+        
+        debugLogger.ai(`Attempt ${attempt}: Making AI call... (expectPlainText: ${expectPlainText})`);
+        const responseText = await makeAICall(prompt, aiConfig, expectPlainText);
         debugLogger.ai(`Attempt ${attempt}: Received response, length: ${responseText.length}`);
         debugLogger.ai(`Raw response (first 200 chars): ${responseText.substring(0, 200)}...`);
 
-        // Try to extract JSON from the response
+        // Check if schema expects plain text (string) response
+        if (schema._def && schema._def.typeName === 'ZodString') {
+          debugLogger.ai(`Schema expects plain text response, skipping JSON parsing`);
+          const validated = schema.parse(responseText.trim());
+          debugLogger.ai(`Plain text validation successful`);
+          return validated;
+        }
+
+        // For object schemas, try to extract JSON from the response
         let jsonText = responseText.trim();
 
         // Handle cases where AI returns JSON wrapped in markdown code blocks
@@ -451,8 +462,34 @@ export async function callAI(prompt, schema, aiConfig) {
         jsonText = jsonText.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
 
         debugLogger.ai(`Final JSON text (first 200 chars): ${jsonText.substring(0, 200)}...`);
-
-        const parsed = JSON.parse(jsonText);
+        
+        // Log more details when parsing fails
+        let parsed;
+        try {
+          parsed = JSON.parse(jsonText);
+        } catch (parseError) {
+          console.error(`[AI ERROR] JSON.parse failed with: ${parseError.message}`);
+          console.error(`[AI ERROR] JSON length: ${jsonText.length} characters`);
+          
+          // Find the error position
+          const match = parseError.message.match(/position (\d+)/);
+          if (match) {
+            const errorPos = parseInt(match[1]);
+            const contextStart = Math.max(0, errorPos - 100);
+            console.error(`[AI ERROR] Context around position ${errorPos}:`);
+            console.error(`[AI ERROR] Before: "${jsonText.substring(contextStart, errorPos)}"`);
+            console.error(`[AI ERROR] At error: "${jsonText.substring(errorPos, errorPos + 10)}..."`);
+            console.error(`[AI ERROR] Character at position ${errorPos}: "${jsonText.charAt(errorPos)}" (code: ${jsonText.charCodeAt(errorPos)})`);
+            
+            // Log the full response for debugging
+            if (jsonText.length < 5000) {
+              console.error(`[AI ERROR] Full response:\n${jsonText}`);
+            } else {
+              console.error(`[AI ERROR] Response too long (${jsonText.length} chars), showing first 2000:\n${jsonText.substring(0, 2000)}...`);
+            }
+          }
+          throw parseError;
+        }
         debugLogger.ai(`JSON parsed successfully`);
 
         const validated = schema.parse(parsed);
@@ -468,8 +505,9 @@ export async function callAI(prompt, schema, aiConfig) {
           console.error(`[AI ERROR] Zod validation error details:`, JSON.stringify(e.errors, null, 2));
         }
 
-        if (e.message.includes('Unexpected token')) {
+        if (e.message.includes('Unexpected token') || e.message.includes('Expected')) {
           console.error(`[AI ERROR] JSON parsing failed - likely malformed JSON response`);
+          console.error(`[AI ERROR] Error occurred at: ${e.message}`);
         }
 
         if (e.message.includes('timed out')) {

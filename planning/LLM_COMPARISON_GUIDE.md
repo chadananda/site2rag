@@ -119,7 +119,8 @@ Insertions: [[Ocean search software development]], [[Bahá'í community members]
 
 - All providers use the same disambiguation prompt
 - Temperature set to 0.1 for consistency
-- JSON schema validation ensures consistent output format
+- Plain text response format with blank line separators
+- Strict validation ensures only `[[context]]` insertions
 - Automatic fallback to original content on errors
 - Session tracking isolates each test run
 

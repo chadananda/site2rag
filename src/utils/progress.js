@@ -125,6 +125,8 @@ export class ProgressService {
     this.isActive = true;
     this.stats.startTime = Date.now();
     this.isReCrawl = initialStats.isReCrawl || false;
+    // Store the maxPages limit to cap the progress bar total
+    this.maxPages = initialStats.maxPages || null;
 
     // Initialize re-crawl statistics if applicable
     if (initialStats.isReCrawl) {
@@ -139,7 +141,7 @@ export class ProgressService {
       this.stats.totalUrls = initialStats.totalUrls;
       // Debug log
       if (process.env.DEBUG) {
-        console.log(`[PROGRESS] Setting totalUrls to ${initialStats.totalUrls}`);
+        console.log(`[PROGRESS] Setting totalUrls to ${initialStats.totalUrls}, maxPages: ${this.maxPages}`);
       }
     }
 
@@ -185,10 +187,18 @@ export class ProgressService {
     // Start the update interval to refresh the progress bar based on real progress
     this.updateInterval = setInterval(() => {
       if (this.multibar) {
-        // Always update the total to show all discovered URLs
+        // Update the total to show discovered URLs, but cap at maxPages if set
         const discoveredTotal = this.stats.crawledUrls + this.stats.queuedUrls;
-        if (discoveredTotal > this.multibar.total) {
-          this.multibar.setTotal(discoveredTotal);
+        let targetTotal = discoveredTotal;
+        
+        // If maxPages is set, cap the total at that limit
+        if (this.maxPages && targetTotal > this.maxPages) {
+          targetTotal = this.maxPages;
+        }
+        
+        // Only update if the target total is greater than current total
+        if (targetTotal > this.multibar.total) {
+          this.multibar.setTotal(targetTotal);
         }
 
         // Update with the actual number of crawled URLs
@@ -265,8 +275,9 @@ export class ProgressService {
   /**
    * Start AI processing progress bar (second phase)
    * @param {number} totalRequests - Total number of AI requests to process
+   * @param {Object} aiConfig - AI configuration object with provider and model
    */
-  startProcessing(totalRequests) {
+  startProcessing(totalRequests, aiConfig) {
     // Clean up download progress bar first
     if (this.multibar) {
       this.multibar.stop();
@@ -278,7 +289,15 @@ export class ProgressService {
     process.stdout.write('\x1b[1A'); // Move up one line
     process.stdout.write('\x1b[2K\r'); // Clear that line too
 
-    console.log(chalk.blue(`\nProcessing content with AI enhancement:\n`));
+    // Display AI provider and model information
+    let aiInfo = 'AI enhancement';
+    if (aiConfig) {
+      const provider = aiConfig.provider || aiConfig.fallbackName || 'unknown';
+      const model = aiConfig.model || 'default';
+      aiInfo = `AI enhancement using ${chalk.cyan(provider)}/${chalk.cyan(model)}`;
+    }
+
+    console.log(chalk.blue(`\nProcessing content with ${aiInfo}:\n`));
 
     // Create new progress bar for processing
     const terminalWidth = process.stdout.columns || 80;

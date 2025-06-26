@@ -15,12 +15,46 @@ import {z} from 'zod';
 import pLimit from 'p-limit';
 import {callAI} from './ai_client.js';
 import debugLogger from '../services/debug_logger.js';
-import {validateEnhancement} from '../utils/context_utils.js';
 
-// Schema for AI response - simple text format for mini models
-const WindowEnhancementSchema = z.object({
-  enhanced_blocks: z.record(z.string(), z.string())
-});
+// Schema for AI response - plain text for better model compatibility
+const PlainTextResponseSchema = z.string();
+
+/**
+ * Strict validation that ensures ONLY context insertions are added
+ * @param {string} original - Original text
+ * @param {string} enhanced - Enhanced text with [[context]] insertions
+ * @returns {Object} Validation result
+ */
+function strictValidateEnhancement(original, enhanced) {
+  if (!original || !enhanced) {
+    return {
+      isValid: false,
+      error: 'Missing original or enhanced text'
+    };
+  }
+
+  // Remove [[...]] insertions from enhanced text
+  const enhancedWithoutContext = enhanced.replace(/\s*\[\[.*?\]\]/g, '');
+
+  // Only normalize whitespace - no other modifications allowed
+  const normalizedOriginal = original.replace(/\s+/g, ' ').trim();
+  const normalizedEnhanced = enhancedWithoutContext.replace(/\s+/g, ' ').trim();
+
+  // Must match exactly after removing insertions and normalizing whitespace
+  const isValid = normalizedOriginal === normalizedEnhanced;
+
+  if (!isValid) {
+    return {
+      isValid: false,
+      error: 'Enhanced text modifies the original content (only [[context]] insertions are allowed)'
+    };
+  }
+
+  return {
+    isValid: true,
+    error: null
+  };
+}
 
 // Window size configurations based on model type
 const WINDOW_SIZES = {
@@ -39,16 +73,6 @@ const WINDOW_SIZES = {
 // Content filtering thresholds
 const MIN_BLOCK_CHARS = process.env.SITE2RAG_MIN_BLOCK_CHARS ? parseInt(process.env.SITE2RAG_MIN_BLOCK_CHARS) : 100; // Skip very short blocks to save tokens
 
-/**
- * Check if the AI model requires simplified prompts and smaller context windows
- * @param {Object} aiConfig - AI configuration
- * @returns {boolean} True if model needs simplified prompts
- */
-function isSimplifiedPromptModel(aiConfig) {
-  const simpleModels = ['gpt-4o-mini', 'gpt-3.5-turbo', 'gpt-3.5'];
-  // Note: We do NOT include Haiku here - it should use the detailed prompts
-  return aiConfig.model && simpleModels.some(m => aiConfig.model.includes(m));
-}
 
 /**
  * Clean text for context by removing markdown formatting, code blocks, images, and links
@@ -109,18 +133,16 @@ export function cleanTextForContext(text) {
  * Create sliding windows from document blocks
  * Each window has context from previous window and new blocks to process
  * @param {Array} blocks - Document blocks
- * @param {Object} aiConfig - AI configuration to determine window sizes
  * @returns {Array} Windows with context and blocks to process
  */
-function createSlidingWindows(blocks, aiConfig) {
+function createSlidingWindows(blocks) {
   const windows = [];
   let processedBlockIndex = 0;
   let previousText = ''; // Accumulate text for context
 
-  // Use appropriate window sizes based on model type
-  const useSimplified = isSimplifiedPromptModel(aiConfig);
-  const CONTEXT_WORDS = useSimplified ? WINDOW_SIZES.MINI.context : WINDOW_SIZES.DEFAULT.context;
-  const PROCESS_WORDS = useSimplified ? WINDOW_SIZES.MINI.process : WINDOW_SIZES.DEFAULT.process;
+  // Use optimal window sizes for all models
+  const CONTEXT_WORDS = WINDOW_SIZES.MINI.context;
+  const PROCESS_WORDS = WINDOW_SIZES.MINI.process;
 
   while (processedBlockIndex < blocks.length) {
     // Collect blocks for this window
@@ -248,43 +270,58 @@ export function simplifyMetadata(metadata) {
  * @param {Object} window - Window data
  * @param {Object} metadata - Document metadata
  * @param {string} docId - Document identifier
- * @param {Object} aiConfig - AI configuration
  * @returns {Object} Request object
  */
-function createWindowRequest(window, metadata, docId, aiConfig) {
-  const useSimplifiedPrompt = isSimplifiedPromptModel(aiConfig);
+function createWindowRequest(window, metadata, docId) {
   const simplifiedMetadata = simplifyMetadata(metadata);
 
   // Debug log the metadata being used
   debugLogger.ai(`Creating prompt with metadata: author="${simplifiedMetadata.author}", org="${simplifiedMetadata.authorOrganization}"`);
-  
-  let prompt;
-  if (useSimplifiedPrompt) {
-    // Simplified prompt for models like GPT-4o-mini - NO JSON for better results
-    prompt = `Add [[clarifications]] to make each paragraph stand alone. Use ONLY information from THIS document.
 
-WHAT TO CLARIFY:
-• "I" → "I [[Chad Jones]]" (using author from metadata)
-• "we/our" → "we [[specific team/group mentioned in doc]]"
-• "this/that" → "this [[specific thing referenced]]"
-• "it" → "it [[the specific item]]"
-• "the project" → "the project [[Ocean]]"
-• "the software" → "the software [[Ocean]]"
-• Generic terms like "the CDs" when specific type is known
+  // Use the simplified prompt for all models - it's clearer and more effective
+  const prompt = `Add [[disambiguation]] to ambiguous references using ONLY information already stated in this document.
 
-❌ FORBIDDEN - NEVER ADD:
-• Definitions: "PC [[personal computer]]" ✗
-• Locations: "S̱híráz [[a city in Iran]]" ✗
-• Explanations: "controversy [[disagreement]]" ✗
-• External facts: "Lotus Temple [[a Bahá'í House of Worship]]" ✗
-• Info not in document: "Dawn-Breakers [[a Bahá'í text]]" ✗
+PURPOSE: Each paragraph will be indexed separately for search. When someone searches for "Sarah Chen mobile app", they should find relevant paragraphs even if the paragraph only says "I launched it yesterday." Without disambiguation, that paragraph would be unsearchable.
 
-✓ GOOD EXAMPLES:
-• "I started this" → "I [[Chad Jones]] started this [[Ocean project]]"
-• "We developed it" → "We [[the Ocean team]] developed it [[Ocean]]"
-• "This was amazing" → "This [[visiting the Lotus Temple]] was amazing"
+GOAL: Make each paragraph standalone and searchable by resolving what pronouns and vague terms refer to.
 
-Only disambiguate if genuinely unclear. Skip if already clear from context.
+## TARGET FOR DISAMBIGUATION:
+- Pronouns: I, we, they, he, she, it, them
+- Demonstratives: this, that, these, those
+- Vague references: "the project", "the team", "the system", "the company"
+- Unclear antecedents where the referent is ambiguous
+
+## DISAMBIGUATION RULES:
+1. Use ONLY names, entities, and concepts explicitly mentioned in THIS document
+2. Add [[clarification]] immediately after the ambiguous reference
+3. Disambiguate each reference only ONCE per paragraph
+4. Skip if the referent is clear from immediate context (within same paragraph)
+5. CRITICAL: If you cannot find the disambiguation in the provided document or it's meta-data, DO NOT disambiguate
+6. FORBIDDEN: Never use your general knowledge about what something is (e.g., knowing Google is a search engine)
+
+## DISAMBIGUATION TEST:
+Ask yourself: "If this paragraph were the only search result, would someone understand what/who is being referenced?"
+
+If NO → Add disambiguation
+If YES → Leave as-is
+
+## EXAMPLES:
+✓ "I completed the analysis" → "I [[Sarah Chen]] completed the analysis"
+   (Searcher needs to know WHO completed analysis)
+✓ "We launched it yesterday" → "We [[the dev team]] launched it [[the mobile app]] yesterday"
+   (Searcher needs to know WHO launched WHAT)
+✓ "This approach worked" → "This approach [[microservices architecture]] worked"
+   (Searcher needs to know WHICH approach)
+✓ "They approved our proposal" → "They [[the board]] approved our proposal [[for Q4 expansion]]"
+   (Searcher needs to know WHO approved WHAT proposal)
+
+## DO NOT DISAMBIGUATE:
+✗ Clear references: "Sarah completed her analysis" (already clear)
+✗ Immediately obvious: "The car broke down. It needs repair." (clear within paragraph)
+✗ External knowledge: Don't add info not in the document
+✗ Definitions: Don't explain what things are, only identify what specific thing is referenced
+
+Focus on using document content and meta-data to make ambiguous references searchable, not educational.
 
 ========= DOCUMENT META-DATA:
 
@@ -303,61 +340,20 @@ ${window.context || '(This is the beginning of the document)'}
 
 ========= TEXT TO PROCESS:
 
-${JSON.stringify(window.blocks, null, 0)}
+${JSON.stringify(window.blocks, null, 2)}
 
 ========= OUTPUT FORMAT:
 
-Return JSON with "enhanced_blocks" containing the same text with [[clarifications]] added.
-Example: {"enhanced_blocks": {"0": "Text with [[clarification]]...", "1": "Another text..."}}`;
-  } else {
-    // More detailed prompt for advanced models
-    prompt = `Disambiguate pronouns and vague references. Use ONLY information from THIS document.
+Return ONLY the enhanced text blocks with [[disambiguations]] added.
+Separate each block with a blank line.
+Do not add any explanations, numbers, or other text.
 
-TARGET THESE AMBIGUOUS REFERENCES:
-1. Pronouns: I, we, our, they, their, he, she, it
-2. Demonstratives: this, that, these, those
-3. Generic terms: the project, the software, the team, the CDs
-4. Unclear references that need context
+Example output:
+I [[Sarah Chen]] completed the analysis.
 
-APPLY THESE CLARIFICATIONS:
-• "I" → "I [[Chad Jones]]" (from metadata author)
-• "we/our" → "we [[the Ocean team]]" or specific group from doc
-• "this/that" → add what it refers to from context
-• "the project" → "the project [[Ocean]]"
-• "it" → specify what "it" refers to
+The team [[the dev team]] launched it [[the mobile app]].
 
-STRICT FORBIDDEN LIST:
-✗ "PC" → "PC [[personal computer]]" - NO definitions!
-✗ "S̱híráz" → "S̱híráz [[a city in Iran]]" - NO geography!
-✗ "Lotus Temple" → "Lotus Temple [[a Bahá'í House of Worship]]" - NO descriptions!
-✗ Any info not explicitly in THIS document
-
-EXAMPLES:
-✓ "I started this project" → "I [[Chad Jones]] started this project [[Ocean]]"
-✓ "We achieved it" → "We [[the Ocean team]] achieved it [[distributing Ocean globally]]"
-✓ "This was incredible" → "This [[the response from communities]] was incredible"
-
-Return JSON: {"enhanced_blocks": {"0": "text with [[context]]", "1": "text with [[context]]", ...}}
-
-========= DOCUMENT META-DATA:
-
-${Object.entries(simplifiedMetadata)
-  .filter(([, value]) => value && value !== '')
-  .map(([key, value]) => {
-    // Format key nicely (camelCase to Title Case)
-    const formattedKey = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()).trim();
-    return `${formattedKey}: ${value}`;
-  })
-  .join('\n')}
-
-========= PREVIOUS CONTEXT:
-
-${window.context || '(This is the beginning of the document)'}
-
-========= BLOCKS TO PROCESS:
-
-${JSON.stringify(window.blocks, null, 0)}`;
-  }
+This [[the product launch]] was amazing.`;
 
   return {
     docId,
@@ -389,7 +385,7 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
     }
 
     // Create sliding windows for this document
-    const windows = createSlidingWindows(doc.blocks, aiConfig);
+    const windows = createSlidingWindows(doc.blocks);
     debugLogger.ai(`Document ${doc.docId}: Created ${windows.length} windows`);
 
     // Log window sizes for debugging
@@ -400,7 +396,7 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
 
     // Create request for each window
     for (const window of windows) {
-      const request = createWindowRequest(window, doc.metadata, doc.docId, aiConfig);
+      const request = createWindowRequest(window, doc.metadata, doc.docId);
       allRequests.push(request);
     }
   }
@@ -452,34 +448,71 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
         }
 
         // Call AI with the request
-        const response = await callAI(request.prompt, WindowEnhancementSchema, aiConfig);
+        const response = await callAI(request.prompt, PlainTextResponseSchema, aiConfig);
+        
+        // Log response preview to debug
+        const disambCount = (response.match(/\[\[.*?\]\]/g) || []).length;
+        debugLogger.ai(`Response preview: ${response.substring(0, 200)}...`);
+        debugLogger.ai(`Total disambiguations in response: ${disambCount}`);
 
-        if (!response || !response.enhanced_blocks) {
-          throw new Error('Invalid AI response format');
+        if (!response) {
+          throw new Error('Invalid AI response - empty response');
         }
+
+        // Parse plain text response into blocks (split by blank lines)
+        const responseBlocks = response.split(/\n\s*\n/).map(block => block.trim()).filter(block => block);
+        const enhancedBlocks = {};
+
+        // Match response blocks to original blocks using content matching
+        const originalBlocksArray = Object.entries(request.window.blocks);
+        const unmatchedResponses = [...responseBlocks];
 
         // Debug: Log AI response for first window
         if (request.windowIndex === 0) {
           debugLogger.ai('\n--- AI RESPONSE ---');
-          debugLogger.ai('Number of blocks returned:', Object.keys(response.enhanced_blocks).length);
-          debugLogger.ai('Response preview:', JSON.stringify(response.enhanced_blocks).substring(0, 300) + '...');
-
-          // Check if response has same keys as input
-          const inputKeys = Object.keys(request.window.blocks).sort();
-          const outputKeys = Object.keys(response.enhanced_blocks).sort();
-          debugLogger.ai('Input keys:', inputKeys);
-          debugLogger.ai('Output keys:', outputKeys);
-          debugLogger.ai('Keys match:', JSON.stringify(inputKeys) === JSON.stringify(outputKeys));
+          debugLogger.ai('Number of blocks returned:', responseBlocks.length);
+          debugLogger.ai('Number of blocks expected:', originalBlocksArray.length);
+          debugLogger.ai('Response preview:', response.substring(0, 300) + '...');
           debugLogger.ai('==================\n');
+        }
+
+        // Match blocks by comparing normalized content
+        for (const [key, originalText] of originalBlocksArray) {
+          let bestMatch = null;
+          let bestMatchIndex = -1;
+
+          // Find the best matching response block
+          for (let i = 0; i < unmatchedResponses.length; i++) {
+            const responseBlock = unmatchedResponses[i];
+
+            // Use the strict validation function to check if this block matches
+            const validation = strictValidateEnhancement(originalText, responseBlock);
+
+            // If validation passes, this is a match
+            if (validation.isValid) {
+              bestMatch = responseBlock;
+              bestMatchIndex = i;
+              break; // Stop searching once we find a valid match
+            }
+          }
+
+          if (bestMatch) {
+            enhancedBlocks[key] = bestMatch;
+            unmatchedResponses.splice(bestMatchIndex, 1);
+          } else {
+            // No match found, use original
+            enhancedBlocks[key] = originalText;
+            debugLogger.ai(`Warning: No matching enhanced block found for key ${key}. Using original.`);
+          }
         }
 
         // Validate enhancements
         const validatedBlocks = {};
         let validationFailures = 0;
         for (const [key, original] of Object.entries(request.window.blocks)) {
-          const enhanced = response.enhanced_blocks[key];
+          const enhanced = enhancedBlocks[key];
           if (enhanced) {
-            const validation = validateEnhancement(original, enhanced);
+            const validation = strictValidateEnhancement(original, enhanced);
             if (validation.isValid) {
               validatedBlocks[key] = enhanced;
               // Log successful enhancements

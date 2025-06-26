@@ -124,7 +124,8 @@
       "Bash(SITE2RAG_DEBUG=ai node tests/tmp/scripts/test-ai-disambiguation.js 2 >& 1)",
       "Bash(SITE2RAG_DEBUG=ai npm run test:bahai-filtered 2 >& 1)",
       "Bash(SITE2RAG_DEBUG=ai node tests/tmp/scripts/test-ai-haiku.js 2 >& 1)",
-      "Bash(SITE2RAG_DEBUG=ai rm -rf ./tests/tmp/sites/bahai-haiku-test2)"
+      "Bash(SITE2RAG_DEBUG=ai rm -rf ./tests/tmp/sites/bahai-haiku-test2)",
+      "Bash(env)"
     ],
     "deny": []
   }

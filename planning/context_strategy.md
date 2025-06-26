@@ -86,11 +86,12 @@ static_content = instructions + metadata + extra_context_file;
 window_capacity = capacity - static_content;
 ```
 
-**Model-Specific Capacities (80% utilization):**
+**Optimized Window Sizes:**
 
-- GPT-4 Turbo: ~100,000 tokens → ~75,000 words window capacity
-- Claude 3 Opus: ~160,000 tokens → ~120,000 words window capacity
-- Llama 3.2: ~3,000 tokens → ~2,000 words window capacity
+- Context Window: 1200 words (provides sufficient context)
+- Processing Window: 600 words (optimal for mini models)
+- Minimum Block Size: 100 characters (filters trivial content)
+- Headers and code blocks: Skipped from processing but included in context
 
 ### Phase 2: Document Processing Pipeline
 
@@ -132,20 +133,21 @@ if (document_size <= window_capacity) {
 
 ### Phase 3: AI Enhancement Process
 
-#### 3.1 Cache Architecture
+#### 3.1 Response Format
 
-**Per-Window Caching:**
+**Plain Text Response:**
 
-```
-CACHED (once per window):
-├── Instructions (disambiguation rules)
-├── Document metadata
-├── Extra context file (if provided)
-└── Current window text
+- AI returns enhanced text blocks directly
+- Blocks separated by blank lines
+- No JSON parsing required
+- Reduces complexity and improves reliability with mini models
 
-DYNAMIC (per batch):
-└── Keyed blocks to process
-```
+**Validation Process:**
+
+- Strict validation ensures only `[[context]]` insertions
+- Original text must be preserved exactly
+- Whitespace normalization allowed
+- No Unicode normalization to avoid text modifications
 
 #### 3.2 Parallel Batch Processing
 
@@ -239,9 +241,15 @@ function calculateCapacity(aiConfig) {
 
 ### Prompt Engineering
 
-Our prompts are carefully crafted to ensure consistent, high-quality context insertion:
+Our prompts are optimized for plain text responses from mini models:
 
 ```
+## OUTPUT FORMAT:
+
+Return ONLY the enhanced text blocks with [[disambiguations]] added.
+Separate each block with a blank line.
+Do not add any explanations, numbers, or other text.
+
 ## Guidelines for Context Enhancement
 
 1. **Document-Only Context**: Only use information found within the provided window
@@ -249,6 +257,7 @@ Our prompts are carefully crafted to ensure consistent, high-quality context ins
 3. **Minimal Disruption**: Insert only where ambiguity exists
 4. **Factual Focus**: Prioritize factual disambiguation over stylistic improvements
 5. **Preservation**: Maintain exact original wording and structure
+6. **Forbidden**: Never use general knowledge (e.g., knowing Google is a search engine)
 
 ## Examples:
 

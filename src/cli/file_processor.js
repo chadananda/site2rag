@@ -5,7 +5,7 @@
 import fs from 'fs';
 import path from 'path';
 import {parseFile, isFileSupported} from '../file/parser.js';
-import {enhanceBlocksWithCaching} from '../core/context_processor.js';
+import {enhanceDocumentSimple} from '../core/context_processor_simple.js';
 import {loadAIConfig} from '../core/ai_config.js';
 import logger from '../services/logger_service.js';
 
@@ -29,7 +29,7 @@ export async function processFile(filePath, options) {
 
   try {
     // Parse the file
-    logger.debug(`Parsing file...`);
+    logger.info(`Parsing file...`);
     const parsed = parseFile(filePath);
 
     // Load AI configuration
@@ -127,9 +127,20 @@ function generateOriginalOutput(parsed) {
  * @returns {Promise<Array>} Enhanced blocks
  */
 async function enhanceContent(blocks, metadata, aiConfig, options) {
-  logger.debug(`Using context-optimized enhancement (no entity extraction)...`);
-  const result = await enhanceBlocksWithCaching(blocks, metadata, aiConfig, options);
-  return result.blocks || result; // Handle both response formats
+  logger.info(`Using simplified context enhancement...`);
+  // Convert blocks to simple array format
+  const blockTexts = blocks.map(b => b.text || b.content || b.original || b);
+  
+  // Use the simple processor
+  const enhancedTexts = await enhanceDocumentSimple(blockTexts, metadata, aiConfig, {
+    onProgress: null
+  });
+  
+  // Convert back to expected format
+  return enhancedTexts.map((text, index) => ({
+    original: blocks[index].text || blocks[index].content || blocks[index].original || blocks[index],
+    contexted: text
+  }));
 }
 
 /**

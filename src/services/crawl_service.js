@@ -1000,9 +1000,6 @@ export class CrawlService {
       fs.writeFileSync(filePath, fullMarkdown, 'utf8');
       logger.crawl(`Saved: ${filePath}`);
 
-      // Extract and download PDFs from the page
-      await this.downloadPDFsFromPage($, normalizedUrl, outputPath);
-
       // Calculate content hash
       const contentHash = this.calculateContentHash(markdown);
 
@@ -1709,8 +1706,12 @@ ${markdownContent}`;
       // Process HTML content
       const {$, main, links: allLinks, removedBlocks} = await this.contentService.processHtml(html, normalizedUrl);
 
+      // Extract document links (PDFs, DOCX, etc.) and add them to the links array
+      const documentLinks = this.extractDocumentLinks($, normalizedUrl);
+      const combinedLinks = [...allLinks, ...documentLinks];
+
       // Filter out external URLs early to avoid processing them later
-      let links = allLinks;
+      let links = combinedLinks;
       if (this.options && this.options.sameDomain === true && this.startUrl) {
         try {
           // Extract base domain from the starting URL
@@ -1718,7 +1719,7 @@ ${markdownContent}`;
           const baseDomain = startUrlObj.hostname;
 
           // Filter links to only include those from the same domain
-          const internalLinks = allLinks.filter(link => {
+          const internalLinks = combinedLinks.filter(link => {
             try {
               const linkObj = new URL(link);
               const linkHostname = linkObj.hostname;
@@ -1939,7 +1940,7 @@ ${markdownContent}`;
         this.progressService.trackAIEnhancement(normalizedUrl, 'pending');
 
         // Start AI enhancement in background - don't await!
-        import('../core/context_processor.js')
+        import('../core/context_enrichment.js')
           .then(async ({enhanceSinglePage}) => {
             const db = this.contentService?.db;
 
@@ -2031,13 +2032,15 @@ ${markdownContent}`;
             if (!this._sitemapFirstMode) {
               // Only update progress total if we're not in sitemap-first mode
               const totalEligible = this.eligibleUrls.size;
+              // If maxPages is set, use the minimum of eligible URLs and maxPages
+              const progressTotal = this.maxPages ? Math.min(totalEligible, this.maxPages) : totalEligible;
 
               this.progressService.updateStats({
-                totalUrls: totalEligible,
+                totalUrls: progressTotal,
                 queuedUrls: this.queuedUrls.size
               });
 
-              logger.info(`Updated total eligible to: ${totalEligible}`);
+              logger.info(`Updated total eligible to: ${progressTotal} (${totalEligible} eligible, limit: ${this.maxPages || 'none'})`);
             } else {
               // In sitemap mode, just update the queue count
               this.progressService.updateStats({
@@ -2062,10 +2065,6 @@ ${markdownContent}`;
         if (this.foundUrls.length >= this.maxPages) {
           logger.crawl(`Reached max pages limit during link processing: ${this.foundUrls.length}/${this.maxPages}`);
           throw new CrawlLimitReached('Crawl limit reached');
-          logger.info(
-            `[CRAWL] Reached max pages limit during link processing: ${this.foundUrls.length}/${this.maxPages}`
-          );
-          throw new CrawlLimitReached();
         }
 
         // Skip if we've already visited or queued this URL - no logging needed for in-memory checks
@@ -2344,6 +2343,28 @@ ${markdownContent}`;
             content_hash: binaryHash // Store the binary hash
           });
         }
+        
+        // Add to foundUrls to count towards the limit (treat as first-class page)
+        this.foundUrls.push(url);
+        logger.info(`[BINARY_TRACKING] Added binary file to foundUrls: ${url} (${this.foundUrls.length}/${this.maxPages})`);
+        
+        // Update database to track for efficient re-crawls
+        if (this.contentService?.db) {
+          const pageData = {
+            url: url,
+            etag: response.headers?.get('etag') || null,
+            last_modified: response.headers?.get('last-modified') || null,
+            content_hash: binaryHash,
+            status: response.status || 200,
+            last_crawled: new Date().toISOString(),
+            title: filename,
+            file_path: savedPath,
+            is_binary: true,
+            content_type: contentType
+          };
+          this.contentService.db.upsertPage(pageData);
+          logger.info(`[BINARY_TRACKING] Saved binary file to database for re-crawl tracking`);
+        }
       } else {
         logger.warn('[BINARY] FileService not available, skipping binary file save');
       }
@@ -2383,14 +2404,16 @@ ${markdownContent}`;
         logger.info(`Filtered to ${eligibleCount} eligible URLs from ${sitemapUrls.length} sitemap URLs`);
         logger.info(`Total eligible URLs after sitemap processing: ${this.eligibleUrls.size}`);
 
-        // Update progress bar total with eligible URLs only
+        // Update progress bar total with eligible URLs only, considering limit
         if (this.progressService) {
           const totalEligible = this.eligibleUrls.size;
+          // If maxPages is set, use the minimum of eligible URLs and maxPages
+          const progressTotal = this.maxPages ? Math.min(totalEligible, this.maxPages) : totalEligible;
           this.progressService.updateStats({
-            totalUrls: totalEligible,
+            totalUrls: progressTotal,
             queuedUrls: this.queuedUrls.size
           });
-          logger.info(`Updated progress total to ${totalEligible} eligible URLs`);
+          logger.info(`Updated progress total to ${progressTotal} (${totalEligible} eligible, limit: ${this.maxPages || 'none'})`);
         }
 
         return sitemapUrls;
@@ -2405,91 +2428,45 @@ ${markdownContent}`;
   }
 
   /**
-   * Download searchable documents (PDFs, Word docs) found on a page
+   * Extract document links from a page and return them for queueing
+   * Documents will be processed through the normal crawl queue
    * @param {Object} $ - Cheerio instance of the page
    * @param {string} pageUrl - URL of the page containing documents
-   * @param {string} outputPath - Base output directory
+   * @returns {Array<string>} - Array of document URLs found
    * @private
    */
-  async downloadPDFsFromPage($, pageUrl, outputPath) {
-    try {
-      // Find all searchable document links (PDFs, Word docs, etc.)
-      const documentLinks = [];
-      // Only download document types that contain searchable text content
-      const downloadableExtensions = ['.pdf', '.doc', '.docx', '.odt', '.rtf'];
-      
-      $('a[href]').each((i, el) => {
-        const href = $(el).attr('href');
-        if (href) {
-          // Check if the link has a searchable document extension
-          const hasDownloadableExt = downloadableExtensions.some(ext => 
-            href.toLowerCase().endsWith(ext) || href.toLowerCase().includes(ext + '?')
-          );
-          
-          if (hasDownloadableExt) {
-            const linkText = $(el).text().trim();
-            documentLinks.push({ url: href, text: linkText });
+  extractDocumentLinks($, pageUrl) {
+    const documentUrls = [];
+    // Only download document types that contain searchable text content
+    const downloadableExtensions = ['.pdf', '.doc', '.docx', '.odt', '.rtf'];
+    
+    $('a[href]').each((i, el) => {
+      const href = $(el).attr('href');
+      if (href) {
+        // Check if the link has a searchable document extension
+        const hasDownloadableExt = downloadableExtensions.some(ext => 
+          href.toLowerCase().endsWith(ext) || href.toLowerCase().includes(ext + '?')
+        );
+        
+        if (hasDownloadableExt) {
+          try {
+            // Resolve to absolute URL
+            const absoluteUrl = new URL(href, pageUrl).href;
+            const normalizedUrl = this.urlService.normalizeUrl(absoluteUrl);
+            documentUrls.push(normalizedUrl);
+          } catch (e) {
+            // Invalid URL, skip
+            logger.debug(`[DOCS] Invalid document URL: ${href}`);
           }
         }
-      });
-
-      if (documentLinks.length === 0) {
-        return; // No downloadable documents found
       }
+    });
 
-      logger.info(`[DOCS] Found ${documentLinks.length} searchable documents on ${pageUrl}`);
-
-      // Create documents directory if it doesn't exist
-      const documentsDir = path.join(outputPath, 'documents');
-      if (!fs.existsSync(documentsDir)) {
-        fs.mkdirSync(documentsDir, { recursive: true });
-      }
-
-      // Download each document
-      for (const docInfo of documentLinks) {
-        try {
-          // Resolve absolute URL
-          const absoluteUrl = new URL(docInfo.url, pageUrl).href;
-          
-          // Skip if we've already downloaded this document
-          const urlHash = this.calculateContentHash(absoluteUrl);
-          const fileExt = path.extname(new URL(absoluteUrl).pathname) || '.pdf';
-          const expectedFilename = `doc-${urlHash}${fileExt}`;
-          const expectedPath = path.join(documentsDir, expectedFilename);
-          
-          if (fs.existsSync(expectedPath)) {
-            logger.info(`[DOCS] Already downloaded: ${expectedFilename}`);
-            continue;
-          }
-
-          logger.info(`[DOCS] Downloading: ${absoluteUrl}`);
-          
-          // Download the PDF using fileService
-          const result = await this.fileService.downloadDocument(absoluteUrl, pageUrl, outputPath);
-          
-          if (result.success) {
-            logger.info(`[DOCS] Downloaded successfully: ${result.filename}`);
-            
-            // Create a metadata file for the document
-            const metadataPath = result.fullPath.replace(/\.[^.]+$/, '-metadata.json');
-            const pdfMetadata = {
-              sourceUrl: absoluteUrl,
-              pageUrl: pageUrl,
-              linkText: docInfo.text,
-              downloadedAt: new Date().toISOString(),
-              filename: result.filename
-            };
-            fs.writeFileSync(metadataPath, JSON.stringify(pdfMetadata, null, 2));
-          } else {
-            logger.warn(`[DOCS] Failed to download ${absoluteUrl}: ${result.error}`);
-          }
-        } catch (error) {
-          logger.error(`[DOCS] Error downloading document ${docInfo.url}: ${error.message}`);
-        }
-      }
-    } catch (error) {
-      logger.error(`[DOCS] Error in downloadPDFsFromPage: ${error.message}`);
+    if (documentUrls.length > 0) {
+      logger.info(`[DOCS] Found ${documentUrls.length} document links on ${pageUrl}`);
     }
+    
+    return documentUrls;
   }
 }
 

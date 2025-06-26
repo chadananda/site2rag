@@ -1,5 +1,5 @@
 import {load} from 'cheerio';
-import {aiServiceAvailable, classifyBlocksWithAI} from '../utils/ai_utils.js';
+import {classifyBlocksWithAI} from '../utils/ai_utils.js';
 import {generateFullSelectorPath, analyzeSelectorPath, isLikelyFrameworkWrapper} from '../utils/dom_utils.js';
 import path from 'path';
 import fs from 'fs';
@@ -854,17 +854,9 @@ export class ContentService {
               return;
             }
 
-            // Check if this is a PDF or DOCX link
-            const isPdfOrDocx = href.toLowerCase().endsWith('.pdf') || href.toLowerCase().endsWith('.docx');
-
-            // For PDF/DOCX links that are relative, we'll download them
-            if (isPdfOrDocx && !href.startsWith('http') && !href.startsWith('//')) {
-              // Add to download queue - we'll process these after scanning all links
-              documentDownloads.push({
-                element: el,
-                href
-              });
-            } else if (!href.startsWith('http') && !href.startsWith('//')) {
+            // Skip PDF/DOCX processing here - it's handled in crawl_service.js
+            // This avoids duplicate download attempts
+            if (!href.startsWith('http') && !href.startsWith('//')) {
               // For other relative links, convert to absolute
               try {
                 const absoluteUrl = new URL(href, baseUrl).href;
@@ -878,20 +870,7 @@ export class ContentService {
           }
         });
 
-      // Process document downloads
-      if (documentDownloads.length > 0) {
-        logger.info(`[DOCUMENT] Found ${documentDownloads.length} document links to download`);
-
-        for (const item of documentDownloads) {
-          const result = await this.fileService.downloadDocument(item.href, baseUrl, hostname);
-
-          if (result.success) {
-            // Update the link to point to the local file
-            $(item.element).attr('href', result.relativePath);
-            logger.info(`[DOCUMENT] Updated link to local path: ${result.relativePath}`);
-          }
-        }
-      }
+      // Document downloads are now handled in crawl_service.js to avoid duplicates
     } catch (error) {
       logger.error(`[LINKS] Error processing links: ${error.message}`);
     }

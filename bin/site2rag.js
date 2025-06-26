@@ -9,8 +9,8 @@ import logger from '../src/services/logger_service.js';
 import {ConfigManager} from '../src/config_manager.js';
 import {SiteProcessor} from '../src/site_processor.js';
 import {DefaultCrawlState} from '../src/core/crawl_state.js';
-import {loadAIConfig, getLLMConfigFromFlags, createFallbackConfig} from '../src/core/ai_config.js';
-import {insertionTracker} from '../src/core/context_processor.js';
+import {loadAIConfig, getLLMConfigFromFlags} from '../src/core/ai_config.js';
+import {insertionTracker} from '../src/core/context_enrichment.js';
 import {settingsMenu, loadGlobalAISettings, promptForAISettings, saveGlobalAISettings} from '../src/cli/settings.js';
 import {aiServiceAvailable} from '../src/utils/ai_utils.js';
 import fs from 'fs';
@@ -78,7 +78,7 @@ async function handleFileProcessing(filePath, options) {
 
     logger.info(`Processing file: ${filePath}`);
 
-    // Load AI configuration with dual system: explicit LLM selection + smart fallback (same logic as URL processing)
+    // Load AI configuration - explicit LLM selection or default
     let aiConfig;
     try {
       // 1. First priority: Explicit LLM selection via flags
@@ -87,15 +87,8 @@ async function handleFileProcessing(filePath, options) {
         aiConfig = llmConfig;
         logger.info(`Using LLM: ${llmConfig.provider}/${llmConfig.model}`);
       } else {
-        // 2. Second priority: Smart fallback system
-        const fallbackConfig = createFallbackConfig(options);
-        if (fallbackConfig) {
-          aiConfig = fallbackConfig;
-          logger.info(`Using auto-fallback with ${fallbackConfig.availableLLMs.length} LLMs available`);
-        } else {
-          // 3. Third priority: Default config
-          aiConfig = loadAIConfig();
-        }
+        // 2. Use default config
+        aiConfig = loadAIConfig();
       }
     } catch (error) {
       logger.error(`LLM configuration error: ${error.message}`);
@@ -243,20 +236,9 @@ program
   .option('--flat', 'Store all files in top-level folder with path-derived names')
   .option('--no-enhancement', 'Extract entities only, do not enhance text content')
   .option('--anthropic <env_var>', 'Use Anthropic Claude API with key from environment variable')
-  .option('--use_opus4', 'Use Anthropic Claude 3.5 Sonnet (requires ANTHROPIC_API_KEY)')
   .option('--use_haiku', 'Use Anthropic Claude 3.5 Haiku (requires ANTHROPIC_API_KEY)')
   .option('--use_gpt4o', 'Use OpenAI GPT-4o (requires OPENAI_API_KEY)')
-  .option('--use_gpt4o_mini', 'Use OpenAI GPT-4o-mini (requires OPENAI_API_KEY)')
-  .option('--use_gpt4_turbo', 'Use OpenAI GPT-4 Turbo (requires OPENAI_API_KEY)')
-  .option('--use_o1_mini', 'Use OpenAI o1-mini (requires OPENAI_API_KEY)')
-  .option('--use_mistral_large', 'Use Mistral Large (requires MISTRAL_API_KEY)')
-  .option('--use_perplexity', 'Use Perplexity API (requires PERPLEXITY_API_KEY)')
-  .option('--use_r1_grok', 'Use xAI Grok (requires XAI_API_KEY)')
-  .option('--auto-fallback', 'Enable smart LLM fallback (try best available LLM)')
-  .option(
-    '--fallback-order <sequence>',
-    'Custom fallback order (comma-separated): gpt4o,gpt4o-mini,opus4,gpt4-turbo,ollama'
-  )
+  .option('--use_ollama', 'Use local Ollama with qwen2.5:14b model')
   .option('--exclude-paths <paths>', 'Exclude URL paths (comma-separated): /terms,/privacy,/blog')
   .option('--exclude-patterns <patterns>', 'Exclude URLs matching regex patterns (comma-separated)')
   .option('--include-language <lang>', 'Only crawl pages with specific language (e.g., en, es, fr)')
@@ -476,7 +458,7 @@ Examples:
 
     logger.info(`Creating SiteProcessor with limit=${limit}, flat=${useFlat}`);
 
-    // Load AI configuration with dual system: explicit LLM selection + smart fallback
+    // Load AI configuration - explicit LLM selection or default
     let aiConfig;
     try {
       // 1. First priority: Explicit LLM selection via flags
@@ -485,31 +467,24 @@ Examples:
         aiConfig = llmConfig;
         logger.info(`Using LLM: ${llmConfig.provider}/${llmConfig.model}`);
       } else {
-        // 2. Second priority: Smart fallback system
-        const fallbackConfig = createFallbackConfig(options);
-        if (fallbackConfig) {
-          aiConfig = fallbackConfig;
-          logger.info(`Using auto-fallback with ${fallbackConfig.availableLLMs.length} LLMs available`);
-        } else {
-          // 3. Third priority: Default config
-          aiConfig = loadAIConfig();
+        // 2. Use default config
+        aiConfig = loadAIConfig();
 
-          // Override with Anthropic if flag is provided (legacy support)
-          if (options.anthropic) {
-            const apiKey = process.env[options.anthropic];
-            if (!apiKey) {
-              logger.error(`Environment variable ${options.anthropic} not found`);
-              process.exit(1);
-            }
-
-            aiConfig = {
-              provider: 'anthropic',
-              model: 'claude-3-haiku-20240307',
-              host: 'https://api.anthropic.com',
-              apiKey: apiKey,
-              timeout: 15000 // 15 second timeout for API calls
-            };
+        // Override with Anthropic if flag is provided (legacy support)
+        if (options.anthropic) {
+          const apiKey = process.env[options.anthropic];
+          if (!apiKey) {
+            logger.error(`Environment variable ${options.anthropic} not found`);
+            process.exit(1);
           }
+
+          aiConfig = {
+            provider: 'anthropic',
+            model: 'claude-3-haiku-20240307',
+            host: 'https://api.anthropic.com',
+            apiKey: apiKey,
+            timeout: 15000 // 15 second timeout for API calls
+          };
         }
       }
     } catch (error) {
@@ -535,6 +510,14 @@ Examples:
     });
     // Set up verbose logging if requested
     const verbose = options.verbose;
+    const testMode = options.test;
+    
+    // Configure logger based on flags
+    if (verbose || testMode) {
+      logger.verbose = true;
+      logger.debug = true;
+    }
+    
     const log = (...args) => {
       if (verbose) logger.info('[VERBOSE]', ...args);
     };

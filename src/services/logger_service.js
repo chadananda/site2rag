@@ -22,7 +22,7 @@ class LoggerService {
         prefix: '[WARN]',
         color: '\x1b[33m', // Yellow
         enabled: true,
-        productionLevel: 'all'
+        productionLevel: 'none' // Only show warnings in debug/verbose mode
       },
       ERROR: {
         prefix: '[ERROR]',

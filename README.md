@@ -199,10 +199,10 @@ Original: "The company achieved remarkable growth last quarter." Enhanced: "The 
 
 #### How It Works
 
-1. **Smart Windowing**: Uses 80% of model's context capacity to maximize available context
-2. **Parallel Processing**: All paragraphs in a window processed simultaneously (10x speedup)
-3. **Cache Optimization**: Static content cached once, only dynamic batches transmitted (90% token savings)
-4. **Inline Enhancement**: Context added inline with `[[...]]` preserving readability
+1. **Optimized Windowing**: Uses fixed 1200/600 word windows for optimal results with mini models
+2. **Parallel Processing**: All blocks processed simultaneously with rate limiting (10 concurrent)
+3. **Plain Text Responses**: AI returns enhanced text directly, no JSON parsing overhead
+4. **Strict Validation**: Ensures only `[[context]]` insertions are added, original text preserved exactly
 
 #### Context Types We Disambiguate
 
@@ -222,7 +222,7 @@ Original: "The company achieved remarkable growth last quarter." Enhanced: "The 
 
 #### No Hallucination Guarantee 🛡️
 
-All disambiguation context is derived **only** from information found elsewhere in the same document - no external knowledge is added. This ensures accuracy and traceability.
+All disambiguation context is derived **only** from information found elsewhere in the same document - no external knowledge is added. This ensures accuracy and traceability. The system uses strict validation to reject any responses that modify the original text beyond adding `[[context]]` insertions.
 
 **Result**: Every paragraph becomes a self-contained, context-rich unit perfect for RAG retrieval! 🎯
 

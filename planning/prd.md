@@ -87,10 +87,12 @@ A CLI tool designed for `npx` execution that converts entire websites into maint
 
 **Purpose**: Enhance individual paragraphs with disambiguating context so they can stand alone when retrieved by RAG systems, dramatically improving search relevance and context understanding.
 
-**Two-Pass Architecture**:
+**Architecture**:
 
-- **Pass 1: Entity Extraction** - Build comprehensive entity graph with sliding windows for large documents
-- **Pass 2: Context Enhancement** - Enhance each content block with entity-aware disambiguation using cached context
+- **Sliding Window Processing** - Uses optimized 1200/600 word windows for mini models
+- **Plain Text Responses** - AI returns enhanced text directly, separated by blank lines
+- **Strict Validation** - Ensures only `[[context]]` insertions are added, no text modifications
+- **Parallel Processing** - Up to 10 concurrent AI calls with rate limiting
 
 **Enhanced Disambiguation Types** (13 rules):
 

@@ -2,7 +2,7 @@
 
 ## Summary
 
-GPT-4o-mini performs poorly with JSON-constrained responses but works well with plain text. The model adds only 2-3 disambiguations with JSON but 8+ without it.
+The context disambiguation system has been refactored to use plain text responses instead of JSON, resulting in better performance with mini models. The system now uses strict validation to ensure only `[[context]]` insertions are added.
 
 ## Key Discovery
 
@@ -100,6 +100,13 @@ The sliding window approach is working correctly:
    - Send pronoun locations explicitly to the AI
    - Use a two-pass approach: identify then disambiguate
 
-## Conclusion
+## Current Implementation
 
-GPT-4o-mini is not following the disambiguation instructions comprehensively. While it can disambiguate correctly when prompted with specific examples, it's not systematically processing all pronouns in the document. This appears to be a limitation of the mini model's instruction-following capabilities rather than a bug in our code.
+The system has been updated to:
+1. Use plain text responses (blocks separated by blank lines)
+2. Implement strict validation that rejects any text modifications
+3. Use optimized 1200/600 word windows for mini models
+4. Skip headers and code blocks from processing
+5. Default to Claude 3.5 Haiku for better disambiguation performance
+
+This approach works better with mini models and provides more reliable results.

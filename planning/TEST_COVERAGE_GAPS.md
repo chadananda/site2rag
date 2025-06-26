@@ -89,14 +89,16 @@ Missing tests:
 - Error handling for failed downloads
 - Filename generation for documents without extensions
 
-### 6. Enhanced Context Processing
-**File**: Various context processors
+### 6. Context Disambiguation Processing
+**File**: `src/core/context_processor_simple.js`
 
 Missing tests:
-- Preservation of metadata-rich content during context processing
-- JSON-LD data retention in processed output
-- Author bio inclusion in context
-- Structured data preservation
+- Plain text response parsing (blocks separated by blank lines)
+- Strict validation of `[[context]]` insertions only
+- Window creation with 1200/600 word sizes
+- Header and code block skipping
+- Text cleaning for context (removing markdown/links/images)
+- Parallel processing with rate limiting
 
 ## Critical Gaps Requiring Immediate Attention
 
