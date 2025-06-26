@@ -477,9 +477,10 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
     return {};
   }
 
-  // Initialize progress with actual request count
+  // Initialize progress with actual request count from tracker if available
   if (progressCallback) {
-    progressCallback(0, totalRequests);
+    const initialTotal = aiRequestTracker.isInitialized ? aiRequestTracker.totalExpected : totalRequests;
+    progressCallback(0, initialTotal);
   }
 
   // Phase 2: Process all requests in parallel with rate limiting
@@ -618,7 +619,8 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
         // Update progress
         completedRequests.count++;
         if (progressCallback) {
-          progressCallback(completedRequests.count, totalRequests);
+          const currentTotal = aiRequestTracker.isInitialized ? aiRequestTracker.totalExpected : totalRequests;
+          progressCallback(completedRequests.count, currentTotal);
         }
         
         // Track completion in the shared tracker
@@ -640,7 +642,8 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
         // Update progress even on failure
         completedRequests.count++;
         if (progressCallback) {
-          progressCallback(completedRequests.count, totalRequests);
+          const currentTotal = aiRequestTracker.isInitialized ? aiRequestTracker.totalExpected : totalRequests;
+          progressCallback(completedRequests.count, currentTotal);
         }
         
         // Track completion in the shared tracker even on failure
