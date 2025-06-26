@@ -414,7 +414,7 @@ export class CrawlService {
     this.visitedUrls = new Set(); // URLs already processed in this session
     this.queuedUrls = new Set(); // URLs in the queue to be processed
     this.eligibleUrls = new Set(); // URLs that pass all filters (for accurate progress tracking)
-    this.foundUrls = []; // URLs successfully processed
+    this.foundUrls = new Set(); // URLs successfully processed (Set to prevent memory leak)
     this.contentHashes = new Map(); // In-memory cache of URL content hashes for this session
     this.linkMap = {}; // Map of source URLs to their outbound links
 
@@ -662,18 +662,18 @@ export class CrawlService {
 
       logger.info('Phase 2: Crawling - Starting selective crawl...');
       await this.crawl(url, 0);
-      logger.info(`Crawl completed with ${this.foundUrls.length} URLs found`);
+      logger.info(`Crawl completed with ${this.foundUrls.size} URLs found`);
 
-      return this.foundUrls;
+      return Array.from(this.foundUrls);
     } catch (err) {
       if (err instanceof CrawlLimitReached) {
-        logger.info(`Crawl limit reached after ${this.foundUrls.length} URLs`);
+        logger.info(`Crawl limit reached after ${this.foundUrls.size} URLs`);
         // This is an expected condition, not an error
         // Database state is automatically saved as we go
         logger.info(`[STATE] Crawl state is stored in the database`);
 
         // Return the array of found URLs
-        return this.foundUrls;
+        return Array.from(this.foundUrls);
       }
       logger.error('Error during crawl:', err);
       throw err;
@@ -737,7 +737,7 @@ export class CrawlService {
    * @param {number} depth - Current crawl depth
    */
   async queueUrl(url, depth) {
-    if (this.foundUrls.length >= this.options.maxPages) return;
+    if (this.foundUrls.size >= this.options.maxPages) return;
     if (this.maxDepth > 0 && depth > this.maxDepth) return;
     let normalizedUrl = url;
     if (this.urlService && this.urlService.normalizeUrl) {
@@ -853,7 +853,7 @@ export class CrawlService {
 
     // Process each valid URL directly
     for (const sitemapUrl of validUrls) {
-      if (this.foundUrls.length >= this.maxPages) {
+      if (this.foundUrls.size >= this.maxPages) {
         logger.info(`Reached page limit of ${this.maxPages}`);
         break;
       }
@@ -899,8 +899,8 @@ export class CrawlService {
       logger.crawl(`Processing URL directly: ${normalizedUrl}`);
 
       // Check if we've reached the maximum number of pages
-      if (this.foundUrls.length >= this.maxPages) {
-        logger.crawl(`Reached max pages limit: ${this.foundUrls.length}/${this.maxPages}`, true);
+      if (this.foundUrls.size >= this.maxPages) {
+        logger.crawl(`Reached max pages limit: ${this.foundUrls.size}/${this.maxPages}`, true);
         return;
       }
 
@@ -1021,8 +1021,8 @@ export class CrawlService {
       }
 
       // Add to found URLs list
-      this.foundUrls.push(normalizedUrl);
-      logger.crawl(`Added URL to found list: ${normalizedUrl} (${this.foundUrls.length}/${this.maxPages})`);
+      this.foundUrls.add(normalizedUrl);
+      logger.crawl(`Added URL to found list: ${normalizedUrl} (${this.foundUrls.size}/${this.maxPages})`);
 
       // Mark download as complete
       this.progressService.completeUrl(normalizedUrl, 'success');
@@ -1439,9 +1439,9 @@ export class CrawlService {
     }
 
     // Check if we've reached the maximum number of pages
-    if (this.foundUrls.length >= this.maxPages) {
+    if (this.foundUrls.size >= this.maxPages) {
       this.activeCrawls--;
-      logger.crawl(`Reached max pages limit: ${this.foundUrls.length}/${this.maxPages}`, true);
+      logger.crawl(`Reached max pages limit: ${this.foundUrls.size}/${this.maxPages}`, true);
       throw new CrawlLimitReached('Crawl limit reached');
     }
 
@@ -1917,8 +1917,8 @@ ${markdownContent}`;
       }
 
       // Successfully processed the page - add to found URLs list
-      this.foundUrls.push(normalizedUrl);
-      logger.crawl(`Added URL to found list: ${normalizedUrl} (${this.foundUrls.length}/${this.maxPages})`);
+      this.foundUrls.add(normalizedUrl);
+      logger.crawl(`Added URL to found list: ${normalizedUrl} (${this.foundUrls.size}/${this.maxPages})`);
       this.totalUrlsMapped++;
       if (this.totalUrlsMapped % 100 === 0) {
         logger.crawl(`Total URLs mapped so far: ${this.totalUrlsMapped}`);
@@ -1930,7 +1930,7 @@ ${markdownContent}`;
         const totalEligible = this.eligibleUrls.size;
         this.progressService.updateStats({
           totalUrls: totalEligible,
-          crawledUrls: this.foundUrls.length
+          crawledUrls: this.foundUrls.size
         });
       }
 
@@ -2062,8 +2062,8 @@ ${markdownContent}`;
       // Process links recursively
       for (const link of links_to_crawl) {
         // Skip if we've reached the page limit
-        if (this.foundUrls.length >= this.maxPages) {
-          logger.crawl(`Reached max pages limit during link processing: ${this.foundUrls.length}/${this.maxPages}`);
+        if (this.foundUrls.size >= this.maxPages) {
+          logger.crawl(`Reached max pages limit during link processing: ${this.foundUrls.size}/${this.maxPages}`);
           throw new CrawlLimitReached('Crawl limit reached');
         }
 
@@ -2345,8 +2345,8 @@ ${markdownContent}`;
         }
         
         // Add to foundUrls to count towards the limit (treat as first-class page)
-        this.foundUrls.push(url);
-        logger.info(`[BINARY_TRACKING] Added binary file to foundUrls: ${url} (${this.foundUrls.length}/${this.maxPages})`);
+        this.foundUrls.add(url);
+        logger.info(`[BINARY_TRACKING] Added binary file to foundUrls: ${url} (${this.foundUrls.size}/${this.maxPages})`);
         
         // Update database to track for efficient re-crawls
         if (this.contentService?.db) {

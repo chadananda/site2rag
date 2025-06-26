@@ -256,7 +256,7 @@ Watch for these and stop immediately:
 - **Minimum Block Size**: 100 characters (filters out trivial content)
 - **Response Format**: Plain text with blank line separators (no JSON)
 - **Primary Provider**: Claude 3.5 Haiku (default, best for disambiguation)
-- **Fallback Order**: haiku → gpt4o-mini → gpt4o → opus4 → gpt4-turbo → ollama
+- **Fallback Order**: haiku → gpt4o → opus4 → gpt4-turbo → ollama
 - **Validation**: Strict - only `[[context]]` insertions allowed, original text preserved
 - **Processing**: Headers and code blocks skipped, only content blocks enhanced
 

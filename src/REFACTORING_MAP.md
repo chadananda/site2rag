@@ -41,6 +41,23 @@ services/url_service.js
 
 utils/errors.js
 └── CrawlLimitReached                               [Simple error class]
+
+utils/urlSecurity.js                                [NEW - Security utilities]
+├── validateUrl(url, options) → {isValid, reason}   [URL validation]
+├── sanitizeFilename(filename) → string             [Path traversal prevention]
+├── isPathSafe(basePath, targetPath) → boolean      [Directory escape check]
+├── createSafeUrlResolver(baseUrl, options) → func  [Safe URL resolution]
+└── UrlRateLimiter class                            [Request rate limiting]
+
+utils/performanceOptimizer.js                       [NEW - Performance utilities]
+├── BoundedArray class                              [Memory-safe array]
+├── BoundedSet class                                [Memory-safe set]
+├── LRUCache class                                  [Least Recently Used cache]
+├── BatchProcessor class                            [Batch async operations]
+├── ResourcePool class                              [Object pooling]
+├── debounce(func, wait) → function                 [Debounce utility]
+├── throttle(func, limit) → function                [Throttle utility]
+└── MemoryMonitor class                             [Memory usage tracking]
 ```
 
 ### ⚠️ **MEDIUM SAFETY** (Stateful but Moveable with Care)
@@ -69,6 +86,12 @@ core/crawl_state.js
 ├── DefaultCrawlState.getPage(url) → pageData       [DATABASE READ]
 ├── DefaultCrawlState.upsertPage(data)              [DATABASE WRITE]
 └── DefaultCrawlState.finalizeSession()             [DATABASE TRANSACTION]
+
+core/context_processor_simple.js
+├── enhanceDocumentsSimplified(documents, aiConfig) [AI orchestration]
+├── createSlidingWindows(blocks, metadata)          [Window creation]
+├── processWindowBatch(window, aiConfig)            [AI calls]
+└── reassembleBlocks(blocks, results)               [Block reassembly]
 
 services/fetch_service.js
 ├── FetchService.fetchRobotsTxt(domain)             [NETWORK I/O + STATE]

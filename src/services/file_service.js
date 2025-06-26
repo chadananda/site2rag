@@ -137,6 +137,13 @@ This file contains HTML blocks that were removed during content processing.
    * @returns {string} - Full file path
    */
   getOutputPath(domain, filename, createDir = true) {
+    // Path traversal protection
+    if (filename && (filename.includes('../') || filename.includes('..\\') || path.isAbsolute(filename))) {
+      throw new Error('Invalid filename: potential path traversal detected');
+    }
+    if (domain && (domain.includes('../') || domain.includes('..\\') || path.isAbsolute(domain))) {
+      throw new Error('Invalid domain: potential path traversal detected');
+    }
     // Ensure the output directory exists
     if (createDir && !fs.existsSync(this.outputDir)) {
       logger.info(`Creating output directory: ${this.outputDir}`);
@@ -269,6 +276,10 @@ This file contains HTML blocks that were removed during content processing.
       const documentData = await response.arrayBuffer();
       const buffer = Buffer.from(documentData);
 
+      // Validate URL before processing
+      if (absoluteUrl.includes('file://')) {
+        return {success: false, error: 'File protocol not allowed'};
+      }
       // Extract filename from URL or use a hash
       const urlObj = new URL(absoluteUrl);
       let filename = path.basename(urlObj.pathname);

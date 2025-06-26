@@ -144,6 +144,9 @@ Traditional scrapers use crude CSS selectors. `site2rag` uses **local AI** to un
 - **External CDN support** - Downloads PDFs even from S3, CloudFlare, etc.
 - **Smart deduplication** - Won't download the same document twice
 - **Organized storage** - Documents saved in `assets/documents/` directory
+- **Binary file tracking** - PDFs and other binary files tracked as first-class pages
+- **Change detection** - Re-downloads binary files when source changes
+- **Database integration** - Binary files tracked in SQLite with metadata
 
 **Before** (raw HTML):
 
@@ -301,6 +304,7 @@ npx site2rag docs.example.com --auto-fallback
 ```bash
 # Limit pages and use custom output directory
 npx site2rag docs.example.com --limit 100 --output ./my-knowledge-base
+# Progress bar accurately shows remaining pages based on limit
 
 # Update existing crawl (only downloads changed content)
 npx site2rag docs.example.com --update
@@ -491,7 +495,7 @@ npx site2rag docs.example.com --update --auto-fallback
 | --- | --- | --- |
 | `input` | URL to crawl or file path to process | `npx site2rag docs.example.com` |
 | `-o, --output <path>` | Output directory for URLs or file path for files | `--output ./my-docs` |
-| `--limit <num>` | Limit the number of pages downloaded (URL mode only) | `--limit 100` |
+| `--limit <num>` | Limit the number of pages downloaded (URL mode only) - progress bar shows accurate count | `--limit 100` |
 | `--flat` | Store all files in top-level folder with path-derived names | `--flat` |
 | `--update` | Update existing crawl (only changed content) | `--update` |
 | `-s, --status` | Show status for a previous crawl | `--status` |

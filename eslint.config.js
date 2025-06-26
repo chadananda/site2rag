@@ -12,7 +12,7 @@ export default defineConfig([
       'tests/debug/**/*',
       'custom-output/**/*',
       'oceanoflights.org/**/*',
-      '**/*.error.md',
+      '**/*.md',
       'node_modules/**/*',
       'package-lock.json'
     ]

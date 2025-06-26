@@ -39,6 +39,7 @@
     "test:quicktest:count-blocks": "grep -E '^(#+|[A-Z])' tests/tmp/sites/quicktest/the-ocean-adventure.md | wc -l",
     "test:ai-direct": "node tests/tmp/test-ai-direct.js",
     "clean:test-scripts": "rm -f tests/tmp/test-*.js",
+    "test:security": "vitest tests/unit/utils/urlSecurity.test.js tests/unit/utils/performanceOptimizer.test.js",
     "format": "npx prettier --write .",
     "lint": "npx eslint . --ext .js",
     "lint:fix": "npx eslint . --ext .js --fix",

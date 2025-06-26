@@ -73,6 +73,9 @@ A CLI tool designed for `npx` execution that converts entire websites into maint
 - **Maintain relative paths** in markdown
 - **Asset deduplication** by content hash
 - **Organize by content type** in structured folders
+- **Binary files as pages** - PDFs and documents tracked in database as first-class pages
+- **Binary change detection** - Re-downloads when source files change
+- **Progress tracking** - Binary files included in crawl progress counts
 
 ### 5. AI Integration & RAG Context Disambiguation
 
@@ -131,6 +134,9 @@ Before: "I started working on the project in India." After: "I (Chad Jones, auth
 - **Detailed logging** with configurable verbosity
 - **Error handling** with retry mechanisms
 - **Summary reports** of crawl results
+- **Accurate progress with --limit** - Progress bar shows actual remaining pages based on limit
+- **Binary file tracking** - PDFs and documents included in progress counts
+- **AI request tracking** - Shows AI enhancement progress separately
 
 ## Technical Architecture
 
@@ -264,7 +270,10 @@ CREATE TABLE pages (
   depth INTEGER,
   status TEXT,
   filepath TEXT,
-  word_count INTEGER
+  word_count INTEGER,
+  is_pdf INTEGER DEFAULT 0,                     -- Binary file tracking
+  pdf_conversion_status TEXT DEFAULT NULL,      -- PDF conversion status
+  pdf_md_path TEXT DEFAULT NULL                 -- Path to converted markdown
 );
 
 CREATE TABLE assets (

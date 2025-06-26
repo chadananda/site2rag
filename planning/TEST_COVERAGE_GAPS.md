@@ -77,6 +77,9 @@ Missing tests:
 - Duplicate download prevention
 - Document storage in correct subdirectory structure
 - Progress tracking for document downloads
+- Binary files tracked as first-class pages in database
+- Change detection for binary files (re-download when source changes)
+- PDF metadata tracking (is_pdf, pdf_conversion_status, pdf_md_path)
 
 ### 5. Binary Content Handling
 **File**: `src/services/crawl_service.js`

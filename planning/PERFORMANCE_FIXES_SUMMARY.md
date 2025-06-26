@@ -79,3 +79,15 @@ With these critical fixes:
    - **UX**: Smooth progress bar updates showing real progress
 
 The performance should now be dramatically improved. The AI limiter fix alone should provide massive speedup since we're now actually using the configured concurrency of 10 instead of processing everything sequentially.
+
+## Update: Simplified Sliding Window Implementation (Latest)
+
+The codebase has since moved to a radically simplified sliding window approach in `context_processor_simple.js`:
+
+1. **No Caching**: Removed all caching complexity in favor of pure parallelization
+2. **Full Parallelization**: All windows from all documents prepared upfront with pLimit(10)
+3. **Simple Window Design**: Each window processes ~1000 words with context from previous window
+4. **Performance**: ~10x faster than the caching approach
+5. **Progress Tracking**: Shows "AI requests" instead of blocks for accurate progress
+
+This simplified implementation addresses the "way way too slow" performance issues by eliminating caching overhead entirely.
