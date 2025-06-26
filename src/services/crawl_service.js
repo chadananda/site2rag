@@ -1706,10 +1706,14 @@ ${markdownContent}`;
       // Process HTML content
       const {$, main, links: allLinks, removedBlocks} = await this.contentService.processHtml(html, normalizedUrl);
 
-      // Extract document links (PDFs, DOCX, etc.) and add them to the links array
+      // Extract and download PDFs/documents from external domains
+      // These won't go through the normal crawl queue to bypass domain filtering
+      await this.downloadExternalDocuments($, normalizedUrl);
+      
+      // Extract document links from same domain to add to crawl queue
       const documentLinks = this.extractDocumentLinks($, normalizedUrl);
       if (documentLinks.length > 0) {
-        logger.info(`[DOCS] Extracted ${documentLinks.length} document links from ${normalizedUrl}`);
+        logger.info(`[DOCS] Extracted ${documentLinks.length} same-domain document links from ${normalizedUrl}`);
       }
       const combinedLinks = [...allLinks, ...documentLinks];
 
@@ -2444,7 +2448,9 @@ ${markdownContent}`;
     const downloadableExtensions = ['.pdf', '.doc', '.docx', '.odt', '.rtf'];
     
     const allLinks = $('a[href]').length;
-    logger.debug(`[DOCS] Checking ${allLinks} links on ${pageUrl}`);
+    if (logger.verbose) {
+      logger.info(`[DOCS] Checking ${allLinks} links on ${pageUrl}`);
+    }
     
     $('a[href]').each((i, el) => {
       const href = $(el).attr('href');
@@ -2462,7 +2468,9 @@ ${markdownContent}`;
             documentUrls.push(normalizedUrl);
           } catch (e) {
             // Invalid URL, skip
-            logger.debug(`[DOCS] Invalid document URL: ${href}`);
+            if (logger.verbose) {
+              logger.info(`[DOCS] Invalid document URL: ${href}`);
+            }
           }
         }
       }
@@ -2473,6 +2481,134 @@ ${markdownContent}`;
     }
     
     return documentUrls;
+  }
+
+  /**
+   * Download documents (PDFs, DOCX, etc.) from external domains directly
+   * This bypasses the normal crawl queue and domain filtering
+   * @param {Object} $ - Cheerio instance of the page
+   * @param {string} pageUrl - URL of the page containing documents
+   * @returns {Promise<void>}
+   * @private
+   */
+  async downloadExternalDocuments($, pageUrl) {
+    const downloadableExtensions = ['.pdf', '.doc', '.docx', '.odt', '.rtf'];
+    const downloads = [];
+    
+    $('a[href]').each((i, el) => {
+      const href = $(el).attr('href');
+      if (href) {
+        // Check if the link has a downloadable extension
+        const hasDownloadableExt = downloadableExtensions.some(ext => 
+          href.toLowerCase().endsWith(ext) || href.toLowerCase().includes(ext + '?')
+        );
+        
+        if (hasDownloadableExt) {
+          try {
+            // Resolve to absolute URL
+            const absoluteUrl = new URL(href, pageUrl).href;
+            downloads.push(absoluteUrl);
+          } catch (e) {
+            if (logger.verbose) {
+              logger.info(`[DOCS] Invalid document URL: ${href}`);
+            }
+          }
+        }
+      }
+    });
+
+    if (downloads.length === 0) return;
+    
+    logger.info(`[DOCS] Found ${downloads.length} document links on ${pageUrl}`);
+    
+    // Download each document
+    for (const docUrl of downloads) {
+      // Skip if we've reached the page limit
+      if (this.foundUrls.size >= this.maxPages) {
+        logger.info(`[DOCS] Reached max pages limit, skipping remaining documents`);
+        break;
+      }
+      
+      // Skip if already downloaded
+      if (this.visitedUrls.has(docUrl)) {
+        continue;
+      }
+      
+      try {
+        logger.info(`[DOCS] Downloading document: ${docUrl}`);
+        
+        // Mark as visited to prevent duplicates
+        this.visitedUrls.add(docUrl);
+        
+        // Fetch the document
+        const response = await fetch(docUrl);
+        if (!response.ok) {
+          logger.warn(`[DOCS] Failed to download document: ${response.status} ${response.statusText}`);
+          continue;
+        }
+        
+        // Get the document data
+        const buffer = await response.arrayBuffer();
+        
+        // Determine filename from URL
+        const urlObj = new URL(docUrl);
+        let filename = path.basename(urlObj.pathname);
+        
+        // If filename is empty, generate one
+        if (!filename || !path.extname(filename)) {
+          const contentType = response.headers.get('content-type') || '';
+          let extension = '.bin';
+          if (contentType.includes('pdf')) extension = '.pdf';
+          else if (contentType.includes('word') || contentType.includes('docx')) extension = '.docx';
+          filename = `document-${Date.now()}${extension}`;
+        }
+        
+        // Save the document
+        const {hostname} = new URL(pageUrl);
+        const savedPath = await this.fileService.saveBinaryFile(
+          Buffer.from(buffer), 
+          hostname, 
+          filename
+        );
+        
+        logger.info(`[DOCS] Saved document to: ${savedPath}`);
+        
+        // Add to foundUrls to count towards limit
+        this.foundUrls.add(docUrl);
+        logger.info(`[DOCS] Document counted towards limit: ${this.foundUrls.size}/${this.maxPages}`);
+        
+        // Save to database for re-crawl tracking
+        if (this.contentService?.db) {
+          const pageData = {
+            url: docUrl,
+            etag: response.headers.get('etag') || null,
+            last_modified: response.headers.get('last-modified') || null,
+            content_hash: this.calculateBinaryHash(buffer),
+            status: response.status,
+            last_crawled: new Date().toISOString(),
+            title: filename,
+            file_path: savedPath,
+            is_binary: true,
+            content_type: response.headers.get('content-type') || 'application/octet-stream'
+          };
+          this.contentService.db.upsertPage(pageData);
+        }
+        
+        // Update progress
+        if (this.progressService) {
+          this.progressService.updateStats({
+            crawledUrls: this.visitedUrls.size,
+            assets: {
+              documents: (this.assetStats.documents || 0) + 1,
+              total: (this.assetStats.total || 0) + 1
+            }
+          });
+        }
+        
+      } catch (error) {
+        logger.error(`[DOCS] Error downloading document ${docUrl}: ${error.message}`);
+      }
+    }
   }
 }
 
