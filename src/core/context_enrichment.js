@@ -4,6 +4,7 @@ import {processDocumentsSimple, enhanceDocumentSimple} from './context_processor
 import {getDB} from '../db.js';
 import logger from '../services/logger_service.js';
 import fs from 'fs';
+import {aiRequestTracker} from './ai_request_tracker.js';
 
 // Global insertion tracking for test mode
 export const insertionTracker = {
@@ -115,6 +116,8 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
   
   const rawDocs = allRawPages;
   
+  logger.info(`[CONTEXT] Found ${rawDocs.length} raw pages to process from database`);
+  
   if (process.env.NODE_ENV === 'test') {
     logger.info(`[CONTEXT] Starting simplified context enhancement for ${rawDocs.length} documents`);
   }
@@ -143,16 +146,19 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
         }
       }
 
-      // Parse markdown into ALL blocks
-      const allBlocks = content.split(/\n{2,}/).map((text, index) => ({text, originalIndex: index}));
+      // Parse markdown into ALL blocks with original indices
+      const allBlocks = content.split(/\n{2,}/).map((text, index) => ({
+        text, 
+        originalIndex: index
+      }));
 
       // Use basic metadata
       const meta = {title: doc.title || '', url: doc.url};
 
-      // Add document to batch processing list
+      // Add document to batch processing list - send blocks with originalIndex preserved
       documentsToProcess.push({
         docId: doc.url,
-        blocks: allBlocks.map(b => b.text), // Simple text array for processor
+        blocks: allBlocks, // Send full block objects to preserve originalIndex
         metadata: meta
       });
 
@@ -175,6 +181,19 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
   }
 
   logger.info(`[CONTEXT] Processing ${documentsToProcess.length} documents with simplified sliding window approach`);
+
+  // Log document details for debugging
+  if (process.env.DEBUG) {
+    documentsToProcess.forEach((doc, idx) => {
+      logger.info(`[CONTEXT] Document ${idx + 1}: ${doc.docId} - ${doc.blocks.length} blocks`);
+    });
+  }
+
+  // Initialize the AI request tracker with all documents
+  // This will calculate the expected total requests across all documents
+  if (progressCallback) {
+    aiRequestTracker.initialize(documentsToProcess, progressCallback);
+  }
 
   // Process all documents together
   const results = await processDocumentsSimple(documentsToProcess, aiConfig, progressCallback);

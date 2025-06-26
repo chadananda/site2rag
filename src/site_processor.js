@@ -12,6 +12,7 @@ import {DefaultCrawlState} from './core/crawl_state.js';
 import logger from './services/logger_service.js';
 import fs from 'fs';
 import path from 'path';
+import {aiRequestTracker} from './core/ai_request_tracker.js';
 /**
  * Main site processor that coordinates the crawling and processing pipeline
  */
@@ -171,6 +172,16 @@ export class SiteProcessor {
       const dbInstance = this.contentService.db;
 
       if (dbInstance) {
+        // Initialize the AI request tracker for parallel processing
+        // We'll update it with actual documents as they're discovered
+        const parallelProgressCallback = (current, total) => {
+          // During crawl, we don't show AI progress bar, just log it
+          logger.info(`[AI] Progress: ${current}/${total} AI requests completed`);
+        };
+        
+        // Initialize with empty array - will be updated as pages are processed
+        aiRequestTracker.initialize([], parallelProgressCallback);
+        
         parallelProcessor = createParallelAIProcessor(dbInstance, this.options.aiConfig);
         parallelProcessor.start();
         logger.info('[AI] Started parallel AI processor - will process pages as they are crawled');
@@ -189,6 +200,9 @@ export class SiteProcessor {
         parallelProcessor.stop();
         const stats = parallelProcessor.getStats();
         logger.info(`[AI] Parallel processor completed: ${stats.processed} pages enhanced during crawl`);
+        
+        // Reset the tracker for batch processing phase
+        aiRequestTracker.reset();
       }
 
       if (this.found.length === 1 && this.options.maxDepth === 0) {
@@ -202,6 +216,7 @@ export class SiteProcessor {
       // Stop parallel processor on error
       if (parallelProcessor) {
         parallelProcessor.stop();
+        aiRequestTracker.reset();
       }
 
       if (!(err instanceof CrawlLimitReached)) {
@@ -272,22 +287,54 @@ export class SiteProcessor {
         if (unprocessedDocs.length > 0) {
           logger.info(`[CONTEXT] Found ${unprocessedDocs.length} unprocessed pages from this crawl`);
           
-          // Estimate ~5 windows per document as initial guess (will update dynamically)
-          const estimatedRequests = unprocessedDocs.length * 5;
-          
-          // Pass the AI config to display provider/model info
-          this.crawlService.progressService.startProcessing(estimatedRequests, this.options.aiConfig);
-
-          // Progress callback will receive actual AI request counts
+          // Initialize the tracker to calculate expected requests
+          // The tracker will provide accurate counts based on actual document content
           const progressCallback = (current, total) => {
+            // Use the tracker's total which will be dynamically updated
             this.crawlService.progressService.updateProcessing(current, total);
           };
+          
+          // Get all documents that need processing to initialize the tracker
+          const docsToProcess = [];
+          for (const doc of unprocessedDocs) {
+            try {
+              const pageData = dbInstance.db.prepare('SELECT file_path, title FROM pages WHERE url = ?').get(doc.url);
+              if (pageData && pageData.file_path && fs.existsSync(pageData.file_path)) {
+                const markdown = await fs.promises.readFile(pageData.file_path, 'utf8');
+                let content = markdown;
+                if (markdown.startsWith('---')) {
+                  const frontmatterEnd = markdown.indexOf('---', 3);
+                  if (frontmatterEnd > 0) {
+                    content = markdown.substring(frontmatterEnd + 3).trim();
+                  }
+                }
+                const blocks = content.split(/\n{2,}/).map((text, index) => ({text, originalIndex: index}));
+                docsToProcess.push({
+                  docId: doc.url,
+                  blocks: blocks,
+                  metadata: {title: pageData.title || '', url: doc.url}
+                });
+              }
+            } catch (err) {
+              logger.warn(`[CONTEXT] Failed to prepare doc ${doc.url}: ${err.message}`);
+            }
+          }
+          
+          // Initialize tracker with all documents to get accurate total
+          aiRequestTracker.initialize(docsToProcess, progressCallback);
+          const stats = aiRequestTracker.getStats();
+          
+          // Pass the AI config to display provider/model info
+          this.crawlService.progressService.startProcessing(stats.totalExpected, this.options.aiConfig);
 
           // Run the main context enrichment for all raw pages
           await runContextEnrichment(dbInstance, this.options.aiConfig, progressCallback);
 
           // Complete processing progress
           this.crawlService.progressService.completeProcessing();
+          
+          // Reset tracker after batch processing
+          aiRequestTracker.reset();
         } else {
           logger.info(`[CONTEXT] All pages already processed by parallel processor`);
         }

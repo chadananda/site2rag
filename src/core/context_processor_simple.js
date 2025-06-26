@@ -15,6 +15,7 @@ import {z} from 'zod';
 import pLimit from 'p-limit';
 import {callAI} from './ai_client.js';
 import debugLogger from '../services/debug_logger.js';
+import {aiRequestTracker} from './ai_request_tracker.js';
 
 // Schema for AI response - plain text for better model compatibility
 const PlainTextResponseSchema = z.string();
@@ -182,6 +183,13 @@ function createSlidingWindows(blocks) {
       // Skip empty blocks and blocks that are too short
       if (blockText.trim().length < MIN_BLOCK_CHARS) {
         debugLogger.ai(`Skipping short block (${blockText.trim().length} chars): "${blockText.substring(0, 50)}..."`);
+        currentWindowIndex++;
+        continue;
+      }
+      
+      // Skip image blocks (they don't need disambiguation)
+      if (blockText.trim().startsWith('![')) {
+        debugLogger.ai(`Skipping image block: "${blockText.substring(0, 50)}..."`);
         currentWindowIndex++;
         continue;
       }
@@ -437,29 +445,39 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
 
     // Create sliding windows for this document
     const windows = createSlidingWindows(doc.blocks);
-    debugLogger.ai(`Document ${doc.docId}: Created ${windows.length} windows`);
+    debugLogger.ai(`Document ${doc.docId}: Created ${windows.length} windows from ${doc.blocks.length} total blocks`);
 
-    // Log window sizes for debugging
-    debugLogger.ai(`Created ${windows.length} windows for processing:`);
-    windows.forEach((w, i) => {
-      debugLogger.ai(`  Window ${i}: ${Object.keys(w.blocks).length} blocks, ${w.wordCount} words`);
-    });
+    // Log window details for debugging
+    if (windows.length > 0) {
+      const totalProcessableBlocks = windows.reduce((sum, w) => sum + Object.keys(w.blocks).length, 0);
+      debugLogger.ai(`  Processing ${totalProcessableBlocks} content blocks across ${windows.length} windows`);
+      if (process.env.DEBUG) {
+        windows.forEach((w, i) => {
+          debugLogger.ai(`  Window ${i}: ${Object.keys(w.blocks).length} blocks, ${w.wordCount} words`);
+        });
+      }
+    }
 
     // Create request for each window
     for (const window of windows) {
       const request = createWindowRequest(window, doc.metadata, doc.docId);
       allRequests.push(request);
     }
+
+    // Update the tracker with actual window count for this document
+    if (aiRequestTracker.isInitialized) {
+      aiRequestTracker.updateDocumentActual(doc.docId, windows.length);
+    }
   }
 
   const totalRequests = allRequests.length;
-  debugLogger.ai(`Total requests to process: ${totalRequests}`);
+  debugLogger.ai(`Total AI requests to process: ${totalRequests} (from ${documents.length} documents)`);
 
   if (totalRequests === 0) {
     return {};
   }
 
-  // Initialize progress
+  // Initialize progress with actual request count
   if (progressCallback) {
     progressCallback(0, totalRequests);
   }
@@ -602,6 +620,11 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
         if (progressCallback) {
           progressCallback(completedRequests.count, totalRequests);
         }
+        
+        // Track completion in the shared tracker
+        if (aiRequestTracker.isInitialized) {
+          aiRequestTracker.trackCompletion(request.docId);
+        }
 
         return {
           docId: request.docId,
@@ -618,6 +641,11 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
         completedRequests.count++;
         if (progressCallback) {
           progressCallback(completedRequests.count, totalRequests);
+        }
+        
+        // Track completion in the shared tracker even on failure
+        if (aiRequestTracker.isInitialized) {
+          aiRequestTracker.trackCompletion(request.docId);
         }
 
         // Return original blocks on error
@@ -695,22 +723,7 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
       } else {
         // Fallback if blockIndices is missing (shouldn't happen with new code)
         debugLogger.ai(`Warning: blockIndices or enhancedBlocks missing for window ${window.windowIndex}`);
-        // Use the old logic as fallback
-        let blockCounter = 0;
-        for (
-          let idx = window.startBlockIndex;
-          idx <= window.endBlockIndex && blockCounter < enhancedBlocksArray.length;
-          idx++
-        ) {
-          const block = doc.blocks[idx];
-          if (block) {
-            const blockText = typeof block === 'string' ? block : block.text || block;
-            if (blockText.trim().length >= MIN_BLOCK_CHARS) {
-              finalBlocks[idx] = enhancedBlocksArray[blockCounter];
-              blockCounter++;
-            }
-          }
-        }
+        // Skip this window in the fallback case
       }
     }
 

@@ -3,6 +3,7 @@
 import {processDocumentsSimple} from './context_processor_simple.js';
 import logger from '../services/logger_service.js';
 import fs from 'fs';
+import {aiRequestTracker} from './ai_request_tracker.js';
 
 /**
  * Monitors database for new 'raw' pages and processes them immediately
@@ -15,8 +16,6 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
   let isRunning = false;
   let intervalId = null;
   let processedUrls = new Set();
-  let totalAIRequests = 0;
-  let completedAIRequests = 0;
   const processorId = `parallel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
   async function processPage(page) {
@@ -66,14 +65,15 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
       // Process with AI
       logger.info(`[AI-PARALLEL] Processing ${eligibleBlocks.length} eligible blocks from ${page.url}`);
 
-      // Track AI requests for this document
-      const estimatedRequests = Math.ceil(eligibleBlocks.length / 5);
-      totalAIRequests += estimatedRequests;
+      // Use the shared tracker's progress callback if initialized
+      const progressCallback = aiRequestTracker.isInitialized 
+        ? () => {
+            const stats = aiRequestTracker.getStats();
+            logger.info(`[AI-PARALLEL] Progress: ${stats.totalCompleted}/${stats.totalExpected} AI requests`);
+          }
+        : null;
 
-      const results = await processDocumentsSimple([doc], aiConfig, (completed, total) => {
-        completedAIRequests++;
-        logger.info(`[AI-PARALLEL] Progress: ${completedAIRequests}/${totalAIRequests} AI requests`);
-      });
+      const results = await processDocumentsSimple([doc], aiConfig, progressCallback);
 
       // Write results back
       if (results[page.url]) {
