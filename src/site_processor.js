@@ -259,11 +259,15 @@ export class SiteProcessor {
           logger.info(`Started LLM enhancement session: ${this.options.aiConfig.provider}/${this.options.aiConfig.model}`);
         }
 
-        // Check how many documents need processing (skip ones already processed by parallel processor)
-        const rawDocs = dbInstance.db.prepare("SELECT url FROM pages WHERE content_status = 'raw'").all();
+        // Check how many documents need processing from this crawl session only
+        const crawledUrls = Array.from(this.crawlService.foundUrls);
+        const placeholders = crawledUrls.map(() => '?').join(',');
+        const rawDocs = placeholders ? 
+          dbInstance.db.prepare(`SELECT url FROM pages WHERE content_status = 'raw' AND url IN (${placeholders})`).all(...crawledUrls) :
+          [];
 
         if (rawDocs.length > 0) {
-          logger.info(`[CONTEXT] Found ${rawDocs.length} remaining raw pages to process`);
+          logger.info(`[CONTEXT] Found ${rawDocs.length} pages from this crawl to process`);
         } else {
           logger.info(`[CONTEXT] All pages already processed by parallel processor`);
         }

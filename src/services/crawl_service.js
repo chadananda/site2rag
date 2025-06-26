@@ -1708,6 +1708,9 @@ ${markdownContent}`;
 
       // Extract document links (PDFs, DOCX, etc.) and add them to the links array
       const documentLinks = this.extractDocumentLinks($, normalizedUrl);
+      if (documentLinks.length > 0) {
+        logger.info(`[DOCS] Extracted ${documentLinks.length} document links from ${normalizedUrl}`);
+      }
       const combinedLinks = [...allLinks, ...documentLinks];
 
       // Filter out external URLs early to avoid processing them later
@@ -2439,6 +2442,9 @@ ${markdownContent}`;
     const documentUrls = [];
     // Only download document types that contain searchable text content
     const downloadableExtensions = ['.pdf', '.doc', '.docx', '.odt', '.rtf'];
+    
+    const allLinks = $('a[href]').length;
+    logger.debug(`[DOCS] Checking ${allLinks} links on ${pageUrl}`);
     
     $('a[href]').each((i, el) => {
       const href = $(el).attr('href');
