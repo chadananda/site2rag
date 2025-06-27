@@ -303,8 +303,13 @@ export class SiteProcessor {
           // Initialize the tracker to calculate expected requests
           // The tracker will provide accurate counts based on actual document content
           const progressCallback = (current, total) => {
+            // Include token data in progress updates
+            const tokenData = {
+              totalTokens: aiRequestTracker.totalTokensUsed,
+              totalCost: aiRequestTracker.totalCost
+            };
             // Use the tracker's total which will be dynamically updated
-            this.crawlService.progressService.updateProcessing(current, total);
+            this.crawlService.progressService.updateProcessing(current, total, tokenData);
           };
 
           // Run the main context enrichment for all raw pages

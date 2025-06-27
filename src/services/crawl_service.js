@@ -428,7 +428,8 @@ export class CrawlService {
     this.progressService =
       options.progressService ||
       new ProgressService({
-        updateFrequency: options.progressUpdateFrequency || 500
+        updateFrequency: options.progressUpdateFrequency || 500,
+        testMode: this.testMode
       });
 
     this.assetStats = {

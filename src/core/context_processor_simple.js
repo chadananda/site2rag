@@ -544,20 +544,30 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
           await new Promise(resolve => setTimeout(resolve, 200)); // 200ms delay between requests
         }
 
+        // Set current model for pricing calculations
+        if (aiRequestTracker.isInitialized && aiConfig.model) {
+          aiRequestTracker.setCurrentModel(aiConfig.model);
+        }
+
         // Call AI with the request
         const response = await callAI(request.prompt, PlainTextResponseSchema, aiConfig);
+        
+        // For now, we don't have access to usage data for plain text responses
+        // This is a limitation we'll need to address in a future update
+        const usage = null;
+        const responseText = response;
 
         // Log response preview to debug
-        const disambCount = (response.match(/\[\[.*?\]\]/g) || []).length;
-        debugLogger.ai(`Response preview: ${response.substring(0, 200)}...`);
+        const disambCount = (responseText.match(/\[\[.*?\]\]/g) || []).length;
+        debugLogger.ai(`Response preview: ${responseText.substring(0, 200)}...`);
         debugLogger.ai(`Total disambiguations in response: ${disambCount}`);
 
-        if (!response) {
+        if (!responseText) {
           throw new Error('Invalid AI response - empty response');
         }
 
         // Parse plain text response into blocks (split by blank lines)
-        const responseBlocks = response
+        const responseBlocks = responseText
           .split(/\n\s*\n/)
           .map(block => block.trim())
           .filter(block => block);
@@ -572,7 +582,7 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
           debugLogger.ai('\n--- AI RESPONSE ---');
           debugLogger.ai('Number of blocks returned:', responseBlocks.length);
           debugLogger.ai('Number of blocks expected:', originalBlocksArray.length);
-          debugLogger.ai('Response preview:', response.substring(0, 300) + '...');
+          debugLogger.ai('Response preview:', responseText.substring(0, 300) + '...');
           debugLogger.ai('==================\n');
         }
 
@@ -649,7 +659,7 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
 
         // Track completion in the shared tracker
         if (aiRequestTracker.isInitialized) {
-          await aiRequestTracker.trackCompletion(request.docId);
+          await aiRequestTracker.trackCompletion(request.docId, usage);
         }
 
         return {
@@ -673,7 +683,7 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
 
         // Track completion in the shared tracker even on failure
         if (aiRequestTracker.isInitialized) {
-          await aiRequestTracker.trackCompletion(request.docId);
+          await aiRequestTracker.trackCompletion(request.docId, null); // No usage data on failure
         }
 
         // Return original blocks on error

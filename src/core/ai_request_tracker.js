@@ -13,6 +13,11 @@ export class AIRequestTracker {
     this.documentActuals = new Map(); // docId -> actual requests
     this.progressCallback = null;
     this.isInitialized = false;
+    // Token tracking
+    this.totalTokensUsed = 0;
+    this.totalCost = 0;
+    this.tokenDetails = []; // Array of {prompt_tokens, completion_tokens, cost}
+    this.currentModel = null; // Track current model for pricing
     // Simple mutex implementation for critical sections
     this._lockPromise = Promise.resolve();
   }
@@ -163,12 +168,25 @@ export class AIRequestTracker {
   /**
    * Track a completed AI request
    * @param {string} docId - Document ID (optional)
+   * @param {Object} usage - Token usage data from AI response
    */
-  async trackCompletion(_docId = null) {
+  async trackCompletion(_docId = null, usage = null) {
     const release = await this._acquireLock();
     try {
       // docId parameter kept for future use
       this.totalCompleted++;
+      
+      // Track token usage if provided
+      if (usage) {
+        const cost = this.calculateCost(usage);
+        this.totalTokensUsed += (usage.total_tokens || 0);
+        this.totalCost += cost;
+        this.tokenDetails.push({
+          prompt_tokens: usage.prompt_tokens || 0,
+          completion_tokens: usage.completion_tokens || 0,
+          cost: cost
+        });
+      }
 
       // If we've exceeded our expected total, update it
       if (this.totalCompleted > this.totalExpected) {
@@ -185,6 +203,43 @@ export class AIRequestTracker {
     } finally {
       release();
     }
+  }
+
+  /**
+   * Calculate cost based on token usage
+   * @param {Object} usage - Token usage data
+   * @returns {number} Cost in dollars
+   */
+  calculateCost(usage) {
+    if (!usage || !usage.total_tokens) return 0;
+    
+    // Pricing per 1K tokens (add more models as needed)
+    const pricing = {
+      'gpt-4o': { prompt: 0.005, completion: 0.015 },
+      'gpt-4o-mini': { prompt: 0.00015, completion: 0.0006 },
+      'claude-3-haiku-20240307': { prompt: 0.00025, completion: 0.00125 },
+      'claude-3-5-sonnet-20241022': { prompt: 0.003, completion: 0.015 },
+      'mistral-large-latest': { prompt: 0.004, completion: 0.012 },
+      'llama-3.1-sonar-large-128k-online': { prompt: 0.001, completion: 0.001 },
+      'grok-beta': { prompt: 0.005, completion: 0.015 }
+    };
+    
+    // Default pricing if model not found
+    const defaultPrice = { prompt: 0.001, completion: 0.002 };
+    const price = pricing[this.currentModel] || defaultPrice;
+    
+    const promptCost = (usage.prompt_tokens || 0) * price.prompt / 1000;
+    const completionCost = (usage.completion_tokens || 0) * price.completion / 1000;
+    
+    return promptCost + completionCost;
+  }
+
+  /**
+   * Set the current model being used (for pricing)
+   * @param {string} model - Model name
+   */
+  setCurrentModel(model) {
+    this.currentModel = model;
   }
 
   /**

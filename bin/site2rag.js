@@ -5,6 +5,17 @@ import {getDB} from '../src/db.js';
 // All DB access must use getDB() from src/db.js. Never instantiate CrawlDB directly.
 // SAFETY: All test crawl outputs must be directed to tests/tmp/sites/ subfolders to prevent accidental deletion of project files.
 import logger from '../src/services/logger_service.js';
+import fileLogger from '../src/services/file_logger_service.js';
+// Setup cleanup handlers for file logger
+process.on('exit', () => fileLogger.close());
+process.on('SIGINT', () => {
+  fileLogger.close();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  fileLogger.close();
+  process.exit(0);
+});
 
 import {ConfigManager} from '../src/config_manager.js';
 import {SiteProcessor} from '../src/site_processor.js';
@@ -95,6 +106,14 @@ async function handleFileProcessing(filePath, options) {
       process.exit(1);
     }
 
+    // Initialize file logging for file processing if --test flag is used
+    if (options.test && options.output) {
+      const outputDir = path.dirname(options.output || filePath);
+      const logFile = fileLogger.initialize(outputDir, true);
+      if (logFile) {
+        logger.info(`Test mode enabled - all debug output will be logged to: ${logFile}`);
+      }
+    }
     // Start insertion tracking session if test mode is enabled
     if (options.test && aiConfig) {
       insertionTracker.enabled = true;
@@ -116,8 +135,12 @@ async function handleFileProcessing(filePath, options) {
     if (options.test && aiConfig && insertionTracker.enabled) {
       insertionTracker.logSessionSummary();
     }
+    // Close file logger if active
+    fileLogger.close();
   } catch (error) {
     logger.error(`File processing failed: ${error.message}`);
+    // Close file logger if active
+    fileLogger.close();
     process.exit(1);
   }
 }
@@ -127,13 +150,18 @@ const homeDir = process.env.HOME || process.env.USERPROFILE;
 const defaultConfigPath = path.join(homeDir, '.site2rag', 'config.json');
 const configPath = process.env.SITE2RAG_CONFIG_PATH || defaultConfigPath;
 
-async function displayHeader() {
+async function displayHeader(aiConfig = null) {
   // Check AI status properly with async
   let aiStatus = '';
   try {
     const available = await aiServiceAvailable();
-    if (available) {
-      aiStatus = chalk.cyan('🧠 AI Processing: qwen2.5:14b ready');
+    if (available && aiConfig) {
+      const provider = aiConfig.provider || 'unknown';
+      const model = aiConfig.model || 'default';
+      aiStatus = chalk.cyan(`🧠 AI Processing: ${provider}/${model} ready`);
+    } else if (available) {
+      // Default to Ollama if no config provided
+      aiStatus = chalk.cyan('🧠 AI Processing: ollama/qwen2.5:14b ready');
     } else {
       aiStatus = chalk.yellow('⚠ AI Processing: AI not available');
     }
@@ -256,7 +284,7 @@ Examples:
   .action(async (input, options, command) => {
     // Display header when running with no arguments (for testing)
     if (process.argv.length === 2) {
-      await displayHeader();
+      await displayHeader(null);
     }
 
     // Determine input type: file or URL
@@ -274,6 +302,7 @@ Examples:
       url = 'https://' + url;
       logger.info(`Adding https:// prefix to URL: ${url}`);
     }
+    // We'll display header after loading AI config below
     // Settings menu
     if (options.settings) {
       await settingsMenu();
@@ -358,6 +387,13 @@ Examples:
         outputDir = `./${hostname}`;
       } catch {
         outputDir = './output';
+      }
+    }
+    // Initialize file logging if --test flag is used
+    if (options.test && outputDir) {
+      const logFile = fileLogger.initialize(outputDir, true);
+      if (logFile) {
+        logger.info(`Test mode enabled - all debug output will be logged to: ${logFile}`);
       }
     }
     if (options.update) {
@@ -494,6 +530,12 @@ Examples:
 
     logger.info(`AI configuration: ${aiConfig ? 'loaded' : 'not available'}`);
 
+    // Display header immediately for better UX with correct AI config
+    if (url) {
+      console.clear(); // Clear screen before showing header
+      await displayHeader(aiConfig);
+    }
+
     const processor = new SiteProcessor(url, {
       crawlState,
       outputDir,
@@ -567,6 +609,8 @@ Examples:
       }
     } finally {
       crawlDb.finalizeSession();
+      // Close file logger if active
+      fileLogger.close();
     }
     process.exit(0);
   });

@@ -15,6 +15,10 @@ export class ProgressService {
     this.options = options;
     // Get package version
     this.version = this.getPackageVersion();
+    // Check if we're in test/log mode
+    this.testMode = options.testMode || false;
+    // Also check if file logging is active
+    this.fileLoggingActive = false;
     this.stats = {
       totalUrls: 0,
       crawledUrls: 0,
@@ -64,13 +68,16 @@ export class ProgressService {
     const minBarSize = 35; // Minimum size for small terminals (increased by 15%)
     const maxBarSize = Math.floor((((terminalWidth - 25) * 2) / 3) * 1.15); // 2/3 of available width + 15%
     const barSize = Math.max(minBarSize, maxBarSize);
+    
+    // Check if we're in a TTY environment
+    const isInteractive = process.stderr.isTTY && !process.env.CI;
 
     // Create multibar container with simplified format
     // Use full-width progress bar with minimal text
     this.multibar = new cliProgress.MultiBar(
       {
         clearOnComplete: false,
-        hideCursor: true,
+        hideCursor: isInteractive,
         // Colorful format with percentage and URL count - using bold for better visibility
         // Add extra padding to ensure the total count is fully visible
         format: `${chalk.cyan.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}${chalk.gray('/')}${chalk.yellow.bold('{total}')}   `,
@@ -78,11 +85,14 @@ export class ProgressService {
         barCompleteChar: '█', // Full block
         barIncompleteChar: '░', // Light shade
         barsize: barSize,
-        forceRedraw: true,
+        forceRedraw: false,
         emptyOnZero: false,
         autopadding: true,
         etaBuffer: 10,
-        fps: 10
+        fps: isInteractive ? 10 : 1,
+        stream: process.stderr,
+        noTTYOutput: !isInteractive,
+        notTTYSchedule: 5000
       },
       cliProgress.Presets.shades_classic
     );
@@ -90,6 +100,10 @@ export class ProgressService {
     // Create individual progress bars
     this.totalProgress = null;
     this.activeDownloads = new Map();
+    // Dual progress bar support
+    this.crawlBar = null;
+    this.aiBar = null;
+    this.dualMode = false;
 
     this.isActive = false;
     this.updateInterval = null;
@@ -146,9 +160,6 @@ export class ProgressService {
       }
     }
 
-    // Display the figlet header
-    this.displayHeader();
-
     // Display the site URL being processed
     const siteUrl = initialStats.siteUrl || 'Unknown site';
     if (this.isReCrawl) {
@@ -156,56 +167,117 @@ export class ProgressService {
     } else {
       console.log(chalk.green(`\nDownloading site: ${chalk.bold(siteUrl)}\n`));
     }
-
-    // Create a single-bar instance instead of multibar to avoid double line issues
-    const terminalWidth = process.stdout.columns || 80;
-    const barSize = Math.max(35, Math.floor((((terminalWidth - 25) * 2) / 3) * 1.15));
-
-    this.multibar = new cliProgress.SingleBar(
-      {
-        clearOnComplete: false, // Don't clear on complete to keep the final state visible
-        hideCursor: true,
-        format: `${chalk.cyan.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}${chalk.gray('/')}${chalk.yellow.bold('{total}')}`,
-        barCompleteChar: '\u2588',
-        barIncompleteChar: '\u2591',
-        barsize: barSize,
-        stopOnComplete: false, // Don't stop on complete to keep the bar visible
-        forceRedraw: true
-      },
-      cliProgress.Presets.shades_classic
-    );
-
-    // Always start with the initial total (usually 1 for the starting URL)
-    // This will be updated dynamically as URLs are discovered
-    const total = this.stats.totalUrls || 1;
-
-    if (process.env.DEBUG) {
-      debugLogger.progress(`Starting multibar - initial totalUrls: ${total}`);
+    
+    // In test mode, skip progress bars entirely
+    if (this.testMode) {
+      // Don't create multibar or any progress bars
+      this.multibar = null;
+      this.crawlBar = null;
+      this.aiBar = null;
+      this.isActive = false;
+      return;
+    }
+    
+    // Check if we're in a TTY environment  
+    const isTTY = process.stderr.isTTY;
+    
+    // In non-TTY environments (npm scripts, CI/CD), use simple logging instead of progress bars
+    if (!isTTY) {
+      this.multibar = null;
+      this.crawlBar = null;
+      this.aiBar = null;
+      this.nonTTYMode = true;
+      this.lastProgressLog = Date.now();
+      
+      // Set up simple progress logging interval
+      this.progressLogInterval = setInterval(() => {
+        const crawlProgress = this.maxPages 
+          ? `Crawl: ${this.stats.crawledUrls}/${this.maxPages} pages`
+          : `Crawl: ${this.stats.crawledUrls} pages`;
+        const aiProgress = `AI: ${this.stats.aiEnhanced} enhanced`;
+        console.log(chalk.dim(`Progress: ${crawlProgress}, ${aiProgress}`));
+      }, 5000); // Log every 5 seconds
+      
+      return;
+    }
+    
+    // Clear any previous progress bars
+    if (process.stdout.isTTY) {
+      process.stdout.write('\x1B[?25l'); // Hide cursor
     }
 
-    this.multibar.start(total, 0);
+    // Create dual progress bars
+    const terminalWidth = process.stdout.columns || 80;
+    // Make bars shorter to fit with labels and values
+    const barSize = Math.min(42, Math.max(20, Math.floor((terminalWidth - 40) * 0.5)));
+
+    this.dualMode = true;
+    
+    // Create multibar container with proper terminal handling
+    this.multibar = new cliProgress.MultiBar({
+      clearOnComplete: false,
+      hideCursor: true, // Always true in TTY mode
+      format: `${chalk.cyan.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}${chalk.gray('/')}${chalk.yellow.bold('{total}')}`,
+      barCompleteChar: '\u2588',
+      barIncompleteChar: '\u2591',
+      barsize: barSize,
+      stopOnComplete: false,
+      forceRedraw: false, // Don't force redraw on every update
+      linewrap: false,
+      stream: process.stderr, // Use stderr for progress bars
+      gracefulExit: true,
+      noTTYOutput: false, // Disable non-TTY output in TTY mode
+      fps: 10 // 10 FPS for smooth updates
+    }, cliProgress.Presets.shades_classic);
+    
+    // Always start with the initial total (usually 1 for the starting URL)
+    const total = this.stats.totalUrls || 1;
+    
+    // Simple, clean approach - just two progress bars with clear labels
+    console.log(''); // Space after "Downloading site:"
+    
+    // Create crawl progress bar
+    this.crawlBar = this.multibar.create(total, 0, {}, {
+      format: `${chalk.cyan.bold('Crawling:')} ${chalk.cyan.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}/${chalk.yellow.bold('{total}')} pages`,
+      barsize: barSize
+    });
+    
+    // Create AI progress bar  
+    this.aiBar = this.multibar.create(100, 0, { 
+      tokenInfo: chalk.cyan('0 tokens | $0.00')
+    }, {
+      format: `${chalk.magenta.bold('AI:      ')} ${chalk.magenta.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}/${chalk.yellow.bold('{total}')} reqs | {tokenInfo}`,
+      barsize: barSize
+    });
+
+    if (process.env.DEBUG) {
+      debugLogger.progress(`Starting dual progress bars - initial totalUrls: ${total}`);
+    }
 
     // Start the update interval to refresh the progress bar based on real progress
     this.updateInterval = setInterval(() => {
-      if (this.multibar) {
-        // Update the total to show discovered URLs, but cap at maxPages if set
-        const discoveredTotal = this.stats.crawledUrls + this.stats.queuedUrls;
-        let targetTotal = discoveredTotal;
+      if (this.crawlBar) {
+        // Update the total based on discovered URLs or max pages
+        const discoveredTotal = Math.max(this.stats.totalUrls, this.stats.crawledUrls + this.stats.queuedUrls);
+        let targetTotal = discoveredTotal || 1;
 
-        // If maxPages is set, cap the total at that limit
-        if (this.maxPages && targetTotal > this.maxPages) {
+        // If maxPages is set, use it as the total
+        if (this.maxPages) {
           targetTotal = this.maxPages;
         }
 
-        // Only update if the target total is greater than current total
-        if (targetTotal > this.multibar.total) {
-          this.multibar.setTotal(targetTotal);
+        // Update the total if it has changed
+        if (targetTotal !== this.crawlBar.total && targetTotal > 0) {
+          this.crawlBar.setTotal(targetTotal);
         }
 
-        // Update with the actual number of crawled URLs
-        this.multibar.update(this.stats.crawledUrls);
+        // Update with the actual number of crawled URLs, but don't exceed the total
+        const crawledCount = Math.min(this.stats.crawledUrls, targetTotal);
+        this.crawlBar.update(crawledCount);
       }
-    }, 100); // Update every 100ms for smooth animation
+      
+      // AI bar will be updated through updateProcessing calls
+    }, 100); // Update every 100ms
   }
 
   /**
@@ -278,6 +350,28 @@ export class ProgressService {
    * @param {Object} aiConfig - AI configuration object with provider and model
    */
   startProcessing(totalRequests, aiConfig) {
+    // Store AI config for later use
+    this.lastAIConfig = aiConfig;
+    
+    // In test mode, just log the info
+    if (this.testMode) {
+      if (aiConfig) {
+        const provider = aiConfig.provider || aiConfig.fallbackName || 'unknown';
+        const model = aiConfig.model || 'default';
+        console.log(chalk.dim(`Starting AI processing: ${totalRequests} requests using ${provider}/${model}`));
+      }
+      return;
+    }
+    
+    // In dual mode, just update the existing AI bar
+    if (this.aiBar) {
+      this.aiBar.setTotal(totalRequests);
+      // Don't change the format - it's already set properly in start()
+      // The token info will be updated via updateProcessing calls
+      return;
+    }
+    
+    // Legacy single bar mode (fallback)
     // Clean up download progress bar first
     if (this.multibar) {
       this.multibar.stop();
@@ -326,10 +420,40 @@ export class ProgressService {
    * Update processing progress
    * @param {number} current - Current AI request completed
    * @param {number} total - Total AI requests
-   * @param {string} detail - Current processing detail
+   * @param {Object} tokenData - Token usage data {totalTokens, totalCost}
    */
-  updateProcessing(current, total) {
-    if (this.multibar) {
+  updateProcessing(current, total, tokenData = null) {
+    // In test mode, log progress updates
+    if (this.testMode) {
+      if (tokenData) {
+        const costStr = tokenData.totalCost ? `$${tokenData.totalCost.toFixed(2)}` : '$0.00';
+        const tokenStr = tokenData.totalTokens ? tokenData.totalTokens.toLocaleString() : '0';
+        console.log(chalk.dim(`AI Progress: ${current}/${total} - Tokens: ${tokenStr}, Cost: ${costStr}`));
+      } else {
+        console.log(chalk.dim(`AI Progress: ${current}/${total}`));
+      }
+      return;
+    }
+    
+    if (this.aiBar) {
+      // Update total if it has changed (for dynamic progress tracking)
+      if (total && total !== this.aiBar.total) {
+        this.aiBar.setTotal(total);
+      }
+      
+      // Format token data for inline display
+      let tokenInfo = chalk.cyan('0 tokens | $0.00');
+      
+      if (tokenData) {
+        const costStr = tokenData.totalCost ? `$${tokenData.totalCost.toFixed(2)}` : '$0.00';
+        const tokenStr = tokenData.totalTokens ? tokenData.totalTokens.toLocaleString() : '0';
+        tokenInfo = chalk.cyan(`${tokenStr} tokens | ${costStr}`);
+      }
+      
+      // Update the AI bar with token info
+      this.aiBar.update(current, { tokenInfo });
+    } else if (this.multibar) {
+      // Legacy single bar mode
       // Update total if it has changed (for dynamic progress tracking)
       if (total && total !== this.multibar.total) {
         this.multibar.setTotal(total);
@@ -352,7 +476,10 @@ export class ProgressService {
       this.multibar = null;
     }
 
-    console.log(`\n${chalk.green('✓')} ${chalk.green('AI processing completed successfully!')}\n`);
+    // Only show completion message if AI processing actually happened
+    if (this.stats.aiEnhanced > 0 || this.stats.aiFailed > 0) {
+      console.log(`\n${chalk.green('✓')} ${chalk.green('AI processing completed successfully!')}\n`);
+    }
   }
 
   /**
@@ -363,11 +490,36 @@ export class ProgressService {
 
     // Mark as inactive first to prevent any updates during cleanup
     this.isActive = false;
+    
+    // In test mode, just log completion
+    if (this.testMode) {
+      if (this.isReCrawl) {
+        console.log(chalk.dim(`Re-crawl completed: ${this.stats.newPages} new, ${this.stats.updatedPages} updated, ${this.stats.unchangedPages} unchanged`));
+      } else {
+        console.log(chalk.dim(`Crawl completed: ${this.stats.crawledUrls} pages downloaded`));
+      }
+      return;
+    }
+    
+    // In non-TTY mode, show final summary
+    if (this.nonTTYMode) {
+      if (this.isReCrawl) {
+        console.log(`\n✓ Re-crawl completed successfully! ${this.stats.newPages} new, ${this.stats.updatedPages} updated, ${this.stats.unchangedPages} unchanged, ${this.stats.crawledUrls} total pages\n`);
+      } else {
+        console.log(`\n✓ Download completed successfully! Downloaded ${this.stats.crawledUrls} pages\n`);
+      }
+      return;
+    }
 
     // Stop all intervals
     if (this.updateInterval) {
       clearInterval(this.updateInterval);
       this.updateInterval = null;
+    }
+    
+    if (this.progressLogInterval) {
+      clearInterval(this.progressLogInterval);
+      this.progressLogInterval = null;
     }
 
     // Clear all active downloads
@@ -381,41 +533,50 @@ export class ProgressService {
     }
     if (this.multibar) {
       try {
-        // Update total to match actual crawled count for final display
-        // For unlimited crawls or when discovered URLs differ from initial estimate
-        if (this.stats.crawledUrls > 0) {
+        if (this.crawlBar) {
+          // Update crawl bar to final state
           const finalTotal = this.stats.crawledUrls;
-          if (this.multibar.setTotal) {
-            this.multibar.setTotal(finalTotal);
-          } else {
-            this.multibar.total = finalTotal;
-          }
-          this.multibar.update(finalTotal);
+          this.crawlBar.setTotal(finalTotal);
+          this.crawlBar.update(finalTotal);
         }
+        
+        // Stop the multibar container
         this.multibar.stop();
+        this.multibar = null;
+        
+        // Show cursor again
         if (process.stdout.isTTY) {
-          if (process.stdout.clearLine && process.stdout.cursorTo) {
-            process.stdout.clearLine(0);
-            process.stdout.cursorTo(0);
-          }
+          process.stdout.write('\x1B[?25h'); // Show cursor
         }
+        
+        // Add a small delay to ensure progress bars are fully cleared
+        process.nextTick(() => {
+          // Print completion message after bars are gone
+          if (this.isReCrawl) {
+            // Normal re-crawl logic
+            const actualTotal = this.stats.newPages + this.stats.updatedPages + this.stats.unchangedPages;
+            console.log(
+              `\n✓ Re-crawl completed successfully! ${this.stats.newPages} new, ${this.stats.updatedPages} updated, ${this.stats.unchangedPages} unchanged, ${actualTotal} total pages\n`
+            );
+          } else {
+            console.log(`\n✓ Download completed successfully! Downloaded ${this.stats.crawledUrls} pages\n`);
+          }
+        });
       } catch (e) {
         if (process.env.DEBUG === 'true') {
           debugLogger.debug('DEBUG', `Error stopping progress bar: ${e.message}`);
         }
       }
-    }
-
-    this.multibar = null;
-
-    if (this.isReCrawl) {
-      // Normal re-crawl logic
-      const actualTotal = this.stats.newPages + this.stats.updatedPages + this.stats.unchangedPages;
-      console.log(
-        `\n✓ Re-crawl completed successfully! ${this.stats.newPages} new, ${this.stats.updatedPages} updated, ${this.stats.unchangedPages} unchanged, ${actualTotal} total pages\n`
-      );
     } else {
-      console.log(`\n✓ Download completed successfully! Downloaded ${this.stats.crawledUrls} pages\n`);
+      // No progress bars, print immediately
+      if (this.isReCrawl) {
+        const actualTotal = this.stats.newPages + this.stats.updatedPages + this.stats.unchangedPages;
+        console.log(
+          `\n✓ Re-crawl completed successfully! ${this.stats.newPages} new, ${this.stats.updatedPages} updated, ${this.stats.unchangedPages} unchanged, ${actualTotal} total pages\n`
+        );
+      } else {
+        console.log(`\n✓ Download completed successfully! Downloaded ${this.stats.crawledUrls} pages\n`);
+      }
     }
   }
 
@@ -463,6 +624,18 @@ export class ProgressService {
    * @param {Object} stats - Updated statistics
    */
   updateStats(stats) {
+    // In test mode, log significant updates
+    if (this.testMode) {
+      if (stats.crawledUrls !== undefined && stats.crawledUrls !== this.stats.crawledUrls) {
+        console.log(chalk.dim(`Crawl Progress: ${stats.crawledUrls}/${stats.totalUrls || '?'} pages`));
+      }
+      // Update internal stats but skip all progress bar updates
+      if (stats.totalUrls !== undefined) this.stats.totalUrls = stats.totalUrls;
+      if (stats.crawledUrls !== undefined) this.stats.crawledUrls = stats.crawledUrls;
+      if (stats.queuedUrls !== undefined) this.stats.queuedUrls = stats.queuedUrls;
+      if (stats.activeUrls !== undefined) this.stats.activeUrls = stats.activeUrls;
+      return;
+    }
     // Update stats with new values
     const oldTotalUrls = this.stats.totalUrls;
     if (stats.totalUrls !== undefined) this.stats.totalUrls = stats.totalUrls;
@@ -498,20 +671,18 @@ export class ProgressService {
     if (stats.aiFailed !== undefined) this.stats.aiFailed = stats.aiFailed;
 
     // Update progress bar total if it changed and we have an active progress bar
-    if (this.multibar && this.stats.totalUrls !== oldTotalUrls) {
-      // For SingleBar, we need to update the total differently
-      // Always update the total, even if it's 0 (will use our placeholder of 100)
-      const newTotal = this.stats.totalUrls > 0 ? this.stats.totalUrls : 100;
-      if (this.multibar.setTotal) {
-        this.multibar.setTotal(newTotal);
-      } else {
-        this.multibar.total = newTotal;
-      }
-      // Force update to reflect the new total
-      this.multibar.update(this.stats.crawledUrls);
+    if (this.crawlBar && this.stats.totalUrls !== oldTotalUrls) {
+      // Update the crawl bar total
+      const newTotal = this.stats.totalUrls > 0 ? this.stats.totalUrls : 1;
+      this.crawlBar.setTotal(newTotal);
+    }
+    
+    // Update crawl bar progress
+    if (this.crawlBar) {
+      this.crawlBar.update(this.stats.crawledUrls);
     }
 
-    // Update total progress bar if it exists (legacy)
+    // Update total progress bar if it exists (legacy single bar mode)
     if (this.totalProgress) {
       this.totalProgress.setTotal(this.stats.totalUrls || 100);
       this.totalProgress.update(this.stats.crawledUrls);

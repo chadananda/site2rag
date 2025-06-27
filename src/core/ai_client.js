@@ -137,7 +137,7 @@ async function makeAICall(prompt, aiConfig, expectPlainText = false) {
       return result;
     } catch (error) {
       lastError = error;
-      console.error(`[AI ERROR] Network attempt ${attempt} failed: ${error.message}`);
+      debugLogger.ai(`[AI ERROR] Network attempt ${attempt} failed: ${error.message}`);
 
       // Check if it's a retryable error
       const isRetryable =
@@ -157,7 +157,7 @@ async function makeAICall(prompt, aiConfig, expectPlainText = false) {
         throw error;
       }
 
-      console.error(`[AI ERROR] Error is retryable, will retry...`);
+      debugLogger.ai(`[AI ERROR] Error is retryable, will retry...`);
     }
   }
 
@@ -209,7 +209,7 @@ async function makeAICallInternal(prompt, aiConfig, expectPlainText = false) {
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(requestBody)
     }).catch(fetchError => {
-      console.error(`[AI ERROR] Ollama - Network error:`, fetchError);
+      debugLogger.ai(`[AI ERROR] Ollama - Network error:`, fetchError);
       throw new Error(`Ollama network error: ${fetchError.message}`);
     });
 
@@ -220,8 +220,8 @@ async function makeAICallInternal(prompt, aiConfig, expectPlainText = false) {
 
     if (!response.ok) {
       const errorBody = await response.text();
-      console.error(`[AI ERROR] Ollama - API error: ${response.status} ${response.statusText}`);
-      console.error(`[AI ERROR] Ollama - Error body:`, errorBody);
+      debugLogger.ai(`[AI ERROR] Ollama - API error: ${response.status} ${response.statusText}`);
+      debugLogger.ai(`[AI ERROR] Ollama - Error body:`, errorBody);
       throw new Error(`Ollama AI request failed: ${response.status} ${response.statusText} - ${errorBody}`);
     }
 
@@ -230,11 +230,14 @@ async function makeAICallInternal(prompt, aiConfig, expectPlainText = false) {
     debugLogger.ai(`Ollama - Response length: ${(data.response || '').length}`);
 
     if (!data.response) {
-      console.error(`[AI ERROR] Ollama - No response field in data:`, data);
+      debugLogger.ai(`[AI ERROR] Ollama - No response field in data:`, data);
       throw new Error(`Ollama response missing 'response' field`);
     }
 
-    return data.response;
+    return {
+      content: data.response,
+      usage: null // Ollama doesn't provide usage data
+    };
   }
 
   if (provider === 'anthropic') {
@@ -287,7 +290,10 @@ async function makeAICallInternal(prompt, aiConfig, expectPlainText = false) {
     }
 
     const data = await response.json();
-    return data.content[0].text || '';
+    return {
+      content: data.content[0].text || '',
+      usage: data.usage // Anthropic provides usage in response
+    };
   }
 
   if (provider === 'openai') {
@@ -340,7 +346,10 @@ async function makeAICallInternal(prompt, aiConfig, expectPlainText = false) {
       throw parseError;
     }
 
-    return data.choices[0].message.content || '';
+    return {
+      content: data.choices[0].message.content || '',
+      usage: data.usage // OpenAI provides usage directly
+    };
   }
 
   if (provider === 'mistral') {
@@ -379,7 +388,10 @@ async function makeAICallInternal(prompt, aiConfig, expectPlainText = false) {
     }
 
     const data = await response.json();
-    return data.choices[0].message.content || '';
+    return {
+      content: data.choices[0].message.content || '',
+      usage: data.usage || null // Mistral may provide usage data
+    };
   }
 
   if (provider === 'perplexity') {
@@ -418,7 +430,10 @@ async function makeAICallInternal(prompt, aiConfig, expectPlainText = false) {
     }
 
     const data = await response.json();
-    return data.choices[0].message.content || '';
+    return {
+      content: data.choices[0].message.content || '',
+      usage: data.usage || null // Perplexity may provide usage data
+    };
   }
 
   if (provider === 'xai') {
@@ -457,7 +472,10 @@ async function makeAICallInternal(prompt, aiConfig, expectPlainText = false) {
     }
 
     const data = await response.json();
-    return data.choices[0].message.content || '';
+    return {
+      content: data.choices[0].message.content || '',
+      usage: data.usage || null // xAI may provide usage data
+    };
   }
 
   throw new Error(`Provider ${provider} not implemented`);
@@ -496,7 +514,14 @@ export async function callAI(prompt, schema, aiConfig) {
         const expectPlainText = schema._def && schema._def.typeName === 'ZodString';
 
         debugLogger.ai(`Attempt ${attempt}: Making AI call... (expectPlainText: ${expectPlainText})`);
-        const responseText = await makeAICall(prompt, aiConfig, expectPlainText);
+        const response = await makeAICall(prompt, aiConfig, expectPlainText);
+        
+        // Handle new response format
+        const result = typeof response === 'string' 
+          ? { content: response, usage: null }
+          : response;
+        
+        const responseText = result.content;
         debugLogger.ai(`Attempt ${attempt}: Received response, length: ${responseText.length}`);
         debugLogger.ai(`Raw response (first 200 chars): ${responseText.substring(0, 200)}...`);
 
@@ -505,6 +530,8 @@ export async function callAI(prompt, schema, aiConfig) {
           debugLogger.ai(`Schema expects plain text response, skipping JSON parsing`);
           const validated = schema.parse(responseText.trim());
           debugLogger.ai(`Plain text validation successful`);
+          // For plain text responses, we can't attach usage to the string itself
+          // The caller will need to check the original response object for usage
           return validated;
         }
 
@@ -537,26 +564,26 @@ export async function callAI(prompt, schema, aiConfig) {
         try {
           parsed = JSON.parse(jsonText);
         } catch (parseError) {
-          console.error(`[AI ERROR] JSON.parse failed with: ${parseError.message}`);
-          console.error(`[AI ERROR] JSON length: ${jsonText.length} characters`);
+          debugLogger.ai(`[AI ERROR] JSON.parse failed with: ${parseError.message}`);
+          debugLogger.ai(`[AI ERROR] JSON length: ${jsonText.length} characters`);
 
           // Find the error position
           const match = parseError.message.match(/position (\d+)/);
           if (match) {
             const errorPos = parseInt(match[1]);
             const contextStart = Math.max(0, errorPos - 100);
-            console.error(`[AI ERROR] Context around position ${errorPos}:`);
-            console.error(`[AI ERROR] Before: "${jsonText.substring(contextStart, errorPos)}"`);
-            console.error(`[AI ERROR] At error: "${jsonText.substring(errorPos, errorPos + 10)}..."`);
-            console.error(
+            debugLogger.ai(`[AI ERROR] Context around position ${errorPos}:`);
+            debugLogger.ai(`[AI ERROR] Before: "${jsonText.substring(contextStart, errorPos)}"`);
+            debugLogger.ai(`[AI ERROR] At error: "${jsonText.substring(errorPos, errorPos + 10)}..."`);
+            debugLogger.ai(
               `[AI ERROR] Character at position ${errorPos}: "${jsonText.charAt(errorPos)}" (code: ${jsonText.charCodeAt(errorPos)})`
             );
 
             // Log the full response for debugging
             if (jsonText.length < 5000) {
-              console.error(`[AI ERROR] Full response:\n${jsonText}`);
+              debugLogger.ai(`[AI ERROR] Full response:\n${jsonText}`);
             } else {
-              console.error(
+              debugLogger.ai(
                 `[AI ERROR] Response too long (${jsonText.length} chars), showing first 2000:\n${jsonText.substring(0, 2000)}...`
               );
             }
@@ -570,48 +597,48 @@ export async function callAI(prompt, schema, aiConfig) {
         return validated;
       } catch (e) {
         lastError = e;
-        console.error(`[AI ERROR] Attempt ${attempt} failed:`);
-        console.error(`[AI ERROR] Error type: ${e.constructor.name}`);
-        console.error(`[AI ERROR] Error message: ${e.message}`);
+        debugLogger.ai(`[AI ERROR] Attempt ${attempt} failed:`);
+        debugLogger.ai(`[AI ERROR] Error type: ${e.constructor.name}`);
+        debugLogger.ai(`[AI ERROR] Error message: ${e.message}`);
 
         if (e.name === 'ZodError') {
-          console.error(`[AI ERROR] Zod validation error details:`, JSON.stringify(e.errors, null, 2));
+          debugLogger.ai(`[AI ERROR] Zod validation error details: ${JSON.stringify(e.errors, null, 2)}`);
         }
 
         if (e.message.includes('Unexpected token') || e.message.includes('Expected')) {
-          console.error(`[AI ERROR] JSON parsing failed - likely malformed JSON response`);
-          console.error(`[AI ERROR] Error occurred at: ${e.message}`);
+          debugLogger.ai(`[AI ERROR] JSON parsing failed - likely malformed JSON response`);
+          debugLogger.ai(`[AI ERROR] Error occurred at: ${e.message}`);
         }
 
         if (e.message.includes('timed out')) {
-          console.error(`[AI ERROR] Request timed out - check network/model availability`);
-          console.error(
+          debugLogger.ai(`[AI ERROR] Request timed out - check network/model availability`);
+          debugLogger.ai(
             `[AI ERROR] Timeout occurred after ${aiConfig.timeout || 30000}ms for prompt of ${prompt.length} chars`
           );
         }
 
         if (e.message.includes('API request failed')) {
-          console.error(`[AI ERROR] API request failed - check provider configuration`);
+          debugLogger.ai(`[AI ERROR] API request failed - check provider configuration`);
         }
 
         if (e.message.includes('Network error') || e.message.includes('Premature close')) {
-          console.error(`[AI ERROR] Network issue detected - this is often transient and will be retried`);
+          debugLogger.ai(`[AI ERROR] Network issue detected - this is often transient and will be retried`);
         }
 
-        console.error(`[AI ERROR] Full error stack:`, e.stack);
+        debugLogger.ai(`[AI ERROR] Full error stack:`, e.stack);
 
         if (attempt < 2) {
-          console.error(`[AI] Will retry validation attempt ${attempt + 1}...`);
+          debugLogger.ai(`[AI] Will retry validation attempt ${attempt + 1}...`);
           // Delay is handled at the start of the loop
         } else {
-          console.error(`[AI FATAL] All validation attempts failed. Unable to get valid AI response.`);
+          debugLogger.ai(`[AI FATAL] All validation attempts failed. Unable to get valid AI response.`);
           logger.error(`AI response validation failed after 2 attempts: ${e.message}`);
         }
       }
     }
 
-    console.error(`[AI FATAL] Returning null after all attempts failed`);
-    console.error(`[AI FATAL] Last error was: ${lastError?.message || 'Unknown error'}`);
+    debugLogger.ai(`[AI FATAL] Returning null after all attempts failed`);
+    debugLogger.ai(`[AI FATAL] Last error was: ${lastError?.message || 'Unknown error'}`);
     return null;
   });
 }
