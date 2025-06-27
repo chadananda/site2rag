@@ -30,6 +30,9 @@ node_modules/
 *.sln
 *.sw?
 
+# Claude settings (local configuration)
+.claude/
+
 # OS specific
 .DS_Store
 
