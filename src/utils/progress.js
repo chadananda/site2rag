@@ -237,7 +237,12 @@ export class ProgressService {
     
     // Create crawl progress bar
     this.crawlBar = this.multibar.create(total, 0, {}, {
-      format: `${chalk.cyan.bold('Crawling:')} ${chalk.cyan.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}/${chalk.yellow.bold('{total}')} pages`,
+      format: (options, params, payload) => {
+        const bar = options.barCompleteChar.repeat(Math.round(params.progress * options.barsize)) + 
+                   options.barIncompleteChar.repeat(options.barsize - Math.round(params.progress * options.barsize));
+        const percentage = Math.floor(params.progress * 100);
+        return `${chalk.cyan.bold('Crawling:')} ${chalk.cyan.bold(bar)} ${chalk.green.bold(percentage + '%')} | ${chalk.yellow.bold(params.value)}/${chalk.yellow.bold(params.total)} pages`;
+      },
       barsize: barSize
     });
     

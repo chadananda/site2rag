@@ -175,12 +175,21 @@ export class SiteProcessor {
         // Initialize the AI request tracker for parallel processing
         // We'll update it with actual documents as they're discovered
         const parallelProgressCallback = (current, total) => {
-          // During crawl, we don't show AI progress bar, just log it
-          logger.info(`[AI] Progress: ${current}/${total} AI requests completed`);
+          // Update the AI progress bar with token data
+          const tokenData = {
+            totalTokens: aiRequestTracker.totalTokensUsed,
+            totalCost: aiRequestTracker.totalCost
+          };
+          this.crawlService.progressService.updateProcessing(current, total, tokenData);
         };
 
         // Initialize with empty array - will be updated as pages are processed
         await aiRequestTracker.initialize([], parallelProgressCallback);
+
+        // Initialize the AI progress bar with an estimated total
+        // We'll estimate 2 AI requests per page as a starting point
+        const estimatedAIRequests = 100; // Start with a reasonable estimate
+        this.crawlService.progressService.startProcessing(estimatedAIRequests, this.options.aiConfig);
 
         parallelProcessor = createParallelAIProcessor(dbInstance, this.options.aiConfig);
         parallelProcessor.start();

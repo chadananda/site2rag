@@ -550,12 +550,11 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
         }
 
         // Call AI with the request
-        const response = await callAI(request.prompt, PlainTextResponseSchema, aiConfig);
+        const responseText = await callAI(request.prompt, PlainTextResponseSchema, aiConfig);
         
-        // For now, we don't have access to usage data for plain text responses
-        // This is a limitation we'll need to address in a future update
-        const usage = null;
-        const responseText = response;
+        // For plain text responses, callAI returns just the string
+        // We need to track this request even without usage data
+        const usage = null; // Usage tracking will be improved in future update
 
         // Log response preview to debug
         const disambCount = (responseText.match(/\[\[.*?\]\]/g) || []).length;
