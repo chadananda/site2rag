@@ -528,11 +528,14 @@ export async function callAI(prompt, schema, aiConfig) {
         // Check if schema expects plain text (string) response
         if (schema._def && schema._def.typeName === 'ZodString') {
           debugLogger.ai(`Schema expects plain text response, skipping JSON parsing`);
+          debugLogger.ai(`[USAGE DEBUG] result.usage: ${JSON.stringify(result.usage)}`);
           const validated = schema.parse(responseText.trim());
           debugLogger.ai(`Plain text validation successful`);
-          // For plain text responses, we can't attach usage to the string itself
-          // The caller will need to check the original response object for usage
-          return validated;
+          // Return both content and usage data for proper token tracking
+          return {
+            content: validated,
+            usage: result.usage
+          };
         }
 
         // For object schemas, try to extract JSON from the response

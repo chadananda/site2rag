@@ -318,8 +318,11 @@ export async function processDocumentsSecure(documents, aiConfig, progressCallba
     limiter(async () => {
       const aiTimer = performanceTracker.startTimer('aiCalls');
       try {
-        const response = await callAI(request.prompt, PlainTextResponseSchema, aiConfig);
+        const aiResponse = await callAI(request.prompt, PlainTextResponseSchema, aiConfig);
         aiTimer();
+        // Extract content and usage from the response
+        const response = aiResponse.content || aiResponse; // Handle both old and new format
+        const usage = aiResponse.usage || null;
         if (!response) {
           throw new Error('Invalid AI response - empty response');
         }

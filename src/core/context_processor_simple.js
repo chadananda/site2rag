@@ -550,11 +550,18 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
         }
 
         // Call AI with the request
-        const responseText = await callAI(request.prompt, PlainTextResponseSchema, aiConfig);
+        const aiResponse = await callAI(request.prompt, PlainTextResponseSchema, aiConfig);
         
-        // For plain text responses, callAI returns just the string
-        // We need to track this request even without usage data
-        const usage = null; // Usage tracking will be improved in future update
+        // Extract content and usage from the response
+        const responseText = aiResponse.content || aiResponse; // Handle both old and new format
+        const usage = aiResponse.usage || null;
+        
+        // Debug log usage data
+        if (usage) {
+          debugLogger.ai(`[TOKEN TRACKING] Got usage data: ${JSON.stringify(usage)}`);
+        } else {
+          debugLogger.ai(`[TOKEN TRACKING] No usage data returned from AI call`);
+        }
 
         // Log response preview to debug
         const disambCount = (responseText.match(/\[\[.*?\]\]/g) || []).length;
