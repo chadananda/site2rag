@@ -20,7 +20,13 @@ export default defineConfig([
 
   // JavaScript source files
   {files: ['**/*.{js,mjs,cjs}'], plugins: {js}, extends: ['js/recommended']},
-  {files: ['**/*.{js,mjs,cjs}'], languageOptions: {globals: {...globals.node, ...globals.es2022}}},
+  {
+    files: ['**/*.{js,mjs,cjs}'],
+    languageOptions: {globals: {...globals.node, ...globals.es2022}},
+    rules: {
+      'no-unused-vars': ['error', {argsIgnorePattern: '^_'}]
+    }
+  },
 
   // Test files with vitest globals
   {

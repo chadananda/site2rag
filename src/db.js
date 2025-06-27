@@ -2,6 +2,7 @@ import fs from 'fs';
 import Database from 'better-sqlite3';
 import path from 'path';
 import logger from './services/logger_service.js';
+import debugLogger from './services/debug_logger.js';
 
 /**
  * Database utility functions for Site2RAG
@@ -162,7 +163,9 @@ export function getDB(dbPath) {
         // If recovery failed, create new DB
         try {
           fs.unlinkSync(paths.session);
-        } catch {}
+        } catch {
+          // Ignore unlink errors - file may not exist
+        }
         logger.warn('[DB] Created new session DB after corruption.');
         continue;
       }
@@ -179,7 +182,9 @@ export function getDB(dbPath) {
       // If recovery failed, create new DB
       try {
         fs.unlinkSync(paths.session);
-      } catch {}
+      } catch {
+        // Ignore unlink errors - file may not exist
+      }
       logger.warn('[DB] Created new session DB after error.');
     }
   }
@@ -212,13 +217,17 @@ export function recoverFromPrevDb(prevPath, sessionPath) {
         logger.error('[DB] Previous DB is also corrupt. Deleting it.');
         try {
           fs.unlinkSync(prevPath);
-        } catch {}
+        } catch {
+          // Ignore unlink errors - file may not exist
+        }
       }
     } catch (e) {
       logger.error('[DB] Error reading previous DB:', e);
       try {
         fs.unlinkSync(prevPath);
-      } catch {}
+      } catch {
+        // Ignore unlink errors - file may not exist
+      }
     }
   }
 
@@ -282,10 +291,14 @@ export class CrawlDB {
 
     try {
       fs.unlinkSync(this.paths.backup);
-    } catch {}
+    } catch {
+      // Ignore unlink errors - file may not exist
+    }
     try {
       fs.unlinkSync(this.paths.main);
-    } catch {}
+    } catch {
+      // Ignore unlink errors - file may not exist
+    }
     logger.warn('[CrawlDB] Created new DB after corruption.');
     return false;
   }
@@ -321,7 +334,7 @@ export class CrawlDB {
       const result = stmt.run(page);
       // Only log results in test mode
       if (process.env.NODE_ENV === 'test' || process.env.VITEST) {
-        console.log('[TRACE] SQL execution result:', result);
+        debugLogger.debug('TRACE', `SQL execution result: ${JSON.stringify(result)}`);
       }
     } catch (err) {
       logger.error(`SQL execution error: ${err.message}`);
@@ -429,40 +442,78 @@ export class CrawlDB {
    * @returns {Array} Array of claimed page objects
    */
   claimPagesForProcessing(limit = 5, processorId = 'default') {
-    // Use a transaction to ensure atomicity
-    const transaction = this.db.transaction(() => {
-      // Find unclaimed raw pages
-      // Only claim pages that haven't been successfully processed
-      const pages = this.db.prepare(`
-        SELECT url, file_path, title 
-        FROM pages 
-        WHERE content_status = 'raw' 
-        AND file_path IS NOT NULL
-        LIMIT ?
-      `).all(limit);
-      
-      if (pages.length === 0) return [];
-      
-      // Mark them as processing with processor ID
-      const urls = pages.map(p => p.url);
-      const placeholders = urls.map(() => '?').join(',');
-      const timestamp = new Date().toISOString();
-      
-      this.db.prepare(`
-        UPDATE pages 
-        SET content_status = 'processing',
-            last_context_attempt = ?,
-            context_error = ?
-        WHERE url IN (${placeholders})
-      `).run(timestamp, `processor:${processorId}`, ...urls);
-      
-      // Log claiming for debugging
-      logger.info(`[DB] Processor ${processorId} claimed ${pages.length} pages for processing`);
-      
-      return pages;
-    });
-    
-    return transaction();
+    try {
+      // Use a transaction to ensure atomicity
+      const transaction = this.db.transaction(() => {
+        // Find unclaimed raw pages
+        // Only claim pages that haven't been successfully processed
+        const pages = this.db
+          .prepare(
+            `
+          SELECT url, file_path, title 
+          FROM pages 
+          WHERE content_status = 'raw' 
+          AND file_path IS NOT NULL
+          LIMIT ?
+        `
+          )
+          .all(limit);
+
+        if (pages.length === 0) return [];
+
+        // Mark them as processing with processor ID
+        const urls = pages.map(p => p.url);
+
+        // Handle SQLite parameter limit (max 999)
+        if (urls.length > 100) {
+          // Process in batches to avoid parameter limit issues
+          const batchSize = 100;
+          for (let i = 0; i < urls.length; i += batchSize) {
+            const batch = urls.slice(i, i + batchSize);
+            const placeholders = batch.map(() => '?').join(',');
+            const timestamp = new Date().toISOString();
+
+            this.db
+              .prepare(
+                `
+              UPDATE pages 
+              SET content_status = 'processing',
+                  last_context_attempt = ?,
+                  context_error = ?
+              WHERE url IN (${placeholders})
+            `
+              )
+              .run(timestamp, `processor:${processorId}`, ...batch);
+          }
+        } else {
+          const placeholders = urls.map(() => '?').join(',');
+          const timestamp = new Date().toISOString();
+
+          this.db
+            .prepare(
+              `
+            UPDATE pages 
+            SET content_status = 'processing',
+                last_context_attempt = ?,
+                context_error = ?
+            WHERE url IN (${placeholders})
+          `
+            )
+            .run(timestamp, `processor:${processorId}`, ...urls);
+        }
+
+        // Log claiming for debugging
+        logger.info(`[DB] Processor ${processorId} claimed ${pages.length} pages for processing`);
+
+        return pages;
+      });
+
+      return transaction();
+    } catch (error) {
+      logger.error(`[DB] Failed to claim pages for processing: ${error.message}`);
+      // Return empty array on error to allow processing to continue
+      return [];
+    }
   }
 
   /**
@@ -470,13 +521,17 @@ export class CrawlDB {
    * @param {string} url - Page URL
    */
   markPageContexted(url) {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE pages 
       SET content_status = 'contexted',
           context_error = NULL
       WHERE url = ?
-    `).run(url);
-    
+    `
+      )
+      .run(url);
+
     // Log completion for debugging
     logger.info(`[DB] Page marked as contexted: ${url}`);
   }
@@ -487,13 +542,17 @@ export class CrawlDB {
    * @param {string} error - Error message
    */
   markPageFailed(url, error) {
-    this.db.prepare(`
+    this.db
+      .prepare(
+        `
       UPDATE pages 
       SET content_status = 'failed',
           context_error = ?
       WHERE url = ?
-    `).run(error, url);
-    
+    `
+      )
+      .run(error, url);
+
     // Log failure for debugging
     logger.warn(`[DB] Page marked as failed: ${url} - ${error}`);
   }
@@ -504,15 +563,19 @@ export class CrawlDB {
    */
   resetStuckProcessing(staleMinutes = 30) {
     const staleTime = new Date(Date.now() - staleMinutes * 60 * 1000).toISOString();
-    
-    const result = this.db.prepare(`
+
+    const result = this.db
+      .prepare(
+        `
       UPDATE pages 
       SET content_status = 'raw',
           context_error = 'reset_from_stuck_processing'
       WHERE content_status = 'processing'
       AND last_context_attempt < ?
-    `).run(staleTime);
-    
+    `
+      )
+      .run(staleTime);
+
     return result.changes;
   }
 
@@ -556,10 +619,10 @@ export class CrawlDB {
       try {
         const tempDb = new Database(this.paths.session);
         const count = tempDb.prepare('SELECT COUNT(*) as count FROM pages').get();
-        console.log('[TRACE] Session DB page count before finalization:', count.count);
+        debugLogger.debug('TRACE', `Session DB page count before finalization: ${count.count}`);
         tempDb.close();
       } catch (err) {
-        console.log('[TRACE] Error checking session DB content:', err.message);
+        debugLogger.debug('TRACE', `Error checking session DB content: ${err.message}`);
       }
     }
 

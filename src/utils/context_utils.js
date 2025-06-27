@@ -1,5 +1,6 @@
 // context_extensions.js
 // Supporting functions for optimal sliding cached context window system
+import debugLogger from '../services/debug_logger.js';
 
 /**
  * Get optimal window sizes based on AI model context limits
@@ -160,8 +161,8 @@ export function createOptimizedSlidingWindows(blocks, windowSize, overlapWords, 
   const stepSize = windowSize - overlapWords; // Move window by (windowSize - overlapWords)
 
   if (isTestMode) {
-    console.log(
-      `[SLIDING_WINDOWS] Total: ${words.length} words, Window: ${windowSize} words, Step: ${stepSize} words (${overlapWords} word overlap)`
+    debugLogger.sliding(
+      `Total: ${words.length} words, Window: ${windowSize} words, Step: ${stepSize} words (${overlapWords} word overlap)`
     );
   }
 
@@ -199,7 +200,7 @@ export function createOptimizedSlidingWindows(blocks, windowSize, overlapWords, 
   }
 
   if (isTestMode) {
-    console.log(`[SLIDING_WINDOWS] Created ${windows.length} sliding windows with ${overlapWords} word overlap`);
+    debugLogger.sliding(`Created ${windows.length} sliding windows with ${overlapWords} word overlap`);
   }
   return windows;
 }
@@ -359,9 +360,9 @@ export function validateEnhancement(original, enhanced) {
   if (!isValid) {
     // Only show validation details in test mode
     if (process.env.NODE_ENV === 'test') {
-      console.log(`[VALIDATION] Failed - Enhanced text doesn't match original after removing [[...]] insertions`);
-      console.log(`[VALIDATION] Original: "${normalizedOriginal}"`);
-      console.log(`[VALIDATION] Enhanced (no [[...]]): "${normalizedEnhanced}"`);
+      debugLogger.validation(`Failed - Enhanced text doesn't match original after removing [[...]] insertions`);
+      debugLogger.validation(`Original: "${normalizedOriginal}"`);
+      debugLogger.validation(`Enhanced (no [[...]]): "${normalizedEnhanced}"`);
     }
     return {
       isValid: false,

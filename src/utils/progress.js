@@ -5,6 +5,7 @@ import figlet from 'figlet';
 import {readFileSync} from 'fs';
 import {join, dirname} from 'path';
 import {fileURLToPath} from 'url';
+import debugLogger from '../services/debug_logger.js';
 
 /**
  * Service for displaying crawl progress in the CLI
@@ -61,7 +62,7 @@ export class ProgressService {
     const terminalWidth = process.stdout.columns || 80;
     // Use 2/3 of available width for the progress bar to align with header
     const minBarSize = 35; // Minimum size for small terminals (increased by 15%)
-    const maxBarSize = Math.floor(((terminalWidth - 25) * 2) / 3 * 1.15); // 2/3 of available width + 15%
+    const maxBarSize = Math.floor((((terminalWidth - 25) * 2) / 3) * 1.15); // 2/3 of available width + 15%
     const barSize = Math.max(minBarSize, maxBarSize);
 
     // Create multibar container with simplified format
@@ -141,7 +142,7 @@ export class ProgressService {
       this.stats.totalUrls = initialStats.totalUrls;
       // Debug log
       if (process.env.DEBUG) {
-        console.log(`[PROGRESS] Setting totalUrls to ${initialStats.totalUrls}, maxPages: ${this.maxPages}`);
+        debugLogger.progress(`Setting totalUrls to ${initialStats.totalUrls}, maxPages: ${this.maxPages}`);
       }
     }
 
@@ -158,7 +159,7 @@ export class ProgressService {
 
     // Create a single-bar instance instead of multibar to avoid double line issues
     const terminalWidth = process.stdout.columns || 80;
-    const barSize = Math.max(35, Math.floor(((terminalWidth - 25) * 2) / 3 * 1.15));
+    const barSize = Math.max(35, Math.floor((((terminalWidth - 25) * 2) / 3) * 1.15));
 
     this.multibar = new cliProgress.SingleBar(
       {
@@ -179,7 +180,7 @@ export class ProgressService {
     const total = this.stats.totalUrls || 1;
 
     if (process.env.DEBUG) {
-      console.log(`[PROGRESS] Starting multibar - initial totalUrls: ${total}`);
+      debugLogger.progress(`Starting multibar - initial totalUrls: ${total}`);
     }
 
     this.multibar.start(total, 0);
@@ -190,12 +191,12 @@ export class ProgressService {
         // Update the total to show discovered URLs, but cap at maxPages if set
         const discoveredTotal = this.stats.crawledUrls + this.stats.queuedUrls;
         let targetTotal = discoveredTotal;
-        
+
         // If maxPages is set, cap the total at that limit
         if (this.maxPages && targetTotal > this.maxPages) {
           targetTotal = this.maxPages;
         }
-        
+
         // Only update if the target total is greater than current total
         if (targetTotal > this.multibar.total) {
           this.multibar.setTotal(targetTotal);
@@ -300,7 +301,7 @@ export class ProgressService {
 
     // Create new progress bar for processing
     const terminalWidth = process.stdout.columns || 80;
-    const barSize = Math.max(35, Math.floor(((terminalWidth - 25) * 2) / 3 * 1.15));
+    const barSize = Math.max(35, Math.floor((((terminalWidth - 25) * 2) / 3) * 1.15));
 
     this.multibar = new cliProgress.SingleBar(
       {
@@ -334,7 +335,7 @@ export class ProgressService {
         this.multibar.setTotal(total);
       }
       this.multibar.update(current);
-      
+
       // Force a render to ensure the progress bar is visible
       if (this.multibar.render) {
         this.multibar.render();
@@ -400,7 +401,7 @@ export class ProgressService {
         }
       } catch (e) {
         if (process.env.DEBUG === 'true') {
-          console.log(`[DEBUG] Error stopping progress bar: ${e.message}`);
+          debugLogger.debug('DEBUG', `Error stopping progress bar: ${e.message}`);
         }
       }
     }
@@ -424,9 +425,10 @@ export class ProgressService {
   displayCompletionMessage() {
     // Only log debug information when DEBUG environment variable is set
     if (process.env.DEBUG === 'true') {
-      console.log(`[DEBUG] isReCrawl: ${this.isReCrawl}`);
-      console.log(
-        `[DEBUG] Stats: newPages=${this.stats.newPages}, updatedPages=${this.stats.updatedPages}, unchangedPages=${this.stats.unchangedPages}`
+      debugLogger.debug('DEBUG', `isReCrawl: ${this.isReCrawl}`);
+      debugLogger.debug(
+        'DEBUG',
+        `Stats: newPages=${this.stats.newPages}, updatedPages=${this.stats.updatedPages}, unchangedPages=${this.stats.unchangedPages}`
       );
     }
 

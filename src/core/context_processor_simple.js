@@ -74,7 +74,6 @@ const WINDOW_SIZES = {
 // Content filtering thresholds
 const MIN_BLOCK_CHARS = process.env.SITE2RAG_MIN_BLOCK_CHARS ? parseInt(process.env.SITE2RAG_MIN_BLOCK_CHARS) : 20; // Skip only extremely short blocks (less than ~3 words)
 
-
 /**
  * Clean text for context by removing markdown formatting, code blocks, images, and links
  * This reduces token usage while preserving the semantic content needed for disambiguation
@@ -147,7 +146,7 @@ function createSlidingWindows(blocks) {
 
   // Pre-process all blocks to create a cleaned text array for context generation
   const allCleanedBlocks = blocks.map((block, idx) => {
-    const blockText = typeof block === 'string' ? block : (block.text || '');
+    const blockText = typeof block === 'string' ? block : block.text || '';
     // Ensure blockText is a string
     if (typeof blockText !== 'string') {
       debugLogger.ai(`Warning: Block ${idx} is not a string:`, block);
@@ -176,7 +175,7 @@ function createSlidingWindows(blocks) {
 
     while (currentWindowIndex < blocks.length && windowWords < PROCESS_WORDS) {
       const block = blocks[currentWindowIndex];
-      const blockText = typeof block === 'string' ? block : (block.text || '');
+      const blockText = typeof block === 'string' ? block : block.text || '';
 
       // Skip headers (lines starting with #) from processing but not from iteration
       if (blockText.trim().startsWith('#')) {
@@ -196,7 +195,7 @@ function createSlidingWindows(blocks) {
         currentWindowIndex++;
         continue;
       }
-      
+
       // Skip image blocks (they don't need disambiguation)
       if (blockText.trim().startsWith('![')) {
         debugLogger.ai(`Skipping image block: "${blockText.substring(0, 50)}..."`);
@@ -207,18 +206,20 @@ function createSlidingWindows(blocks) {
       // Track original index - use originalIndex if available (from filtered blocks), otherwise use current index
       const originalIdx = block.originalIndex !== undefined ? block.originalIndex : currentWindowIndex;
       const key = String(originalIdx);
-      
+
       // Check if this block was already processed in a previous window
       if (windowBlocks[key]) {
         debugLogger.ai(`WARNING: Block ${originalIdx} already in current window!`);
       }
-      
+
       // Check if this block was processed in any previous window
       if (globalProcessedBlocks.has(originalIdx)) {
-        debugLogger.ai(`ERROR: Block ${originalIdx} was already processed in a previous window! This will cause duplicate processing.`);
+        debugLogger.ai(
+          `ERROR: Block ${originalIdx} was already processed in a previous window! This will cause duplicate processing.`
+        );
       }
       globalProcessedBlocks.add(originalIdx);
-      
+
       windowBlocks[key] = blockText;
       blockIndices.push(originalIdx);
 
@@ -242,12 +243,12 @@ function createSlidingWindows(blocks) {
     // Include ALL text before the current window's start, up to CONTEXT_WORDS limit
     let contextWords = [];
     let wordCount = 0;
-    
+
     // Work backwards from the start of the current window to build context
     for (let i = startIndex - 1; i >= 0 && wordCount < CONTEXT_WORDS; i--) {
       const cleanedBlock = allCleanedBlocks[i];
       const blockWords = cleanedBlock.cleaned.split(/\s+/).filter(w => w.length > 0);
-      
+
       // If adding this block would exceed the limit, only add partial
       if (wordCount + blockWords.length > CONTEXT_WORDS) {
         const wordsToTake = CONTEXT_WORDS - wordCount;
@@ -273,10 +274,12 @@ function createSlidingWindows(blocks) {
       blockCount: Object.keys(windowBlocks).length,
       wordCount: windowWords
     };
-    
+
     // Debug log window details
-    debugLogger.ai(`Window ${newWindow.windowIndex}: Processing blocks ${blockIndices.join(', ')} (${newWindow.blockCount} blocks, ${newWindow.wordCount} words)`);
-    
+    debugLogger.ai(
+      `Window ${newWindow.windowIndex}: Processing blocks ${blockIndices.join(', ')} (${newWindow.blockCount} blocks, ${newWindow.wordCount} words)`
+    );
+
     // Log the first few words of each block for debugging
     if (process.env.DEBUG) {
       for (const [idx, text] of Object.entries(windowBlocks)) {
@@ -284,7 +287,7 @@ function createSlidingWindows(blocks) {
         debugLogger.ai(`  Block ${idx}: "${preview}..."`);
       }
     }
-    
+
     windows.push(newWindow);
   }
 
@@ -332,7 +335,9 @@ function createWindowRequest(window, metadata, docId) {
   const simplifiedMetadata = simplifyMetadata(metadata);
 
   // Debug log the metadata being used
-  debugLogger.ai(`Creating prompt with metadata: author="${simplifiedMetadata.author}", org="${simplifiedMetadata.authorOrganization}"`);
+  debugLogger.ai(
+    `Creating prompt with metadata: author="${simplifiedMetadata.author}", org="${simplifiedMetadata.authorOrganization}"`
+  );
 
   // Use the simplified prompt for all models - it's clearer and more effective
   const prompt = `Add [[disambiguation]] to make each paragraph understandable when read in isolation.
@@ -398,7 +403,10 @@ ${Object.entries(simplifiedMetadata)
   .filter(([, value]) => value && value !== '')
   .map(([key, value]) => {
     // Format key nicely (camelCase to Title Case)
-    const formattedKey = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()).trim();
+    const formattedKey = key
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/^./, str => str.toUpperCase())
+      .trim();
     return `${formattedKey}: ${value}`;
   })
   .join('\n')}
@@ -535,10 +543,10 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
         if (aiConfig.provider === 'anthropic' && completedRequests.count > 0) {
           await new Promise(resolve => setTimeout(resolve, 200)); // 200ms delay between requests
         }
-        
+
         // Call AI with the request
         const response = await callAI(request.prompt, PlainTextResponseSchema, aiConfig);
-        
+
         // Log response preview to debug
         const disambCount = (response.match(/\[\[.*?\]\]/g) || []).length;
         debugLogger.ai(`Response preview: ${response.substring(0, 200)}...`);
@@ -549,7 +557,10 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
         }
 
         // Parse plain text response into blocks (split by blank lines)
-        const responseBlocks = response.split(/\n\s*\n/).map(block => block.trim()).filter(block => block);
+        const responseBlocks = response
+          .split(/\n\s*\n/)
+          .map(block => block.trim())
+          .filter(block => block);
         const enhancedBlocks = {};
 
         // Match response blocks to original blocks using content matching
@@ -635,7 +646,7 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
           debugLogger.ai(`[PROGRESS] Updating progress: ${completedRequests.count}/${currentTotal}`);
           progressCallback(completedRequests.count, currentTotal);
         }
-        
+
         // Track completion in the shared tracker
         if (aiRequestTracker.isInitialized) {
           await aiRequestTracker.trackCompletion(request.docId);
@@ -659,7 +670,7 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
           debugLogger.ai(`[PROGRESS] Updating progress on failure: ${completedRequests.count}/${currentTotal}`);
           progressCallback(completedRequests.count, currentTotal);
         }
-        
+
         // Track completion in the shared tracker even on failure
         if (aiRequestTracker.isInitialized) {
           await aiRequestTracker.trackCompletion(request.docId);
@@ -685,7 +696,7 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
   // Phase 3: Reassemble results by document
   // Also check for duplicate block processing
   const processedBlocksMap = new Map(); // Track which blocks were processed in which windows
-  
+
   for (const result of allResults) {
     if (!results[result.docId]) {
       results[result.docId] = {
@@ -694,13 +705,15 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
       };
     }
     results[result.docId].windows.push(result);
-    
+
     // Check for duplicate block processing
     if (result.blockIndices) {
       for (const blockIndex of result.blockIndices) {
         const key = `${result.docId}-${blockIndex}`;
         if (processedBlocksMap.has(key)) {
-          debugLogger.ai(`WARNING: Block ${blockIndex} in doc ${result.docId} processed in multiple windows: ${processedBlocksMap.get(key)} and ${result.windowIndex}`);
+          debugLogger.ai(
+            `WARNING: Block ${blockIndex} in doc ${result.docId} processed in multiple windows: ${processedBlocksMap.get(key)} and ${result.windowIndex}`
+          );
         } else {
           processedBlocksMap.set(key, result.windowIndex);
         }

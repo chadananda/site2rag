@@ -126,16 +126,16 @@ function generateOriginalOutput(parsed) {
  * @param {Object} options - CLI options
  * @returns {Promise<Array>} Enhanced blocks
  */
-async function enhanceContent(blocks, metadata, aiConfig, options) {
+async function enhanceContent(blocks, metadata, aiConfig, _options) {
   logger.info(`Using simplified context enhancement...`);
   // Convert blocks to simple array format
   const blockTexts = blocks.map(b => b.text || b.content || b.original || b);
-  
+
   // Use the simple processor
   const enhancedTexts = await enhanceDocumentSimple(blockTexts, metadata, aiConfig, {
     onProgress: null
   });
-  
+
   // Convert back to expected format
   return enhancedTexts.map((text, index) => ({
     original: blocks[index].text || blocks[index].content || blocks[index].original || blocks[index],

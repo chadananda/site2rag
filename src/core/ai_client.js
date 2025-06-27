@@ -123,7 +123,7 @@ export function cleanupInactiveSessions() {
 async function makeAICall(prompt, aiConfig, expectPlainText = false) {
   const maxRetries = 3;
   let lastError = null;
-  
+
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
       // Add delay for retries (exponential backoff)
@@ -132,15 +132,15 @@ async function makeAICall(prompt, aiConfig, expectPlainText = false) {
         debugLogger.ai(`[AI] Network retry attempt ${attempt} after ${delay}ms delay...`);
         await new Promise(resolve => setTimeout(resolve, delay));
       }
-      
+
       const result = await makeAICallInternal(prompt, aiConfig, expectPlainText);
       return result;
     } catch (error) {
       lastError = error;
       console.error(`[AI ERROR] Network attempt ${attempt} failed: ${error.message}`);
-      
+
       // Check if it's a retryable error
-      const isRetryable = 
+      const isRetryable =
         error.message.includes('Network error') ||
         error.message.includes('Premature close') ||
         error.message.includes('ECONNRESET') ||
@@ -152,15 +152,15 @@ async function makeAICall(prompt, aiConfig, expectPlainText = false) {
         (error.message.includes('API request failed') && error.message.includes('503')) ||
         (error.message.includes('API request failed') && error.message.includes('504')) ||
         (error.message.includes('API request failed') && error.message.includes('429')); // Rate limit
-      
+
       if (!isRetryable || attempt === maxRetries) {
         throw error;
       }
-      
+
       console.error(`[AI ERROR] Error is retryable, will retry...`);
     }
   }
-  
+
   throw lastError;
 }
 
@@ -339,7 +339,7 @@ async function makeAICallInternal(prompt, aiConfig, expectPlainText = false) {
       }
       throw parseError;
     }
-    
+
     return data.choices[0].message.content || '';
   }
 
@@ -494,7 +494,7 @@ export async function callAI(prompt, schema, aiConfig) {
       try {
         // Check if we're expecting plain text before making the call
         const expectPlainText = schema._def && schema._def.typeName === 'ZodString';
-        
+
         debugLogger.ai(`Attempt ${attempt}: Making AI call... (expectPlainText: ${expectPlainText})`);
         const responseText = await makeAICall(prompt, aiConfig, expectPlainText);
         debugLogger.ai(`Attempt ${attempt}: Received response, length: ${responseText.length}`);
@@ -531,7 +531,7 @@ export async function callAI(prompt, schema, aiConfig) {
         jsonText = jsonText.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
 
         debugLogger.ai(`Final JSON text (first 200 chars): ${jsonText.substring(0, 200)}...`);
-        
+
         // Log more details when parsing fails
         let parsed;
         try {
@@ -539,7 +539,7 @@ export async function callAI(prompt, schema, aiConfig) {
         } catch (parseError) {
           console.error(`[AI ERROR] JSON.parse failed with: ${parseError.message}`);
           console.error(`[AI ERROR] JSON length: ${jsonText.length} characters`);
-          
+
           // Find the error position
           const match = parseError.message.match(/position (\d+)/);
           if (match) {
@@ -548,13 +548,17 @@ export async function callAI(prompt, schema, aiConfig) {
             console.error(`[AI ERROR] Context around position ${errorPos}:`);
             console.error(`[AI ERROR] Before: "${jsonText.substring(contextStart, errorPos)}"`);
             console.error(`[AI ERROR] At error: "${jsonText.substring(errorPos, errorPos + 10)}..."`);
-            console.error(`[AI ERROR] Character at position ${errorPos}: "${jsonText.charAt(errorPos)}" (code: ${jsonText.charCodeAt(errorPos)})`);
-            
+            console.error(
+              `[AI ERROR] Character at position ${errorPos}: "${jsonText.charAt(errorPos)}" (code: ${jsonText.charCodeAt(errorPos)})`
+            );
+
             // Log the full response for debugging
             if (jsonText.length < 5000) {
               console.error(`[AI ERROR] Full response:\n${jsonText}`);
             } else {
-              console.error(`[AI ERROR] Response too long (${jsonText.length} chars), showing first 2000:\n${jsonText.substring(0, 2000)}...`);
+              console.error(
+                `[AI ERROR] Response too long (${jsonText.length} chars), showing first 2000:\n${jsonText.substring(0, 2000)}...`
+              );
             }
           }
           throw parseError;
@@ -589,7 +593,7 @@ export async function callAI(prompt, schema, aiConfig) {
         if (e.message.includes('API request failed')) {
           console.error(`[AI ERROR] API request failed - check provider configuration`);
         }
-        
+
         if (e.message.includes('Network error') || e.message.includes('Premature close')) {
           console.error(`[AI ERROR] Network issue detected - this is often transient and will be retried`);
         }

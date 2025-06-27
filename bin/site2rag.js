@@ -511,13 +511,13 @@ Examples:
     // Set up verbose logging if requested
     const verbose = options.verbose;
     const testMode = options.test;
-    
+
     // Configure logger based on flags
     if (verbose || testMode) {
       logger.verbose = true;
       logger.debug = true;
     }
-    
+
     const log = (...args) => {
       if (verbose) logger.info('[VERBOSE]', ...args);
     };

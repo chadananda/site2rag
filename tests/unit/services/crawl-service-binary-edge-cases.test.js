@@ -39,7 +39,7 @@ describe('CrawlService Binary File Edge Cases', () => {
   beforeEach(() => {
     // Clear all mocks
     vi.clearAllMocks();
-    
+
     // Create test output directory
     if (!fs.existsSync(TEST_OUTPUT_DIR)) {
       fs.mkdirSync(TEST_OUTPUT_DIR, {recursive: true});
@@ -119,7 +119,7 @@ describe('CrawlService Binary File Edge Cases', () => {
       const pdfUrl2 = 'https://example.com/duplicate.pdf'; // Same content, different URL
 
       // Mock fetch responses
-      fetch.mockImplementation(async (url) => {
+      fetch.mockImplementation(async url => {
         if (url === pdfUrl1 || url === pdfUrl2) {
           return {
             ok: true,
@@ -136,7 +136,7 @@ describe('CrawlService Binary File Edge Cases', () => {
 
       // Second download with same content should be skipped
       await crawlService.downloadBinaryFile(pdfUrl2, 'application/pdf');
-      
+
       // Should still only be called once due to duplicate detection
       expect(mockFileService.writeContent).toHaveBeenCalledTimes(1);
     });
@@ -144,8 +144,8 @@ describe('CrawlService Binary File Edge Cases', () => {
     it('should allow different binary files even with similar names', async () => {
       const pdf1Content = Buffer.from('PDF content 1');
       const pdf2Content = Buffer.from('PDF content 2');
-      
-      fetch.mockImplementation(async (url) => {
+
+      fetch.mockImplementation(async url => {
         if (url.includes('doc1.pdf')) {
           return {
             ok: true,
@@ -172,7 +172,7 @@ describe('CrawlService Binary File Edge Cases', () => {
 
     it('should track binary files across different domains', async () => {
       const sharedPdfContent = Buffer.from('Shared PDF content');
-      
+
       fetch.mockImplementation(async () => ({
         ok: true,
         status: 200,
@@ -206,7 +206,7 @@ describe('CrawlService Binary File Edge Cases', () => {
 
       for (const url of maliciousUrls) {
         await crawlService.downloadBinaryFile(url, 'application/pdf');
-        
+
         // Verify sanitized filename was used
         const calls = mockFileService.writeContent.mock.calls;
         const lastCall = calls[calls.length - 1];
@@ -294,10 +294,7 @@ describe('CrawlService Binary File Edge Cases', () => {
 
       // Should not write oversized file
       expect(mockFileService.writeContent).not.toHaveBeenCalled();
-      expect(mockProgressService.completeUrl).toHaveBeenCalledWith(
-        'https://example.com/huge.pdf',
-        'error'
-      );
+      expect(mockProgressService.completeUrl).toHaveBeenCalledWith('https://example.com/huge.pdf', 'error');
     });
   });
 
@@ -384,7 +381,7 @@ describe('CrawlService Binary File Edge Cases', () => {
 
       // Should stop at limit
       expect(crawlService.stats.totalPages).toBe(6); // 3 + 3
-      
+
       // Further downloads should be skipped
       const shouldContinue = crawlService.stats.totalPages < crawlService.maxPages;
       expect(shouldContinue).toBe(false);
@@ -404,10 +401,7 @@ describe('CrawlService Binary File Edge Cases', () => {
       await crawlService.downloadBinaryFile('https://example.com/doc.pdf', 'application/pdf');
 
       // Should complete successfully
-      expect(mockProgressService.completeUrl).toHaveBeenCalledWith(
-        'https://example.com/doc.pdf',
-        'success'
-      );
+      expect(mockProgressService.completeUrl).toHaveBeenCalledWith('https://example.com/doc.pdf', 'success');
     });
   });
 
@@ -419,10 +413,7 @@ describe('CrawlService Binary File Edge Cases', () => {
 
       await crawlService.downloadBinaryFile('https://example.com/timeout.pdf', 'application/pdf');
 
-      expect(mockProgressService.completeUrl).toHaveBeenCalledWith(
-        'https://example.com/timeout.pdf',
-        'error'
-      );
+      expect(mockProgressService.completeUrl).toHaveBeenCalledWith('https://example.com/timeout.pdf', 'error');
       expect(mockFileService.writeContent).not.toHaveBeenCalled();
     });
 
@@ -435,10 +426,7 @@ describe('CrawlService Binary File Edge Cases', () => {
 
       await crawlService.downloadBinaryFile('https://example.com/missing.pdf', 'application/pdf');
 
-      expect(mockProgressService.completeUrl).toHaveBeenCalledWith(
-        'https://example.com/missing.pdf',
-        'error'
-      );
+      expect(mockProgressService.completeUrl).toHaveBeenCalledWith('https://example.com/missing.pdf', 'error');
     });
 
     it('should handle redirect loops for binary files', async () => {
@@ -457,17 +445,14 @@ describe('CrawlService Binary File Edge Cases', () => {
 
       await crawlService.downloadBinaryFile('https://example.com/loop.pdf', 'application/pdf');
 
-      expect(mockProgressService.completeUrl).toHaveBeenCalledWith(
-        'https://example.com/loop.pdf',
-        'error'
-      );
+      expect(mockProgressService.completeUrl).toHaveBeenCalledWith('https://example.com/loop.pdf', 'error');
     });
   });
 
   describe('Resource URL detection', () => {
     it('should detect and queue resource parameter URLs', async () => {
       const resourceUrl = 'https://example.com/download?resource=document.pdf';
-      
+
       // Process the URL
       await crawlService._shouldCrawlUrl(resourceUrl);
 
@@ -483,7 +468,7 @@ describe('CrawlService Binary File Edge Cases', () => {
 
     it('should handle encoded resource parameters', async () => {
       const encodedUrl = 'https://example.com/get?resource=my%20document%20(2023).pdf';
-      
+
       await crawlService._shouldCrawlUrl(encodedUrl);
 
       expect(mockCrawlStateService.queueUrl).toHaveBeenCalledWith(

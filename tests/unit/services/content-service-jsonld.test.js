@@ -17,53 +17,54 @@ vi.mock('../../../src/services/logger_service.js', () => ({
 }));
 // Test fixture: Article JSON-LD
 const articleJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "Article",
-  "headline": "Test Article with JSON-LD",
-  "description": "This is a test article with structured data",
-  "datePublished": "2025-06-25T10:00:00Z",
-  "dateModified": "2025-06-25T12:00:00Z",
-  "author": {
-    "@type": "Person",
-    "name": "John Doe"
+  '@context': 'https://schema.org',
+  '@type': 'Article',
+  headline: 'Test Article with JSON-LD',
+  description: 'This is a test article with structured data',
+  datePublished: '2025-06-25T10:00:00Z',
+  dateModified: '2025-06-25T12:00:00Z',
+  author: {
+    '@type': 'Person',
+    name: 'John Doe'
   },
-  "publisher": {
-    "@type": "Organization",
-    "name": "Test Publisher",
-    "logo": {
-      "@type": "ImageObject",
-      "url": "https://example.com/logo.png"
+  publisher: {
+    '@type': 'Organization',
+    name: 'Test Publisher',
+    logo: {
+      '@type': 'ImageObject',
+      url: 'https://example.com/logo.png'
     }
   },
-  "image": "https://example.com/article-image.jpg",
-  "keywords": "test, article, json-ld"
+  image: 'https://example.com/article-image.jpg',
+  keywords: 'test, article, json-ld'
 };
 // Test fixture: Person JSON-LD with bio
 const personJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "Person",
-  "name": "John Doe",
-  "description": "John Doe is an experienced software engineer and technical writer with over 10 years of experience in web development.",
-  "jobTitle": "Senior Software Engineer",
-  "image": "https://example.com/john-doe.jpg",
-  "url": "https://example.com/authors/john-doe",
-  "worksFor": {
-    "@type": "Organization",
-    "name": "Tech Corp"
+  '@context': 'https://schema.org',
+  '@type': 'Person',
+  name: 'John Doe',
+  description:
+    'John Doe is an experienced software engineer and technical writer with over 10 years of experience in web development.',
+  jobTitle: 'Senior Software Engineer',
+  image: 'https://example.com/john-doe.jpg',
+  url: 'https://example.com/authors/john-doe',
+  worksFor: {
+    '@type': 'Organization',
+    name: 'Tech Corp'
   }
 };
 // Test fixture: PodcastEpisode JSON-LD
 const podcastJsonLd = {
-  "@context": "https://schema.org",
-  "@type": "PodcastEpisode",
-  "name": "Episode 42: Web Development Best Practices",
-  "description": "In this episode, we discuss modern web development practices",
-  "datePublished": "2025-06-20T00:00:00Z",
-  "timeRequired": "PT45M",
-  "license": "https://creativecommons.org/licenses/by/4.0/",
-  "author": {
-    "@type": "Person",
-    "name": "Jane Smith"
+  '@context': 'https://schema.org',
+  '@type': 'PodcastEpisode',
+  name: 'Episode 42: Web Development Best Practices',
+  description: 'In this episode, we discuss modern web development practices',
+  datePublished: '2025-06-20T00:00:00Z',
+  timeRequired: 'PT45M',
+  license: 'https://creativecommons.org/licenses/by/4.0/',
+  author: {
+    '@type': 'Person',
+    name: 'Jane Smith'
   }
 };
 describe('ContentService JSON-LD Extraction', () => {
@@ -113,7 +114,9 @@ describe('ContentService JSON-LD Extraction', () => {
       expect(metadata.title).toBe('Test Article with JSON-LD');
       expect(metadata.author).toBe('John Doe');
       // Should have Person data
-      expect(metadata.authorDescription).toBe('John Doe is an experienced software engineer and technical writer with over 10 years of experience in web development.');
+      expect(metadata.authorDescription).toBe(
+        'John Doe is an experienced software engineer and technical writer with over 10 years of experience in web development.'
+      );
       expect(metadata.authorJobTitle).toBe('Senior Software Engineer');
       expect(metadata.authorImage).toBe('https://example.com/john-doe.jpg');
       expect(metadata.authorUrl).toBe('https://example.com/authors/john-doe');
@@ -134,7 +137,9 @@ describe('ContentService JSON-LD Extraction', () => {
       const $ = load(html);
       const metadata = contentService.extractMetadata($);
       expect(metadata.author).toBe('John Doe');
-      expect(metadata.authorDescription).toBe('John Doe is an experienced software engineer and technical writer with over 10 years of experience in web development.');
+      expect(metadata.authorDescription).toBe(
+        'John Doe is an experienced software engineer and technical writer with over 10 years of experience in web development.'
+      );
       expect(metadata.authorJobTitle).toBe('Senior Software Engineer');
     });
     it('should handle invalid JSON gracefully', () => {
@@ -191,7 +196,9 @@ describe('ContentService JSON-LD Extraction', () => {
       const metadata = contentService.extractMetadata($);
       // Should extract both Article and Person data
       expect(metadata.title).toBe('Test Article with JSON-LD');
-      expect(metadata.authorDescription).toBe('John Doe is an experienced software engineer and technical writer with over 10 years of experience in web development.');
+      expect(metadata.authorDescription).toBe(
+        'John Doe is an experienced software engineer and technical writer with over 10 years of experience in web development.'
+      );
     });
     it('should prioritize JSON-LD over meta tags', () => {
       const html = `
@@ -215,10 +222,10 @@ describe('ContentService JSON-LD Extraction', () => {
     });
     it('should extract author as string when provided directly', () => {
       const simpleArticle = {
-        "@context": "https://schema.org",
-        "@type": "Article",
-        "headline": "Simple Article",
-        "author": "Jane Doe"  // Author as string, not Person object
+        '@context': 'https://schema.org',
+        '@type': 'Article',
+        headline: 'Simple Article',
+        author: 'Jane Doe' // Author as string, not Person object
       };
       const html = `
         <!DOCTYPE html>
@@ -236,7 +243,7 @@ describe('ContentService JSON-LD Extraction', () => {
     it('should handle missing Person match for author', () => {
       const articleWithDifferentAuthor = {
         ...articleJsonLd,
-        author: { "@type": "Person", "name": "Alice Smith" }
+        author: {'@type': 'Person', name: 'Alice Smith'}
       };
       const html = `
         <!DOCTYPE html>
@@ -277,7 +284,9 @@ describe('ContentService JSON-LD Extraction', () => {
       const result = await contentService.processHtml(html, 'https://example.com/test');
       // Metadata should be extracted
       expect(result.metadata.title).toBe('Test Article with JSON-LD');
-      expect(result.metadata.authorDescription).toBe('John Doe is an experienced software engineer and technical writer with over 10 years of experience in web development.');
+      expect(result.metadata.authorDescription).toBe(
+        'John Doe is an experienced software engineer and technical writer with over 10 years of experience in web development.'
+      );
       // But JSON-LD scripts should be removed from content
       const contentHtml = result.main.html();
       expect(contentHtml).not.toContain('application/ld+json');

@@ -69,8 +69,6 @@ export function detectFormat(ext) {
  * @returns {Array} Array of content blocks
  */
 export function splitIntoBlocks(content, format) {
-  const blocks = [];
-
   switch (format) {
     case 'markdown':
       return splitMarkdownBlocks(content);

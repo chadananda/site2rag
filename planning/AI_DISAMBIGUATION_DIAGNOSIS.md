@@ -103,6 +103,7 @@ The sliding window approach is working correctly:
 ## Current Implementation
 
 The system has been updated to:
+
 1. Use plain text responses (blocks separated by blank lines)
 2. Implement strict validation that rejects any text modifications
 3. Use optimized 1200/600 word windows for mini models

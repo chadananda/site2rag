@@ -34,9 +34,10 @@ The team [[the dev team]] launched it [[the mobile app]].
 This [[the product launch]] was amazing.`;
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({
-            response: expectedResponse
-          })
+          json: () =>
+            Promise.resolve({
+              response: expectedResponse
+            })
         });
         const result = await callAI('test prompt', PlainTextSchema, {provider: 'ollama'});
         expect(result).toBe(expectedResponse.trim());
@@ -46,9 +47,10 @@ This [[the product launch]] was amazing.`;
         const responseWithWhitespace = '  \n\nSome text with whitespace\n\n  ';
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({
-            response: responseWithWhitespace
-          })
+          json: () =>
+            Promise.resolve({
+              response: responseWithWhitespace
+            })
         });
         const result = await callAI('test prompt', PlainTextSchema, {provider: 'ollama'});
         expect(result).toBe('Some text with whitespace');
@@ -64,9 +66,10 @@ This [[the product launch]] was amazing.`;
         };
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({
-            response: JSON.stringify(jsonResponse)
-          })
+          json: () =>
+            Promise.resolve({
+              response: JSON.stringify(jsonResponse)
+            })
         });
         const result = await callAI('test prompt', JsonSchema, {provider: 'ollama'});
         expect(result).toEqual(jsonResponse);
@@ -78,9 +81,10 @@ This [[the product launch]] was amazing.`;
         const responseWithCodeBlock = '```json\n{"result": "success"}\n```';
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({
-            response: responseWithCodeBlock
-          })
+          json: () =>
+            Promise.resolve({
+              response: responseWithCodeBlock
+            })
         });
         const result = await callAI('test prompt', JsonSchema, {provider: 'ollama'});
         expect(result).toEqual({result: 'success'});
@@ -92,9 +96,10 @@ This [[the product launch]] was amazing.`;
         const responseWithCodeBlock = '```json{"result": "success"}```';
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({
-            response: responseWithCodeBlock
-          })
+          json: () =>
+            Promise.resolve({
+              response: responseWithCodeBlock
+            })
         });
         const result = await callAI('test prompt', JsonSchema, {provider: 'ollama'});
         expect(result).toEqual({result: 'success'});
@@ -106,9 +111,10 @@ This [[the product launch]] was amazing.`;
         const mixedResponse = 'Here is the result: {"data": "test value"} and some more text';
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({
-            response: mixedResponse
-          })
+          json: () =>
+            Promise.resolve({
+              response: mixedResponse
+            })
         });
         const result = await callAI('test prompt', JsonSchema, {provider: 'ollama'});
         expect(result).toEqual({data: 'test value'});
@@ -123,9 +129,10 @@ This [[the product launch]] was amazing.`;
           .mockRejectedValueOnce(new Error('Network error'))
           .mockResolvedValueOnce({
             ok: true,
-            json: () => Promise.resolve({
-              response: '{"result": "success"}'
-            })
+            json: () =>
+              Promise.resolve({
+                response: '{"result": "success"}'
+              })
           });
         const result = await callAI('test prompt', JsonSchema, {provider: 'ollama'});
         expect(result).toEqual({result: 'success'});
@@ -133,13 +140,13 @@ This [[the product launch]] was amazing.`;
       }, 10000); // Increase timeout for retry test
       it('should return null after 3 failed attempts', async () => {
         const JsonSchema = z.object({result: z.string()});
-        mockFetch
-          .mockRejectedValueOnce(new Error('Persistent error'))
-          .mockRejectedValueOnce(new Error('Persistent error'))
-          .mockRejectedValueOnce(new Error('Persistent error'));
+        // Mock 6 failures: 3 network retries × 2 validation attempts
+        for (let i = 0; i < 6; i++) {
+          mockFetch.mockRejectedValueOnce(new Error('Persistent error'));
+        }
         const result = await callAI('test prompt', JsonSchema, {provider: 'ollama'});
         expect(result).toBeNull();
-        expect(mockFetch).toHaveBeenCalledTimes(3);
+        expect(mockFetch).toHaveBeenCalledTimes(6); // 3 retries × 2 validation attempts
       }, 10000);
       it('should handle timeout errors', async () => {
         const JsonSchema = z.object({result: z.string()});
@@ -153,26 +160,33 @@ This [[the product launch]] was amazing.`;
       }, 10000);
       it('should handle malformed JSON responses', async () => {
         const JsonSchema = z.object({result: z.string()});
-        mockFetch.mockResolvedValueOnce({
-          ok: true,
-          json: () => Promise.resolve({
-            response: '{invalid json}'
-          })
-        });
+        // Mock all retry attempts with malformed JSON
+        for (let i = 0; i < 6; i++) {
+          mockFetch.mockResolvedValueOnce({
+            ok: true,
+            json: () =>
+              Promise.resolve({
+                response: '{invalid json}'
+              })
+          });
+        }
         const result = await callAI('test prompt', JsonSchema, {provider: 'ollama'});
         expect(result).toBeNull();
-      }, 10000);
+      }, 15000);
       it('should handle API errors with status codes', async () => {
         const JsonSchema = z.object({result: z.string()});
-        mockFetch.mockResolvedValueOnce({
-          ok: false,
-          status: 500,
-          statusText: 'Internal Server Error',
-          text: () => Promise.resolve('Server error details')
-        });
+        // Mock all retry attempts with 500 error (retryable)
+        for (let i = 0; i < 3; i++) {
+          mockFetch.mockResolvedValueOnce({
+            ok: false,
+            status: 500,
+            statusText: 'Internal Server Error',
+            text: () => Promise.resolve('Server error details')
+          });
+        }
         const result = await callAI('test prompt', JsonSchema, {provider: 'ollama'});
         expect(result).toBeNull();
-      }, 10000);
+      }, 15000);
     });
     describe('schema type detection', () => {
       it('should detect string schema and skip JSON parsing', async () => {
@@ -180,9 +194,10 @@ This [[the product launch]] was amazing.`;
         const plainResponse = 'This is plain text, not JSON';
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({
-            response: plainResponse
-          })
+          json: () =>
+            Promise.resolve({
+              response: plainResponse
+            })
         });
         const result = await callAI('test prompt', StringSchema, {provider: 'ollama'});
         expect(result).toBe(plainResponse);
@@ -194,9 +209,10 @@ This [[the product launch]] was amazing.`;
         });
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({
-            response: '{"name": "test", "value": 42}'
-          })
+          json: () =>
+            Promise.resolve({
+              response: '{"name": "test", "value": 42}'
+            })
         });
         const result = await callAI('test prompt', ObjectSchema, {provider: 'ollama'});
         expect(result).toEqual({name: 'test', value: 42});
@@ -205,9 +221,10 @@ This [[the product launch]] was amazing.`;
         const ArraySchema = z.array(z.string());
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({
-            response: '["item1", "item2", "item3"]'
-          })
+          json: () =>
+            Promise.resolve({
+              response: '["item1", "item2", "item3"]'
+            })
         });
         const result = await callAI('test prompt', ArraySchema, {provider: 'ollama'});
         expect(result).toEqual(['item1', 'item2', 'item3']);
@@ -218,9 +235,10 @@ This [[the product launch]] was amazing.`;
         const StringSchema = z.string();
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({
-            content: [{text: 'Anthropic response'}]
-          })
+          json: () =>
+            Promise.resolve({
+              content: [{text: 'Anthropic response'}]
+            })
         });
         const result = await callAI('test prompt', StringSchema, {
           provider: 'anthropic',
@@ -240,9 +258,10 @@ This [[the product launch]] was amazing.`;
         const StringSchema = z.string();
         mockFetch.mockResolvedValueOnce({
           ok: true,
-          json: () => Promise.resolve({
-            choices: [{message: {content: 'OpenAI response'}}]
-          })
+          json: () =>
+            Promise.resolve({
+              choices: [{message: {content: 'OpenAI response'}}]
+            })
         });
         const result = await callAI('test prompt', StringSchema, {
           provider: 'openai',
@@ -253,7 +272,7 @@ This [[the product launch]] was amazing.`;
           'https://api.openai.com/v1/chat/completions',
           expect.objectContaining({
             headers: expect.objectContaining({
-              'Authorization': 'Bearer test-key'
+              Authorization: 'Bearer test-key'
             })
           })
         );
@@ -281,9 +300,10 @@ This [[the product launch]] was amazing.`;
       session.setCachedContext(cachedContext);
       mockFetch.mockResolvedValueOnce({
         ok: true,
-        json: () => Promise.resolve({
-          response: 'Response text'
-        })
+        json: () =>
+          Promise.resolve({
+            response: 'Response text'
+          })
       });
       const StringSchema = z.string();
       await session.call('Additional prompt', StringSchema);

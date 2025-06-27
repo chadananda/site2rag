@@ -1,12 +1,12 @@
 // security.js
 // Security utilities for input sanitization and validation
-import {z} from 'zod';
 /**
  * Pre-compiled regex patterns for performance
  */
 export const SECURITY_PATTERNS = {
   // Detect potential prompt injection attempts
-  promptInjection: /\b(SYSTEM|ASSISTANT|USER|HUMAN|AI|ignore\s+previous|disregard|forget|debug\s+mode|unrestricted|reveal|bypass|override)\s*:/gi,
+  promptInjection:
+    /\b(SYSTEM|ASSISTANT|USER|HUMAN|AI|ignore\s+previous|disregard|forget|debug\s+mode|unrestricted|reveal|bypass|override)\s*:/gi,
   // HTML/script tags that could cause XSS
   htmlTags: /<[^>]+>/g,
   // SQL injection patterns
@@ -96,7 +96,7 @@ export function escapeHtml(text) {
     "'": '&#39;',
     '/': '&#x2F;'
   };
-  return String(text).replace(/[&<>"'\/]/g, char => htmlEntities[char]);
+  return String(text).replace(/[&<>"'/]/g, char => htmlEntities[char]);
 }
 /**
  * Validate AI response to ensure it's safe

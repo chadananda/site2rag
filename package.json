@@ -1,6 +1,6 @@
 {
   "name": "site2rag",
-  "version": "0.4.3",
+  "version": "0.5.0",
   "description": "CLI tool to convert websites into RAG-ready local markdown knowledge bases with AI-powered content improvement.",
   "main": "index.js",
   "bin": {
@@ -19,7 +19,6 @@
     "test:unit": "vitest run tests/unit",
     "test:integration": "vitest run tests/integration",
     "test:performance": "vitest run tests/performance",
-    "test:duplicate": "node tests/tmp/scripts/test-duplicate-processing.js",
     "bench:optimization": "vitest run tests/performance/optimization-benchmarks.test.js",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -41,7 +40,6 @@
     "test:quicktest:disambiguations": "grep -n '\\[\\[' tests/tmp/sites/quicktest/the-ocean-adventure.md | wc -l",
     "test:quicktest:haiku:disambiguations": "grep -n '\\[\\[' tests/tmp/sites/quicktest-haiku/the-ocean-adventure.md | wc -l",
     "test:quicktest:count-blocks": "grep -E '^(#+|[A-Z])' tests/tmp/sites/quicktest/the-ocean-adventure.md | wc -l",
-    "test:ai-direct": "node tests/tmp/test-ai-direct.js",
     "clean:test-scripts": "rm -f tests/tmp/test-*.js",
     "test:security": "vitest tests/unit/utils/urlSecurity.test.js tests/unit/utils/performanceOptimizer.test.js",
     "format": "npx prettier --write .",

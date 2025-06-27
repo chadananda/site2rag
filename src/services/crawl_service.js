@@ -4,6 +4,7 @@ import {URL} from 'url';
 import {CrawlLimitReached} from '../utils/errors.js';
 
 import logger from './logger_service.js';
+import debugLogger from './debug_logger.js';
 import ProgressService from '../utils/progress.js';
 import {SitemapService} from './sitemap_service.js';
 import {UrlFilterService} from './url_filter_service.js';
@@ -466,7 +467,7 @@ export class CrawlService {
         hostname = 'unknown';
         logger.warn('No domain provided for CrawlService.initialize');
       }
-    } catch (err) {
+    } catch {
       hostname = this.domain?.split('/')?.pop() || 'unknown';
       logger.warn(`'${this.domain}' is not a valid URL in CrawlService.initialize. Using '${hostname}' as hostname.`);
     }
@@ -594,7 +595,7 @@ export class CrawlService {
       const totalUrls = 1;
 
       if (process.env.DEBUG) {
-        console.log(`[CRAWL_SERVICE] Starting progress - maxPages: ${this.maxPages}, initial totalUrls: ${totalUrls}`);
+        debugLogger.crawl(`Starting progress - maxPages: ${this.maxPages}, initial totalUrls: ${totalUrls}`);
       }
 
       this.progressService.start({
@@ -929,7 +930,7 @@ export class CrawlService {
       }
 
       // Process HTML content
-      const {$, main, links: allLinks, removedBlocks} = await this.contentService.processHtml(html, normalizedUrl);
+      const {$, main} = await this.contentService.processHtml(html, normalizedUrl);
 
       // Extract metadata from HTML
       const metadata = this.contentService.extractMetadata($);
@@ -948,8 +949,10 @@ export class CrawlService {
 
       // Generate frontmatter
       const frontmatter = Object.entries(enhancedMetadata)
-        .filter(([key, value]) => value !== null && value !== undefined && value !== '' && 
-                                 !(Array.isArray(value) && value.length === 0))
+        .filter(
+          ([, value]) =>
+            value !== null && value !== undefined && value !== '' && !(Array.isArray(value) && value.length === 0)
+        )
         .map(([key, value]) => {
           if (Array.isArray(value)) {
             // Format arrays as YAML lists
@@ -1709,7 +1712,7 @@ ${markdownContent}`;
       // Extract and download PDFs/documents from external domains
       // These won't go through the normal crawl queue to bypass domain filtering
       await this.downloadExternalDocuments($, normalizedUrl);
-      
+
       // Extract document links from same domain to add to crawl queue
       const documentLinks = this.extractDocumentLinks($, normalizedUrl);
       if (documentLinks.length > 0) {
@@ -1811,7 +1814,7 @@ ${markdownContent}`;
       let decodedUrl = normalizedUrl;
       try {
         decodedUrl = decodeURIComponent(normalizedUrl);
-      } catch (e) {
+      } catch {
         // If decoding fails, use the original URL
         logger.warn(`Failed to decode URL: ${normalizedUrl}`);
       }
@@ -1877,9 +1880,6 @@ ${markdownContent}`;
               logger.log('DEBUG', `Generated debug markdown: ${debugMarkdown ? 'yes' : 'no'}`);
 
               if (debugMarkdown) {
-                // Get the base output directory
-                const outputBaseDir = this.fileService.outputDir;
-
                 // Save debug markdown
                 await this.contentService.saveDebugInfo(normalizedUrl, debugMarkdown, filename);
               }
@@ -2047,7 +2047,9 @@ ${markdownContent}`;
                 queuedUrls: this.queuedUrls.size
               });
 
-              logger.info(`Updated total eligible to: ${progressTotal} (${totalEligible} eligible, limit: ${this.maxPages || 'none'})`);
+              logger.info(
+                `Updated total eligible to: ${progressTotal} (${totalEligible} eligible, limit: ${this.maxPages || 'none'})`
+              );
             } else {
               // In sitemap mode, just update the queue count
               this.progressService.updateStats({
@@ -2110,7 +2112,7 @@ ${markdownContent}`;
       }
 
       return this.baseDomain && urlHostname === this.baseDomain;
-    } catch (err) {
+    } catch {
       return false;
     }
   }
@@ -2350,11 +2352,13 @@ ${markdownContent}`;
             content_hash: binaryHash // Store the binary hash
           });
         }
-        
+
         // Add to foundUrls to count towards the limit (treat as first-class page)
         this.foundUrls.add(url);
-        logger.info(`[BINARY_TRACKING] Added binary file to foundUrls: ${url} (${this.foundUrls.size}/${this.maxPages})`);
-        
+        logger.info(
+          `[BINARY_TRACKING] Added binary file to foundUrls: ${url} (${this.foundUrls.size}/${this.maxPages})`
+        );
+
         // Update database to track for efficient re-crawls
         if (this.contentService?.db) {
           const pageData = {
@@ -2420,7 +2424,9 @@ ${markdownContent}`;
             totalUrls: progressTotal,
             queuedUrls: this.queuedUrls.size
           });
-          logger.info(`Updated progress total to ${progressTotal} (${totalEligible} eligible, limit: ${this.maxPages || 'none'})`);
+          logger.info(
+            `Updated progress total to ${progressTotal} (${totalEligible} eligible, limit: ${this.maxPages || 'none'})`
+          );
         }
 
         return sitemapUrls;
@@ -2446,27 +2452,27 @@ ${markdownContent}`;
     const documentUrls = [];
     // Only download document types that contain searchable text content
     const downloadableExtensions = ['.pdf', '.doc', '.docx', '.odt', '.rtf'];
-    
+
     const allLinks = $('a[href]').length;
     if (logger.verbose) {
       logger.info(`[DOCS] Checking ${allLinks} links on ${pageUrl}`);
     }
-    
+
     $('a[href]').each((i, el) => {
       const href = $(el).attr('href');
       if (href) {
         // Check if the link has a searchable document extension
-        const hasDownloadableExt = downloadableExtensions.some(ext => 
-          href.toLowerCase().endsWith(ext) || href.toLowerCase().includes(ext + '?')
+        const hasDownloadableExt = downloadableExtensions.some(
+          ext => href.toLowerCase().endsWith(ext) || href.toLowerCase().includes(ext + '?')
         );
-        
+
         if (hasDownloadableExt) {
           try {
             // Resolve to absolute URL
             const absoluteUrl = new URL(href, pageUrl).href;
             const normalizedUrl = this.urlService.normalizeUrl(absoluteUrl);
             documentUrls.push(normalizedUrl);
-          } catch (e) {
+          } catch {
             // Invalid URL, skip
             if (logger.verbose) {
               logger.info(`[DOCS] Invalid document URL: ${href}`);
@@ -2479,7 +2485,7 @@ ${markdownContent}`;
     if (documentUrls.length > 0) {
       logger.info(`[DOCS] Found ${documentUrls.length} document links on ${pageUrl}`);
     }
-    
+
     return documentUrls;
   }
 
@@ -2494,21 +2500,21 @@ ${markdownContent}`;
   async downloadExternalDocuments($, pageUrl) {
     const downloadableExtensions = ['.pdf', '.doc', '.docx', '.odt', '.rtf'];
     const downloads = [];
-    
+
     $('a[href]').each((i, el) => {
       const href = $(el).attr('href');
       if (href) {
         // Check if the link has a downloadable extension
-        const hasDownloadableExt = downloadableExtensions.some(ext => 
-          href.toLowerCase().endsWith(ext) || href.toLowerCase().includes(ext + '?')
+        const hasDownloadableExt = downloadableExtensions.some(
+          ext => href.toLowerCase().endsWith(ext) || href.toLowerCase().includes(ext + '?')
         );
-        
+
         if (hasDownloadableExt) {
           try {
             // Resolve to absolute URL
             const absoluteUrl = new URL(href, pageUrl).href;
             downloads.push(absoluteUrl);
-          } catch (e) {
+          } catch {
             if (logger.verbose) {
               logger.info(`[DOCS] Invalid document URL: ${href}`);
             }
@@ -2518,9 +2524,9 @@ ${markdownContent}`;
     });
 
     if (downloads.length === 0) return;
-    
+
     logger.info(`[DOCS] Found ${downloads.length} document links on ${pageUrl}`);
-    
+
     // Download each document
     for (const docUrl of downloads) {
       // Skip if we've reached the page limit
@@ -2528,32 +2534,32 @@ ${markdownContent}`;
         logger.info(`[DOCS] Reached max pages limit, skipping remaining documents`);
         break;
       }
-      
+
       // Skip if already downloaded
       if (this.visitedUrls.has(docUrl)) {
         continue;
       }
-      
+
       try {
         logger.info(`[DOCS] Downloading document: ${docUrl}`);
-        
+
         // Mark as visited to prevent duplicates
         this.visitedUrls.add(docUrl);
-        
+
         // Fetch the document
         const response = await fetch(docUrl);
         if (!response.ok) {
           logger.warn(`[DOCS] Failed to download document: ${response.status} ${response.statusText}`);
           continue;
         }
-        
+
         // Get the document data
         const buffer = await response.arrayBuffer();
-        
+
         // Determine filename from URL
         const urlObj = new URL(docUrl);
         let filename = path.basename(urlObj.pathname);
-        
+
         // If filename is empty, generate one
         if (!filename || !path.extname(filename)) {
           const contentType = response.headers.get('content-type') || '';
@@ -2562,21 +2568,17 @@ ${markdownContent}`;
           else if (contentType.includes('word') || contentType.includes('docx')) extension = '.docx';
           filename = `document-${Date.now()}${extension}`;
         }
-        
+
         // Save the document
         const {hostname} = new URL(pageUrl);
-        const savedPath = await this.fileService.saveBinaryFile(
-          Buffer.from(buffer), 
-          hostname, 
-          filename
-        );
-        
+        const savedPath = await this.fileService.saveBinaryFile(Buffer.from(buffer), hostname, filename);
+
         logger.info(`[DOCS] Saved document to: ${savedPath}`);
-        
+
         // Add to foundUrls to count towards limit
         this.foundUrls.add(docUrl);
         logger.info(`[DOCS] Document counted towards limit: ${this.foundUrls.size}/${this.maxPages}`);
-        
+
         // Save to database for re-crawl tracking
         if (this.contentService?.db) {
           const pageData = {
@@ -2593,7 +2595,7 @@ ${markdownContent}`;
           };
           this.contentService.db.upsertPage(pageData);
         }
-        
+
         // Update progress
         if (this.progressService) {
           this.progressService.updateStats({
@@ -2604,7 +2606,6 @@ ${markdownContent}`;
             }
           });
         }
-        
       } catch (error) {
         logger.error(`[DOCS] Error downloading document ${docUrl}: ${error.message}`);
       }

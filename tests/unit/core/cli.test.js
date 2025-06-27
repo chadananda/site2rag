@@ -5,7 +5,7 @@ import {describe, it, expect} from 'vitest';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-const CLI_PATH = path.resolve(__dirname, '../../bin/site2rag.js');
+const CLI_PATH = path.resolve(__dirname, '../../../bin/site2rag.js');
 
 function run(cmd) {
   try {

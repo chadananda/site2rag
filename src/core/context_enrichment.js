@@ -1,10 +1,11 @@
 // context_enrichment.js
 // Consolidated context enrichment using only the simple processor
-import {processDocumentsSimple, enhanceDocumentSimple} from './context_processor_simple.js';
+import {processDocumentsSimple} from './context_processor_simple.js';
 import {getDB} from '../db.js';
 import logger from '../services/logger_service.js';
 import fs from 'fs';
 import {aiRequestTracker} from './ai_request_tracker.js';
+import debugLogger from '../services/debug_logger.js';
 
 // Global insertion tracking for test mode
 export const insertionTracker = {
@@ -53,9 +54,7 @@ export const insertionTracker = {
     if (!session) return;
 
     const elapsedTime = ((Date.now() - session.startTime) / 1000).toFixed(1);
-    const llmInfo = session.llmConfig
-      ? `${session.llmConfig.provider}/${session.llmConfig.model}`
-      : 'Unknown LLM';
+    const llmInfo = session.llmConfig ? `${session.llmConfig.provider}/${session.llmConfig.model}` : 'Unknown LLM';
 
     logger.info(`
 ================================================================================`);
@@ -77,7 +76,7 @@ export const insertionTracker = {
 function extractContextInsertions(text) {
   if (!text) return [];
   // Handle both string and object blocks
-  const textContent = typeof text === 'string' ? text : (text.text || '');
+  const textContent = typeof text === 'string' ? text : text.text || '';
   if (typeof textContent !== 'string') return [];
   const matches = textContent.match(/\[\[([^\]]+)\]\]/g) || [];
   return matches.map(m => m.slice(2, -2)); // Remove [[ and ]]
@@ -93,7 +92,8 @@ function extractContextInsertions(text) {
  */
 export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback = null, options = {}) {
   // Accept either a db instance (CrawlDB) or a path
-  let db, shouldClose = false;
+  let db,
+    shouldClose = false;
   if (typeof dbOrPath === 'string') {
     db = getDB(dbOrPath);
     shouldClose = true;
@@ -116,7 +116,7 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
   // Use the database's atomic claim mechanism for batch processing
   const batchProcessorId = `batch-${Date.now()}`;
   const allRawPages = [];
-  
+
   // Claim pages in batches until no more are available
   while (true) {
     const batch = db.claimPagesForProcessing(50, batchProcessorId);
@@ -127,11 +127,11 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
     logger.info(`[CONTEXT] Claimed ${batch.length} pages for batch processing`);
     allRawPages.push(...batch);
   }
-  
+
   const rawDocs = allRawPages;
-  
+
   logger.info(`[CONTEXT] Found ${rawDocs.length} raw pages to process from database`);
-  
+
   if (process.env.NODE_ENV === 'test') {
     logger.info(`[CONTEXT] Starting simplified context enhancement for ${rawDocs.length} documents`);
   }
@@ -144,7 +144,7 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
     try {
       if (!doc.file_path || !fs.existsSync(doc.file_path)) {
         if (process.env.NODE_ENV === 'test') {
-          console.log(`[CONTEXT] Skipping ${doc.url} - no file path or file doesn't exist`);
+          debugLogger.context(`Skipping ${doc.url} - no file path or file doesn't exist`);
         }
         continue;
       }
@@ -162,7 +162,7 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
 
       // Parse markdown into ALL blocks with original indices
       const allBlocks = content.split(/\n{2,}/).map((text, index) => ({
-        text, 
+        text,
         originalIndex: index
       }));
 
@@ -198,7 +198,7 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
         frontmatterEnd: markdown.startsWith('---') ? markdown.indexOf('---', 3) : -1
       });
     } catch (err) {
-      console.error(`[CONTEXT] Failed preparing doc ${doc.url}:`, err.message);
+      logger.error(`[CONTEXT] Failed preparing doc ${doc.url}: ${err.message}`);
     }
   }
 
@@ -248,7 +248,7 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
 
       // Reassemble enriched markdown - extract text from blocks if they're objects
       const contextedMarkdown = enhancedBlocks
-        .map(block => typeof block === 'string' ? block : (block.text || block))
+        .map(block => (typeof block === 'string' ? block : block.text || block))
         .join('\n\n');
 
       // Preserve frontmatter if present
@@ -266,10 +266,10 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
 
       if (process.env.NODE_ENV === 'test') {
         const insertionsCount = (contextedMarkdown.match(/\[\[.*?\]\]/g) || []).length;
-        console.log(`[CONTEXT] ✓ Completed: ${docId} (${insertionsCount} insertions)`);
+        debugLogger.context(`✓ Completed: ${docId} (${insertionsCount} insertions)`);
       }
     } catch (err) {
-      console.error(`[CONTEXT] Failed writing results for ${docId}:`, err.message);
+      logger.error(`[CONTEXT] Failed writing results for ${docId}: ${err.message}`);
       // Mark as failed so it can be retried
       db.markPageFailed(docId, err.message);
     }
@@ -291,14 +291,18 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
 
   try {
     // Update database: starting attempt
-    db.db.prepare(`
+    db.db
+      .prepare(
+        `
       UPDATE pages 
       SET context_attempts = context_attempts + 1, 
           last_context_attempt = ?, 
           context_error = NULL,
           content_status = 'processing'
       WHERE url = ?
-    `).run(new Date().toISOString(), url);
+    `
+      )
+      .run(new Date().toISOString(), url);
 
     // Check if file exists
     if (!filePath || !fs.existsSync(filePath)) {
@@ -323,7 +327,7 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
     // Get page metadata from database
     const pageData = db.db.prepare('SELECT title FROM pages WHERE url = ?').get(url);
     let meta = {title: pageData?.title || '', url: url};
-    
+
     // Parse frontmatter to get full metadata
     if (markdown.startsWith('---')) {
       const frontmatterEnd = markdown.indexOf('---', 3);
@@ -340,17 +344,17 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
         }
       }
     }
-    
+
     // Use simple processor - pass URL as docId for better tracking
     const doc = {
       docId: url,
       blocks: allBlocks,
       metadata: meta
     };
-    
+
     const results = await processDocumentsSimple([doc], aiConfig, null);
     const enhancedBlocks = results[url] || allBlocks;
-    
+
     if (!enhancedBlocks || enhancedBlocks.length === 0) {
       throw new Error('Context enhancement returned no results');
     }
@@ -366,7 +370,7 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
     }
 
     const contextedMarkdown = enhancedBlocks
-      .map(block => typeof block === 'string' ? block : (block.text || block))
+      .map(block => (typeof block === 'string' ? block : block.text || block))
       .join('\n\n');
 
     // Preserve frontmatter if present
@@ -383,13 +387,17 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
     await fs.promises.writeFile(filePath, finalMarkdown, 'utf8');
 
     // Update database: success
-    db.db.prepare(`
+    db.db
+      .prepare(
+        `
       UPDATE pages 
       SET content_status = 'contexted',
           context_error = NULL,
           last_modified = ?
       WHERE url = ?
-    `).run(new Date().toISOString(), url);
+    `
+      )
+      .run(new Date().toISOString(), url);
 
     const processingTime = Date.now() - startTime;
     const insertionCount = (contextedMarkdown.match(/\[\[.*?\]\]/g) || []).length;
@@ -402,12 +410,16 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
     };
   } catch (error) {
     // Update database: failure
-    db.db.prepare(`
+    db.db
+      .prepare(
+        `
       UPDATE pages 
       SET content_status = 'raw',
           context_error = ?
       WHERE url = ?
-    `).run(error.message, url);
+    `
+      )
+      .run(error.message, url);
 
     return {
       success: false,

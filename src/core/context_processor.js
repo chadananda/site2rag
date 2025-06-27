@@ -22,10 +22,7 @@ export const DocumentAnalysisSchema = z.object({
   document_type: z.string().describe('Type of document (article, blog, documentation, etc.)'),
   main_topics: z.array(z.string()).describe('Primary topics discussed'),
   writing_style: z.string().describe('Writing style (technical, narrative, academic, etc.)'),
-  time_period: z
-    .string()
-    .optional()
-    .describe('Time period discussed if temporal elements are present'),
+  time_period: z.string().optional().describe('Time period discussed if temporal elements are present'),
   perspective: z.string().optional().describe('Perspective or point of view if relevant')
 });
 export const EntityExtractionSchema = z.object({
@@ -210,15 +207,17 @@ Capture as much detail as possible, including context and alternative names/alia
 Return empty arrays for categories with no entities found.`;
       try {
         const entityExtraction = await parseAIResponse(prompt, EntityExtractionSchema, aiConfig, callAIImpl);
-        debugLogger.ai(`Window ${index + 1} extracted: ${JSON.stringify({
-          people: entityExtraction.people?.length || 0,
-          places: entityExtraction.places?.length || 0,
-          organizations: entityExtraction.organizations?.length || 0,
-          dates: entityExtraction.dates?.length || 0,
-          events: entityExtraction.events?.length || 0,
-          documents: entityExtraction.documents?.length || 0,
-          relationships: entityExtraction.relationships?.length || 0
-        })}`);
+        debugLogger.ai(
+          `Window ${index + 1} extracted: ${JSON.stringify({
+            people: entityExtraction.people?.length || 0,
+            places: entityExtraction.places?.length || 0,
+            organizations: entityExtraction.organizations?.length || 0,
+            dates: entityExtraction.dates?.length || 0,
+            events: entityExtraction.events?.length || 0,
+            documents: entityExtraction.documents?.length || 0,
+            relationships: entityExtraction.relationships?.length || 0
+          })}`
+        );
         return entityExtraction;
       } catch (error) {
         debugLogger.ai(`Failed to extract entities from window ${index + 1}: ${error.message}`);
@@ -247,10 +246,16 @@ Return empty arrays for categories with no entities found.`;
   // Log summary
   debugLogger.ai('Entity extraction complete:');
   debugLogger.ai(
-    `- People: ${entityGraph.people.length} (${entityGraph.people.slice(0, 3).map(p => p.name).join(', ')}${entityGraph.people.length > 3 ? '...' : ''})`
+    `- People: ${entityGraph.people.length} (${entityGraph.people
+      .slice(0, 3)
+      .map(p => p.name)
+      .join(', ')}${entityGraph.people.length > 3 ? '...' : ''})`
   );
   debugLogger.ai(
-    `- Places: ${entityGraph.places.length} (${entityGraph.places.slice(0, 3).map(p => p.name).join(', ')}${entityGraph.places.length > 3 ? '...' : ''})`
+    `- Places: ${entityGraph.places.length} (${entityGraph.places
+      .slice(0, 3)
+      .map(p => p.name)
+      .join(', ')}${entityGraph.places.length > 3 ? '...' : ''})`
   );
   debugLogger.ai(`- Organizations: ${entityGraph.organizations.length}`);
   debugLogger.ai(`- Dates: ${entityGraph.dates.length}`);
@@ -327,9 +332,7 @@ export function mergeEntityExtractions(extractions) {
 export function mergeEntities(existing, newEntities, keyField) {
   const merged = [...existing];
   for (const newEntity of newEntities) {
-    const existingIndex = merged.findIndex(
-      e => e[keyField]?.toLowerCase() === newEntity[keyField]?.toLowerCase()
-    );
+    const existingIndex = merged.findIndex(e => e[keyField]?.toLowerCase() === newEntity[keyField]?.toLowerCase());
     if (existingIndex >= 0) {
       // Merge properties
       const existingEntity = merged[existingIndex];
@@ -391,7 +394,10 @@ export function mergeRelationships(existing, newRelationships) {
  * @returns {Promise<Object>} Document analysis
  */
 export async function analyzeDocument(blocks, metadata, aiConfig, callAIImpl = callAI) {
-  const sampleBlocks = blocks.slice(0, 10).map(b => (typeof b === 'string' ? b : b.content || b.text || '')).join('\n\n');
+  const sampleBlocks = blocks
+    .slice(0, 10)
+    .map(b => (typeof b === 'string' ? b : b.content || b.text || ''))
+    .join('\n\n');
   const prompt = `Analyze this document and provide a high-level understanding:
 Title: ${metadata.title || 'Unknown'}
 URL: ${metadata.url || 'Unknown'}

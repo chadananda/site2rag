@@ -5,8 +5,20 @@ import {z} from 'zod';
 import pLimit from 'p-limit';
 import {callAI} from './ai_client.js';
 import debugLogger from '../services/debug_logger.js';
-import {sanitizeMetadata, sanitizeContent, escapeHtml, validateAIResponse, createSecurityReport} from '../utils/security.js';
-import {COMPILED_PATTERNS, PerformanceTracker, BlockMatcher, ValidationCache, TextAccumulator} from '../utils/performance.js';
+import {
+  sanitizeMetadata,
+  sanitizeContent,
+  escapeHtml,
+  validateAIResponse,
+  createSecurityReport
+} from '../utils/security.js';
+import {
+  COMPILED_PATTERNS,
+  PerformanceTracker,
+  BlockMatcher,
+  ValidationCache,
+  TextAccumulator
+} from '../utils/performance.js';
 // Schema for AI response - plain text for better model compatibility
 const PlainTextResponseSchema = z.string();
 // Window size configurations
@@ -111,9 +123,11 @@ function createSlidingWindowsOptimized(blocks, tracker = null) {
       const block = blocks[processedBlockIndex];
       const blockText = typeof block === 'string' ? block : block.text || block;
       // Skip headers and code blocks
-      if (COMPILED_PATTERNS.headerStart.test(blockText.trim()) || 
-          COMPILED_PATTERNS.codeStart.test(blockText.trim()) ||
-          COMPILED_PATTERNS.indentStart.test(blockText)) {
+      if (
+        COMPILED_PATTERNS.headerStart.test(blockText.trim()) ||
+        COMPILED_PATTERNS.codeStart.test(blockText.trim()) ||
+        COMPILED_PATTERNS.indentStart.test(blockText)
+      ) {
         textAccumulator.add(cleanTextForContextSecure(blockText));
         processedBlockIndex++;
         continue;
@@ -225,7 +239,10 @@ Focus on using document content and meta-data to make ambiguous references searc
 ${Object.entries(sanitizedMetadata)
   .filter(([, value]) => value && value !== '')
   .map(([key, value]) => {
-    const formattedKey = key.replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase()).trim();
+    const formattedKey = key
+      .replace(/([A-Z])/g, ' $1')
+      .replace(/^./, str => str.toUpperCase())
+      .trim();
     return `${formattedKey}: ${value}`;
   })
   .join('\n')}
@@ -308,7 +325,10 @@ export async function processDocumentsSecure(documents, aiConfig, progressCallba
         }
         // Parse and match blocks using optimized matcher
         const matchTimer = performanceTracker.startTimer('blockMatching');
-        const responseBlocks = response.split(/\n\s*\n/).map(block => block.trim()).filter(block => block);
+        const responseBlocks = response
+          .split(/\n\s*\n/)
+          .map(block => block.trim())
+          .filter(block => block);
         const enhancedBlocks = {};
         const blockMatcher = new BlockMatcher();
         blockMatcher.addOriginalBlocks(request.window.blocks);

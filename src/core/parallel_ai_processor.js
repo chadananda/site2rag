@@ -18,6 +18,7 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
   let processedUrls = new Set();
   const processorId = `parallel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
   const pendingPromises = new Set(); // Track all pending AI processing promises
+  const MAX_PENDING_PROMISES = 50; // Limit concurrent promises to prevent memory leaks
 
   async function processPage(page) {
     try {
@@ -69,7 +70,7 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
       logger.info(`[AI-PARALLEL] Starting AI processing for ${page.url} with ${eligibleBlocks.length} eligible blocks`);
 
       // Use the shared tracker's progress callback if initialized
-      const progressCallback = aiRequestTracker.isInitialized 
+      const progressCallback = aiRequestTracker.isInitialized
         ? () => {
             const stats = aiRequestTracker.getStats();
             logger.info(`[AI-PARALLEL] Progress: ${stats.totalCompleted}/${stats.totalExpected} AI requests`);
@@ -116,6 +117,12 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
   async function checkAndProcessNewPages() {
     if (!isRunning) return;
 
+    // Don't start new processing if we're at the limit
+    if (pendingPromises.size >= MAX_PENDING_PROMISES) {
+      logger.info(`[AI-PARALLEL] At maximum capacity (${MAX_PENDING_PROMISES} pending), waiting...`);
+      return;
+    }
+
     try {
       // Reset any stuck processing pages first (older than 30 minutes)
       // Increased from 5 to 30 minutes to allow for longer AI processing times
@@ -126,8 +133,14 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
         logger.info(`[AI-PARALLEL] Reset ${resetCount} stuck processing pages (> 30 min)`);
       }
 
+      // Calculate how many pages we can claim based on current capacity
+      const remainingCapacity = MAX_PENDING_PROMISES - pendingPromises.size;
+      const pagesToClaim = Math.min(5, remainingCapacity);
+
+      if (pagesToClaim <= 0) return;
+
       // Atomically claim pages for processing
-      const claimedPages = db.claimPagesForProcessing(5, processorId);
+      const claimedPages = db.claimPagesForProcessing(pagesToClaim, processorId);
 
       if (claimedPages.length > 0) {
         logger.info(`[AI-PARALLEL] Claimed ${claimedPages.length} pages for processing`);
@@ -144,20 +157,24 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
           }
         });
 
-        // Process in parallel and track promises
+        // Process in parallel and track promises with proper cleanup
+        promises.forEach(promise => {
+          // Track individual promise and ensure cleanup
+          pendingPromises.add(promise);
+          promise.finally(() => pendingPromises.delete(promise));
+        });
+
+        // Create batch promise with cleanup
         const batchPromise = Promise.all(promises)
-          .then(() => {
-            // Remove completed promises from tracking
-            promises.forEach(p => pendingPromises.delete(p));
+          .finally(() => {
+            // Ensure batch promise is also cleaned up
+            pendingPromises.delete(batchPromise);
           })
           .catch(error => {
             logger.error(`[AI-PARALLEL] Batch processing error: ${error.message}`);
-            // Remove failed promises from tracking
-            promises.forEach(p => pendingPromises.delete(p));
           });
-        
-        // Add all promises to tracking
-        promises.forEach(p => pendingPromises.add(p));
+
+        // Track the batch promise too
         pendingPromises.add(batchPromise);
       }
     } catch (error) {

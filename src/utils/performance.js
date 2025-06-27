@@ -96,11 +96,7 @@ export class BlockMatcher {
    * @returns {string} Normalized text
    */
   normalizeForMatching(text) {
-    return text
-      .replace(COMPILED_PATTERNS.whitespace, ' ')
-      .trim()
-      .toLowerCase()
-      .substring(0, 100); // Use first 100 chars as key
+    return text.replace(COMPILED_PATTERNS.whitespace, ' ').trim().toLowerCase().substring(0, 100); // Use first 100 chars as key
   }
   /**
    * Find matching original block for enhanced text

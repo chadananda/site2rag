@@ -37,13 +37,13 @@ export function loadAIConfig(projectRoot = process.cwd()) {
   if (globalConfig && globalConfig.ai) {
     config = {...globalConfig.ai};
   }
-  
+
   // Check project config (overrides global)
   const projectConfig = loadJsonIfExists(projectConfigPath);
   if (projectConfig && projectConfig.ai) {
     config = {...(config || {}), ...projectConfig.ai};
   }
-  
+
   // Check env vars (highest priority)
   if (process.env.AI_PROVIDER || process.env.AI_MODEL) {
     config = config || {};
@@ -59,7 +59,7 @@ export function loadAIConfig(projectRoot = process.cwd()) {
     } else if (config.provider === 'openai' && process.env.OPENAI_API_KEY) {
       config.apiKey = process.env.OPENAI_API_KEY;
     }
-    
+
     // Set default timeout if not specified
     if (!config.timeout) {
       config.timeout = 60000; // Increase to 60 seconds for large prompts
@@ -113,4 +113,3 @@ export function getLLMConfigFromFlags(options) {
 
   return null; // No LLM flag specified
 }
-

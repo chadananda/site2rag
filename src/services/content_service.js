@@ -30,7 +30,6 @@ export function scoreContentElement($, element) {
   const headings = $(element).find('h1, h2, h3, h4, h5, h6').length;
   score += headings * 5;
   // Link density (too many links = navigation, not content)
-  const links = $(element).find('a').length;
   const linkText = $(element).find('a').text().length;
   const linkDensity = textLength > 0 ? linkText / textLength : 0;
   score -= Math.min(20, linkDensity * 50);
@@ -242,7 +241,7 @@ export function extractMainContent($, body, options = {}) {
     // Create a clean container for the content
     const contentContainer = $('<div class="site2rag-content-container"></div>');
     contentContainer.append(mainContent.clone());
-    
+
     // Remove any nested navigation elements
     contentContainer.find('nav, header, footer, [role="navigation"]').each((i, el) => {
       const $el = $(el);
@@ -381,13 +380,13 @@ export function extractMainContent($, body, options = {}) {
  */
 export function isLikelyNavigationOrBoilerplate($, element) {
   const $el = $(element);
-  
+
   // First check if this is author-related content that should be preserved
   const className = $el.attr('class') || '';
   const idName = $el.attr('id') || '';
   const fullName = (className + ' ' + idName).toLowerCase();
   const text = $el.text().trim().toLowerCase();
-  
+
   // Preserve author-related sections
   const authorPatterns = ['author', 'byline', 'writer', 'contributor', 'bio', 'about-author', 'author-info'];
   for (const pattern of authorPatterns) {
@@ -395,7 +394,7 @@ export function isLikelyNavigationOrBoilerplate($, element) {
       return false; // Not navigation/boilerplate - keep it
     }
   }
-  
+
   // Check tag name
   const tagName = $el.prop('tagName')?.toLowerCase();
   if (['nav', 'header', 'footer', 'aside'].includes(tagName)) {
@@ -444,7 +443,6 @@ export function isLikelyNavigationOrBoilerplate($, element) {
   // Check link density
   const textLength = text.length;
   if (textLength > 20) {
-    const links = $el.find('a').length;
     const linkText = $el.find('a').text().length;
     const linkDensity = textLength > 0 ? linkText / textLength : 0;
     // High link density indicates navigation
@@ -801,7 +799,7 @@ export class ContentService {
       // Even in case of error, return the body element as a fallback
       try {
         return $('body');
-      } catch (e) {
+      } catch {
         // If even that fails, return an empty set
         return $();
       }
@@ -833,9 +831,6 @@ export class ContentService {
     if (!main || !baseUrl || !this.fileService) return;
 
     try {
-      const {hostname} = new URL(baseUrl);
-      const documentDownloads = [];
-
       // Find all links in the main content
       $(main)
         .find('a[href]')
@@ -975,7 +970,7 @@ export class ContentService {
             try {
               const baseUrlObj = new URL(baseUrl);
               resolvedUrl = `${baseUrlObj.protocol}//${baseUrlObj.host}${href}`;
-            } catch (e) {
+            } catch {
               logger.warn(`[LINKS] Cannot resolve root-relative URL: ${href} with base ${baseUrl}`);
               return;
             }
@@ -983,7 +978,7 @@ export class ContentService {
             // Relative URL - use URL constructor
             try {
               resolvedUrl = new URL(href, baseUrl).href;
-            } catch (e) {
+            } catch {
               logger.warn(`[LINKS] Cannot resolve relative URL: ${href} with base ${baseUrl}`);
               return;
             }
@@ -1026,12 +1021,12 @@ export class ContentService {
           }
 
           // Store metadata for future use if needed
-          const metadata = {
-            text: $(el).text().trim(),
-            title: $(el).attr('title') || '',
-            isResource: !!resourceParam
-          };
-          // We could store this metadata somewhere if needed
+          // Link metadata could be stored here if needed
+          // const metadata = {
+          //   text: $(el).text().trim(),
+          //   title: $(el).attr('title') || '',
+          //   isResource: !!resourceParam
+          // };
         } catch (error) {
           logger.warn(`[LINKS] Error processing URL: ${href} - ${error.message}`);
         }
@@ -1063,7 +1058,7 @@ export class ContentService {
 
     // Extract JSON-LD structured data first (richest source)
     const jsonLdData = this.extractJsonLd($);
-    
+
     // Basic meta tags
     const basicMeta = {
       title: $('title').first().text().trim(),
@@ -1089,10 +1084,14 @@ export class ContentService {
     const articleMeta = {
       author: $('meta[property="article:author"]').attr('content') || '',
       section: $('meta[property="article:section"]').attr('content') || '',
-      published_time: $('meta[property="article:published_time"]').attr('content') || 
-                      $('meta[name="article:published_time"]').attr('content') || '',
-      modified_time: $('meta[property="article:modified_time"]').attr('content') ||
-                     $('meta[name="article:modified_time"]').attr('content') || ''
+      published_time:
+        $('meta[property="article:published_time"]').attr('content') ||
+        $('meta[name="article:published_time"]').attr('content') ||
+        '',
+      modified_time:
+        $('meta[property="article:modified_time"]').attr('content') ||
+        $('meta[name="article:modified_time"]').attr('content') ||
+        ''
     };
 
     // Extract article tags for keywords
@@ -1132,15 +1131,14 @@ export class ContentService {
     if (articleMeta.section) {
       metadata.section = articleMeta.section;
     }
-    
+
     // Additional metadata from JSON-LD Person objects
     if (jsonLdData.personData && jsonLdData.personData.length > 0) {
       // Find the Person data that matches the author
-      const authorPerson = jsonLdData.personData.find(p => 
-        p.name === metadata.author || 
-        (metadata.author && p.name && p.name.includes(metadata.author))
+      const authorPerson = jsonLdData.personData.find(
+        p => p.name === metadata.author || (metadata.author && p.name && p.name.includes(metadata.author))
       );
-      
+
       if (authorPerson) {
         // Author bio/description
         if (authorPerson.description) {
@@ -1164,12 +1162,12 @@ export class ContentService {
         }
       }
     }
-    
+
     // Additional metadata from PodcastEpisode
     if (jsonLdData.timeRequired) {
       metadata.audioDuration = jsonLdData.timeRequired;
     }
-    
+
     // Article image
     if (jsonLdData.image) {
       if (typeof jsonLdData.image === 'string') {
@@ -1178,7 +1176,7 @@ export class ContentService {
         metadata.image = jsonLdData.image.url;
       }
     }
-    
+
     // Publisher logo
     if (jsonLdData.publisher && jsonLdData.publisher.logo && jsonLdData.publisher.logo.url) {
       metadata.publisherLogo = jsonLdData.publisher.logo.url;
@@ -1202,18 +1200,22 @@ export class ContentService {
    */
   extractJsonLd($) {
     const jsonLdData = {};
-    
+
     $('script[type="application/ld+json"]').each((i, script) => {
       try {
         const data = JSON.parse($(script).html());
-        
+
         // Handle both single objects and arrays
         const items = Array.isArray(data) ? data : [data];
-        
+
         for (const item of items) {
           // Extract based on @type
-          if (item['@type'] === 'Article' || item['@type'] === 'NewsArticle' || 
-              item['@type'] === 'BlogPosting' || item['@type'] === 'WebPage') {
+          if (
+            item['@type'] === 'Article' ||
+            item['@type'] === 'NewsArticle' ||
+            item['@type'] === 'BlogPosting' ||
+            item['@type'] === 'WebPage'
+          ) {
             // Article-like content
             Object.assign(jsonLdData, {
               headline: item.headline || jsonLdData.headline,
@@ -1225,7 +1227,7 @@ export class ContentService {
               keywords: item.keywords || jsonLdData.keywords,
               image: item.image || jsonLdData.image
             });
-            
+
             // Extract author
             if (item.author) {
               if (typeof item.author === 'string') {
@@ -1234,7 +1236,7 @@ export class ContentService {
                 jsonLdData.author = item.author.name;
               }
             }
-            
+
             // Extract publisher
             if (item.publisher && item.publisher.name) {
               jsonLdData.publisher = item.publisher;
@@ -1248,7 +1250,7 @@ export class ContentService {
               license: item.license || jsonLdData.license,
               timeRequired: item.timeRequired || jsonLdData.timeRequired
             });
-            
+
             if (item.author && item.author.name) {
               jsonLdData.author = item.author.name;
             }
@@ -1263,7 +1265,7 @@ export class ContentService {
         logger.debug(`[METADATA] Invalid JSON-LD: ${e.message}`);
       }
     });
-    
+
     return jsonLdData;
   }
 
@@ -1279,26 +1281,26 @@ export class ContentService {
   extractAuthor($, jsonLdData, basicMeta, dcMeta, articleMeta) {
     // 1. Try JSON-LD first
     if (jsonLdData.author) return jsonLdData.author;
-    
+
     // 2. Try meta tags
     if (basicMeta.author) return basicMeta.author;
     if (articleMeta.author) return articleMeta.author;
     if (dcMeta.creator) return dcMeta.creator;
-    
+
     // 3. Try rel="author" link
     const authorLink = $('link[rel="author"]').attr('href');
     if (authorLink) {
       const authorText = $('link[rel="author"]').attr('title') || authorLink.split('/').pop();
       if (authorText && authorText !== 'author') return authorText;
     }
-    
+
     // 4. Try to find byline in content (first 500 chars)
     const bodyText = $('body').text().substring(0, 500);
     const bylineMatch = bodyText.match(/[Bb]y\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/);
     if (bylineMatch && bylineMatch[1]) {
       return bylineMatch[1];
     }
-    
+
     return '';
   }
 
@@ -1312,7 +1314,7 @@ export class ContentService {
    */
   extractKeywords(metaKeywords, jsonLdKeywords, articleTags, dcSubject) {
     const keywords = new Set();
-    
+
     // Process meta keywords (comma-separated)
     if (metaKeywords) {
       metaKeywords.split(',').forEach(k => {
@@ -1320,7 +1322,7 @@ export class ContentService {
         if (trimmed) keywords.add(trimmed);
       });
     }
-    
+
     // Process JSON-LD keywords (might be array or string)
     if (jsonLdKeywords) {
       if (Array.isArray(jsonLdKeywords)) {
@@ -1332,10 +1334,10 @@ export class ContentService {
         });
       }
     }
-    
+
     // Add article tags
     articleTags.forEach(tag => keywords.add(tag));
-    
+
     // Process DC subject (comma or semicolon separated)
     if (dcSubject) {
       dcSubject.split(/[,;]/).forEach(s => {
@@ -1343,7 +1345,7 @@ export class ContentService {
         if (trimmed) keywords.add(trimmed);
       });
     }
-    
+
     return Array.from(keywords);
   }
 
@@ -1547,7 +1549,7 @@ export class ContentService {
               // Escape pipe characters that would break markdown tables
               contentPreview = contentPreview.replace(/\|/g, '\\|');
             }
-          } catch (e) {
+          } catch {
             contentPreview = 'Error getting preview';
           }
 
@@ -1592,7 +1594,7 @@ export class ContentService {
       // Decode URI components to handle non-ASCII characters
       try {
         pathname = decodeURIComponent(pathname);
-      } catch (e) {
+      } catch {
         // If decoding fails, use the original pathname
         logger.warn(`[DEBUG] Failed to decode pathname: ${pathname}`);
       }

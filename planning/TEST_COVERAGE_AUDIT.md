@@ -9,6 +9,7 @@ Comprehensive test coverage audit completed for the site2rag project. Created ne
 ## Test Files Created
 
 ### 1. `/tests/unit/utils/progress.test.js`
+
 - **Coverage**: Progress bar functionality and edge cases
 - **Key Areas Tested**:
   - maxPages handling (0, null, undefined, negative values)
@@ -21,6 +22,7 @@ Comprehensive test coverage audit completed for the site2rag project. Created ne
   - Re-crawl mode statistics
 
 ### 2. `/tests/unit/services/crawl-service-binary-edge-cases.test.js`
+
 - **Coverage**: Binary file handling edge cases and security
 - **Key Areas Tested**:
   - Binary file duplicate detection by content hash
@@ -33,6 +35,7 @@ Comprehensive test coverage audit completed for the site2rag project. Created ne
   - Special character sanitization in filenames
 
 ### 3. `/tests/unit/utils/errors.test.js`
+
 - **Coverage**: Custom error classes
 - **Key Areas Tested**:
   - CrawlLimitReached error
@@ -45,6 +48,7 @@ Comprehensive test coverage audit completed for the site2rag project. Created ne
 ## Missing Test Coverage Identified
 
 ### Files Without Tests:
+
 1. `src/core/ai_client_v2.js`
 2. `src/core/ai_config.js`
 3. `src/core/context_enrichment.js`
@@ -65,16 +69,19 @@ Comprehensive test coverage audit completed for the site2rag project. Created ne
 ## Security Test Coverage
 
 ### Path Traversal Protection ✅
+
 - Tests verify that path traversal attempts are blocked
 - URL encoding attacks are handled
 - Filenames are properly sanitized
 
 ### Binary File Security ✅
+
 - Duplicate detection prevents resource exhaustion
 - File size limits are enforced
 - Content type verification is tested
 
 ### URL Validation ✅
+
 - Invalid URL formats are tested
 - JavaScript and file:// URLs are blocked
 - Malformed URLs are handled gracefully
@@ -82,6 +89,7 @@ Comprehensive test coverage audit completed for the site2rag project. Created ne
 ## Edge Cases Covered
 
 ### Progress Bar Edge Cases ✅
+
 - maxPages = 0 (unlimited)
 - maxPages = null
 - maxPages = negative numbers
@@ -89,6 +97,7 @@ Comprehensive test coverage audit completed for the site2rag project. Created ne
 - Progress bar errors during stop
 
 ### Binary File Edge Cases ✅
+
 - Same content, different URLs
 - Cross-domain duplicates
 - Missing content-type headers
@@ -96,6 +105,7 @@ Comprehensive test coverage audit completed for the site2rag project. Created ne
 - Network failures
 
 ### Document Link Extraction ✅
+
 - Query parameters in URLs
 - Malformed document URLs
 - Duplicate links on same page
@@ -118,8 +128,9 @@ Add the following npm scripts to package.json for easier testing:
 ## Known Test Failures
 
 Several existing tests are failing due to:
+
 1. Mock configuration issues
-2. Path resolution problems 
+2. Path resolution problems
 3. Missing test fixtures
 4. Outdated test expectations
 
@@ -136,17 +147,20 @@ These should be addressed in a separate PR focused on fixing test infrastructure
 ## Test Execution
 
 To run all tests:
+
 ```bash
 npm test
 ```
 
 To run specific test suites:
+
 ```bash
 npm run test:unit
 npm run test:integration
 ```
 
 To run with coverage:
+
 ```bash
 npm run test:coverage
 ```

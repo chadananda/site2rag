@@ -7,33 +7,39 @@ Updated all documentation files to reflect the current state of the codebase, fo
 ## Files Updated
 
 ### 1. README.md
+
 - Added notes about PDFs being tracked as first-class pages in the database
 - Added binary file change detection capabilities
 - Clarified that progress bar accurately shows remaining pages with --limit flag
 - Updated Document Download Support section with database integration details
 
 ### 2. planning/prd.md
+
 - Updated Asset Management section to include binary files as pages
 - Added binary change detection and progress tracking for PDFs
 - Updated database schema to show PDF tracking columns (is_pdf, pdf_conversion_status, pdf_md_path)
 - Enhanced Progress Tracking section with notes about --limit accuracy and AI request tracking
 
 ### 3. planning/PERFORMANCE_FIXES_SUMMARY.md
+
 - Added update section about the simplified sliding window implementation
 - Noted the move from caching to pure parallelization
 - Documented the ~10x performance improvement
 
 ### 4. planning/TEST_COVERAGE_GAPS.md
+
 - Added missing test coverage items for binary file tracking
 - Noted that PDFs are tracked as first-class pages in database
 - Added PDF metadata tracking columns to test requirements
 
 ### 5. src/REFACTORING_MAP.md
+
 - Added context_processor_simple.js to the HIGH RISK section
 - Documented the main functions in the simplified sliding window processor
 - Updated the test coverage notes for the new implementation
 
 ### 6. CLAUDE.md
+
 - Updated the fallback order to remove gpt4o-mini (as per recent changes)
 - Confirmed Claude 3.5 Haiku as the default provider
 

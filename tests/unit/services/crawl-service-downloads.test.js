@@ -51,7 +51,7 @@ describe('CrawlService Document Downloads', () => {
     };
     // Mock content service
     mockContentService = {
-      processHtml: vi.fn(async (html, url) => ({
+      processHtml: vi.fn(async () => ({
         $: null,
         main: {html: () => '<div>Content</div>'},
         links: [
@@ -171,7 +171,9 @@ describe('CrawlService Document Downloads', () => {
         ok: true,
         headers: new Map([['content-type', 'application/pdf']]),
         arrayBuffer: async () => pdfContent.buffer,
-        text: async () => { throw new Error('Should not call text() for binary'); }
+        text: async () => {
+          throw new Error('Should not call text() for binary');
+        }
       });
       await crawlService.crawl(['https://example.com/document.pdf']);
       // Should write binary content
@@ -187,7 +189,9 @@ describe('CrawlService Document Downloads', () => {
         ok: true,
         headers: new Map([['content-type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']]),
         arrayBuffer: async () => docContent.buffer,
-        text: async () => { throw new Error('Should not call text() for binary'); }
+        text: async () => {
+          throw new Error('Should not call text() for binary');
+        }
       });
       await crawlService.crawl(['https://example.com/document.docx']);
       expect(mockFileService.writeContent).toHaveBeenCalledWith(
@@ -222,11 +226,7 @@ describe('CrawlService Document Downloads', () => {
         arrayBuffer: async () => pdfContent.buffer
       });
       await crawlService.crawl(['https://example.com/download']);
-      expect(mockFileService.writeContent).toHaveBeenCalledWith(
-        'download.pdf',
-        expect.any(Buffer),
-        expect.any(Object)
-      );
+      expect(mockFileService.writeContent).toHaveBeenCalledWith('download.pdf', expect.any(Buffer), expect.any(Object));
     });
     it('should use content hash for filename if URL is not suitable', async () => {
       const pdfContent = Buffer.from('PDF content');
@@ -256,10 +256,7 @@ describe('CrawlService Document Downloads', () => {
       mockContentService.processHtml.mockResolvedValueOnce({
         $: null,
         main: {html: () => '<div>Content</div>'},
-        links: [
-          'https://cdn.cloudflare.com/docs/manual.pdf',
-          'https://s3.amazonaws.com/bucket/report.pdf'
-        ],
+        links: ['https://cdn.cloudflare.com/docs/manual.pdf', 'https://s3.amazonaws.com/bucket/report.pdf'],
         metadata: {title: 'Test Page'}
       });
       fetch.mockResolvedValueOnce({

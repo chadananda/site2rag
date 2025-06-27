@@ -4,7 +4,6 @@
 
 import {describe, it, expect, beforeEach, afterEach, vi} from 'vitest';
 import {ProgressService} from '../../../src/utils/progress.js';
-import chalk from 'chalk';
 
 // Mock external dependencies
 vi.mock('cli-progress', () => {
@@ -15,7 +14,7 @@ vi.mock('cli-progress', () => {
     setTotal: vi.fn(),
     total: 0
   };
-  
+
   const mockMultiBar = {
     start: vi.fn(),
     stop: vi.fn(),
@@ -23,7 +22,7 @@ vi.mock('cli-progress', () => {
     update: vi.fn(),
     setTotal: vi.fn()
   };
-  
+
   return {
     default: {
       MultiBar: vi.fn(() => mockMultiBar),
@@ -36,12 +35,12 @@ vi.mock('cli-progress', () => {
 });
 
 vi.mock('boxen', () => ({
-  default: vi.fn((content) => content)
+  default: vi.fn(content => content)
 }));
 
 vi.mock('figlet', () => ({
   default: {
-    textSync: vi.fn((text) => text)
+    textSync: vi.fn(text => text)
   }
 }));
 
@@ -52,11 +51,11 @@ vi.mock('fs', () => ({
 
 vi.mock('path', () => ({
   join: vi.fn((...args) => args.join('/')),
-  dirname: vi.fn((path) => path)
+  dirname: vi.fn(path => path)
 }));
 
 vi.mock('url', () => ({
-  fileURLToPath: vi.fn((url) => url)
+  fileURLToPath: vi.fn(url => url)
 }));
 
 describe('ProgressService', () => {
@@ -68,11 +67,11 @@ describe('ProgressService', () => {
   beforeEach(() => {
     // Reset all mocks
     vi.clearAllMocks();
-    
+
     // Mock console methods
     consoleLogSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     consoleClearSpy = vi.spyOn(console, 'clear').mockImplementation(() => {});
-    
+
     // Mock process.stdout
     processStdoutSpy = {
       columns: 80,
@@ -85,7 +84,7 @@ describe('ProgressService', () => {
       value: processStdoutSpy,
       writable: true
     });
-    
+
     progressService = new ProgressService();
   });
 
@@ -142,16 +141,16 @@ describe('ProgressService', () => {
   describe('maxPages handling', () => {
     it('should cap progress bar total at maxPages when set', () => {
       progressService.start({maxPages: 10, totalUrls: 1});
-      
+
       // Simulate discovering more URLs than the limit
       progressService.updateStats({
         crawledUrls: 5,
         queuedUrls: 10 // Total would be 15
       });
-      
+
       // Wait for update interval
       vi.advanceTimersByTime(100);
-      
+
       // Should be capped at maxPages
       expect(progressService.multibar.setTotal).toHaveBeenCalledWith(10);
     });
@@ -159,7 +158,7 @@ describe('ProgressService', () => {
     it('should handle maxPages = 0 gracefully', () => {
       progressService.start({maxPages: 0, totalUrls: 1});
       expect(progressService.maxPages).toBe(0);
-      
+
       // Should not crash when updating
       progressService.updateStats({crawledUrls: 5});
       expect(() => progressService.render()).not.toThrow();
@@ -168,29 +167,29 @@ describe('ProgressService', () => {
     it('should handle maxPages = null (unlimited)', () => {
       progressService.start({maxPages: null, totalUrls: 1});
       expect(progressService.maxPages).toBe(null);
-      
+
       // Should allow unlimited URLs
       progressService.updateStats({
         crawledUrls: 100,
         queuedUrls: 500
       });
-      
+
       vi.advanceTimersByTime(100);
-      
+
       // Should update to discovered total
       expect(progressService.multibar.setTotal).toHaveBeenCalledWith(600);
     });
 
     it('should handle negative maxPages by treating as unlimited', () => {
       progressService.start({maxPages: -1, totalUrls: 1});
-      
+
       progressService.updateStats({
         crawledUrls: 50,
         queuedUrls: 50
       });
-      
+
       vi.advanceTimersByTime(100);
-      
+
       // Should not cap the total
       expect(progressService.multibar.setTotal).toHaveBeenCalledWith(100);
     });
@@ -198,7 +197,7 @@ describe('ProgressService', () => {
     it('should handle undefined maxPages', () => {
       progressService.start({totalUrls: 1});
       expect(progressService.maxPages).toBe(null);
-      
+
       // Should work normally without limit
       progressService.updateStats({crawledUrls: 10});
       expect(() => progressService.render()).not.toThrow();
@@ -208,7 +207,7 @@ describe('ProgressService', () => {
   describe('start', () => {
     it('should initialize progress display', () => {
       progressService.start({siteUrl: 'https://example.com', totalUrls: 10});
-      
+
       expect(progressService.isActive).toBe(true);
       expect(progressService.stats.totalUrls).toBe(10);
       expect(consoleClearSpy).toHaveBeenCalled();
@@ -223,7 +222,7 @@ describe('ProgressService', () => {
         isReCrawl: true,
         totalUrls: 5
       });
-      
+
       expect(progressService.isReCrawl).toBe(true);
       expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Updating site download:'));
     });
@@ -231,9 +230,9 @@ describe('ProgressService', () => {
     it('should stop existing progress before starting new one', () => {
       progressService.start({totalUrls: 5});
       const firstMultibar = progressService.multibar;
-      
+
       progressService.start({totalUrls: 10});
-      
+
       expect(firstMultibar.stop).toHaveBeenCalled();
       expect(progressService.multibar).not.toBe(firstMultibar);
     });
@@ -250,7 +249,7 @@ describe('ProgressService', () => {
         queuedUrls: 3,
         activeUrls: 2
       });
-      
+
       expect(progressService.stats.crawledUrls).toBe(5);
       expect(progressService.stats.queuedUrls).toBe(3);
       expect(progressService.stats.activeUrls).toBe(2);
@@ -265,7 +264,7 @@ describe('ProgressService', () => {
           other: 2
         }
       });
-      
+
       expect(progressService.stats.assets).toEqual({
         total: 10,
         images: 5,
@@ -281,7 +280,7 @@ describe('ProgressService', () => {
           retries: 1
         }
       });
-      
+
       expect(progressService.stats.errors.total).toBe(2);
       expect(progressService.stats.errors.retries).toBe(1);
     });
@@ -293,7 +292,7 @@ describe('ProgressService', () => {
         aiRateLimited: 1,
         aiFailed: 0
       });
-      
+
       expect(progressService.stats.aiEnhanced).toBe(3);
       expect(progressService.stats.aiPending).toBe(2);
       expect(progressService.stats.aiRateLimited).toBe(1);
@@ -307,7 +306,7 @@ describe('ProgressService', () => {
         updatedPages: 3,
         unchangedPages: 5
       });
-      
+
       expect(progressService.stats.newPages).toBe(2);
       expect(progressService.stats.updatedPages).toBe(3);
       expect(progressService.stats.unchangedPages).toBe(5);
@@ -316,11 +315,11 @@ describe('ProgressService', () => {
     it('should handle partial updates without affecting other stats', () => {
       progressService.stats.crawledUrls = 5;
       progressService.stats.errors.total = 2;
-      
+
       progressService.updateStats({
         queuedUrls: 10
       });
-      
+
       expect(progressService.stats.crawledUrls).toBe(5);
       expect(progressService.stats.queuedUrls).toBe(10);
       expect(progressService.stats.errors.total).toBe(2);
@@ -330,7 +329,7 @@ describe('ProgressService', () => {
   describe('concurrent update safety', () => {
     it('should handle rapid concurrent updates', async () => {
       progressService.start({totalUrls: 100});
-      
+
       // Simulate concurrent updates
       const updates = [];
       for (let i = 0; i < 50; i++) {
@@ -341,26 +340,26 @@ describe('ProgressService', () => {
           })
         );
       }
-      
+
       await Promise.all(updates);
-      
+
       expect(progressService.stats.crawledUrls).toBe(50);
       expect(progressService.stats.queuedUrls).toBe(50);
     });
 
     it('should handle concurrent URL completions', () => {
       progressService.start({totalUrls: 10});
-      
+
       // Add multiple URLs
       for (let i = 0; i < 5; i++) {
         progressService.addActiveUrl(`https://example.com/page${i}`);
       }
-      
+
       // Complete them concurrently
       for (let i = 0; i < 5; i++) {
         progressService.completeUrl(`https://example.com/page${i}`, 'success');
       }
-      
+
       expect(progressService.stats.crawledUrls).toBe(5);
       expect(progressService.activeDownloads.size).toBe(0);
     });
@@ -370,9 +369,9 @@ describe('ProgressService', () => {
     it('should clean up resources and display completion message', () => {
       progressService.start({totalUrls: 10});
       progressService.updateStats({crawledUrls: 10});
-      
+
       progressService.stop();
-      
+
       expect(progressService.isActive).toBe(false);
       expect(progressService.updateInterval).toBe(null);
       expect(progressService.multibar.stop).toHaveBeenCalled();
@@ -387,15 +386,11 @@ describe('ProgressService', () => {
         updatedPages: 3,
         unchangedPages: 5
       });
-      
+
       progressService.stop();
-      
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Re-crawl completed successfully!')
-      );
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('2 new, 3 updated, 5 unchanged')
-      );
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Re-crawl completed successfully!'));
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('2 new, 3 updated, 5 unchanged'));
     });
 
     it('should handle stop when already inactive', () => {
@@ -405,9 +400,9 @@ describe('ProgressService', () => {
     it('should update final progress to 100% on stop', () => {
       progressService.start({totalUrls: 10});
       progressService.updateStats({crawledUrls: 8});
-      
+
       progressService.stop();
-      
+
       // Should update to final count
       expect(progressService.multibar.update).toHaveBeenCalledWith(8);
     });
@@ -419,47 +414,39 @@ describe('ProgressService', () => {
         provider: 'openai',
         model: 'gpt-4'
       };
-      
+
       progressService.startProcessing(100, aiConfig);
-      
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('AI enhancement using')
-      );
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('openai')
-      );
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('gpt-4')
-      );
+
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('AI enhancement using'));
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('openai'));
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('gpt-4'));
     });
 
     it('should update processing progress', () => {
       progressService.startProcessing(50);
-      
+
       progressService.updateProcessing(25, 50);
-      
+
       expect(progressService.multibar.update).toHaveBeenCalledWith(25);
     });
 
     it('should handle dynamic total updates during processing', () => {
       progressService.startProcessing(50);
-      
+
       // Total increases during processing
       progressService.updateProcessing(25, 75);
-      
+
       expect(progressService.multibar.setTotal).toHaveBeenCalledWith(75);
       expect(progressService.multibar.update).toHaveBeenCalledWith(25);
     });
 
     it('should complete processing phase', () => {
       progressService.startProcessing(10);
-      
+
       progressService.completeProcessing();
-      
+
       expect(progressService.multibar.stop).toHaveBeenCalled();
-      expect(consoleLogSpy).toHaveBeenCalledWith(
-        expect.stringContaining('AI processing completed successfully!')
-      );
+      expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('AI processing completed successfully!'));
     });
   });
 
@@ -475,7 +462,7 @@ describe('ProgressService', () => {
 
     it('should add and track active URLs', () => {
       progressService.addActiveUrl('https://example.com/page1');
-      
+
       expect(progressService.activeDownloads.has('https://example.com/page1')).toBe(true);
       expect(progressService.stats.currentUrls).toContain('https://example.com/page1');
     });
@@ -484,7 +471,7 @@ describe('ProgressService', () => {
       for (let i = 1; i <= 7; i++) {
         progressService.addActiveUrl(`https://example.com/page${i}`);
       }
-      
+
       expect(progressService.stats.currentUrls.length).toBe(5);
       expect(progressService.stats.currentUrls).not.toContain('https://example.com/page1');
       expect(progressService.stats.currentUrls).toContain('https://example.com/page7');
@@ -492,9 +479,9 @@ describe('ProgressService', () => {
 
     it('should complete URL with different statuses', () => {
       progressService.addActiveUrl('https://example.com/test');
-      
+
       progressService.completeUrl('https://example.com/test', 'success');
-      
+
       expect(progressService.activeDownloads.has('https://example.com/test')).toBe(false);
       expect(progressService.stats.crawledUrls).toBe(1);
       expect(progressService.stats.newPages).toBe(1);
@@ -508,12 +495,12 @@ describe('ProgressService', () => {
         {url: 'https://example.com/4', status: 'unchanged'},
         {url: 'https://example.com/5', status: 'updated'}
       ];
-      
+
       urls.forEach(({url, status}) => {
         progressService.addActiveUrl(url);
         progressService.completeUrl(url, status);
       });
-      
+
       expect(progressService.stats.crawledUrls).toBe(5);
       expect(progressService.stats.newPages).toBe(1);
       expect(progressService.stats.errors).toBe(1);
@@ -530,7 +517,7 @@ describe('ProgressService', () => {
     it('should track AI enhancement statuses', () => {
       progressService.trackAIEnhancement('url1', 'pending');
       expect(progressService.stats.aiPending).toBe(1);
-      
+
       progressService.trackAIEnhancement('url1', 'success');
       expect(progressService.stats.aiEnhanced).toBe(1);
       expect(progressService.stats.aiPending).toBe(0);
@@ -539,7 +526,7 @@ describe('ProgressService', () => {
     it('should track rate limiting', () => {
       progressService.trackAIEnhancement('url1', 'pending');
       progressService.trackAIEnhancement('url1', 'rate_limited');
-      
+
       expect(progressService.stats.aiRateLimited).toBe(1);
       expect(progressService.stats.aiPending).toBe(0);
     });
@@ -547,7 +534,7 @@ describe('ProgressService', () => {
     it('should track failures', () => {
       progressService.trackAIEnhancement('url1', 'pending');
       progressService.trackAIEnhancement('url1', 'failed');
-      
+
       expect(progressService.stats.aiFailed).toBe(1);
       expect(progressService.stats.aiPending).toBe(0);
     });
@@ -557,7 +544,7 @@ describe('ProgressService', () => {
       progressService.stats.aiEnhanced = 3;
       progressService.stats.aiRateLimited = 2;
       progressService.stats.aiFailed = 1;
-      
+
       expect(progressService.getAIProgress()).toBe(60); // 6 out of 10 = 60%
     });
 
@@ -578,10 +565,10 @@ describe('ProgressService', () => {
 
     it('should calculate elapsed time correctly', () => {
       progressService.start({totalUrls: 10});
-      
+
       // Advance time by 2 minutes and 30 seconds
       vi.advanceTimersByTime(150000);
-      
+
       const timeInfo = progressService.calculateTimeInfo();
       expect(timeInfo.elapsed).toBe('2m 30s');
     });
@@ -589,10 +576,10 @@ describe('ProgressService', () => {
     it('should estimate remaining time', () => {
       progressService.start({totalUrls: 100});
       progressService.updateStats({crawledUrls: 25}); // 25% complete
-      
+
       // Advance time by 1 minute
       vi.advanceTimersByTime(60000);
-      
+
       const timeInfo = progressService.calculateTimeInfo();
       expect(timeInfo.elapsed).toBe('1m 0s');
       expect(timeInfo.remaining).toBe('3m 0s'); // 3 more minutes for remaining 75%
@@ -600,7 +587,7 @@ describe('ProgressService', () => {
 
     it('should handle zero progress in time estimation', () => {
       progressService.start({totalUrls: 10});
-      
+
       const timeInfo = progressService.calculateTimeInfo();
       expect(timeInfo.remaining).toBe('calculating...');
     });
@@ -619,15 +606,15 @@ describe('ProgressService', () => {
           throw new Error('File not found');
         })
       }));
-      
+
       // Clear module cache to force re-import with new mock
       vi.resetModules();
-      
+
       // Re-import ProgressService with the throwing mock
       return import('../../../src/utils/progress.js').then(module => {
         const service = new module.ProgressService();
         expect(service.version).toBe('0.4.0'); // fallback version
-        
+
         // Restore original mocks
         vi.resetModules();
         vi.clearAllMocks();
@@ -639,12 +626,12 @@ describe('ProgressService', () => {
       progressService.multibar.stop = vi.fn(() => {
         throw new Error('Stop failed');
       });
-      
+
       process.env.DEBUG = 'true';
-      
+
       expect(() => progressService.stop()).not.toThrow();
       expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('Error stopping progress bar'));
-      
+
       delete process.env.DEBUG;
     });
   });
@@ -665,7 +652,7 @@ describe('ProgressService', () => {
           expected: '/'
         }
       ];
-      
+
       tests.forEach(({input, expected}) => {
         expect(progressService.formatUrl(input)).toEqual(expected);
       });
@@ -682,9 +669,9 @@ describe('ProgressService', () => {
         aiEnhanced: 80,
         startTime: Date.now() - 120000 // 2 minutes ago
       };
-      
+
       progressService.renderSummary();
-      
+
       expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('CRAWL COMPLETE'));
       expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('90 of 100'));
       expect(consoleLogSpy).toHaveBeenCalledWith(expect.stringContaining('50 total'));

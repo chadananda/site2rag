@@ -24,7 +24,7 @@ export class FileService {
   async ensureDir(dirPath) {
     try {
       await fs.promises.access(dirPath);
-    } catch (e) {
+    } catch {
       await fs.promises.mkdir(dirPath, {recursive: true});
     }
   }
@@ -50,7 +50,7 @@ export class FileService {
   async readFile(filePath, defaultValue = '') {
     try {
       return await fs.promises.readFile(filePath, 'utf8');
-    } catch (e) {
+    } catch {
       return defaultValue;
     }
   }
@@ -102,7 +102,7 @@ This file contains HTML blocks that were removed during content processing.
     try {
       await fs.promises.access(filePath, fs.constants.F_OK);
       return true;
-    } catch (e) {
+    } catch {
       return false;
     }
   }
@@ -211,7 +211,7 @@ This file contains HTML blocks that were removed during content processing.
     try {
       const content = await this.readFile(filePath);
       return JSON.parse(content);
-    } catch (e) {
+    } catch {
       return defaultValue;
     }
   }

@@ -8,7 +8,7 @@ export class BoundedArray {
     this.maxSize = maxSize;
     this.items = [];
   }
-  
+
   push(item) {
     this.items.push(item);
     if (this.items.length > this.maxSize) {
@@ -16,15 +16,15 @@ export class BoundedArray {
       this.items = this.items.slice(-this.maxSize);
     }
   }
-  
+
   get length() {
     return this.items.length;
   }
-  
+
   toArray() {
     return [...this.items];
   }
-  
+
   clear() {
     this.items = [];
   }
@@ -38,35 +38,35 @@ export class BoundedSet {
     this.items = new Set();
     this.accessOrder = [];
   }
-  
+
   add(item) {
     if (this.items.has(item)) {
       return;
     }
-    
+
     if (this.items.size >= this.maxSize) {
       // Remove least recently accessed
       const toRemove = this.accessOrder.shift();
       this.items.delete(toRemove);
     }
-    
+
     this.items.add(item);
     this.accessOrder.push(item);
   }
-  
+
   has(item) {
     return this.items.has(item);
   }
-  
+
   get size() {
     return this.items.size;
   }
-  
+
   clear() {
     this.items.clear();
     this.accessOrder = [];
   }
-  
+
   toArray() {
     return Array.from(this.items);
   }
@@ -79,42 +79,42 @@ export class LRUCache {
     this.maxSize = maxSize;
     this.cache = new Map();
   }
-  
+
   get(key) {
     if (!this.cache.has(key)) {
       return undefined;
     }
-    
+
     // Move to end (most recently used)
     const value = this.cache.get(key);
     this.cache.delete(key);
     this.cache.set(key, value);
     return value;
   }
-  
+
   set(key, value) {
     // Remove if exists to update position
     if (this.cache.has(key)) {
       this.cache.delete(key);
     }
-    
+
     // Evict oldest if at capacity
     if (this.cache.size >= this.maxSize) {
       const firstKey = this.cache.keys().next().value;
       this.cache.delete(firstKey);
     }
-    
+
     this.cache.set(key, value);
   }
-  
+
   has(key) {
     return this.cache.has(key);
   }
-  
+
   clear() {
     this.cache.clear();
   }
-  
+
   get size() {
     return this.cache.size;
   }
@@ -130,41 +130,41 @@ export class BatchProcessor {
     this.queue = [];
     this.timer = null;
   }
-  
+
   add(item) {
     this.queue.push(item);
-    
+
     if (this.queue.length >= this.batchSize) {
       this.flush();
     } else if (!this.timer) {
       this.timer = setTimeout(() => this.flush(), this.flushInterval);
     }
   }
-  
+
   async flush() {
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
     }
-    
+
     if (this.queue.length === 0) {
       return;
     }
-    
+
     const batch = this.queue.splice(0, this.batchSize);
     await this.processor(batch);
-    
+
     // Process remaining items
     if (this.queue.length > 0) {
       setImmediate(() => this.flush());
     }
   }
-  
+
   async shutdown() {
     if (this.timer) {
       clearTimeout(this.timer);
     }
-    
+
     while (this.queue.length > 0) {
       await this.flush();
     }
@@ -180,7 +180,7 @@ export class ResourcePool {
     this.available = [];
     this.inUse = new Set();
   }
-  
+
   async acquire() {
     // Return available resource
     if (this.available.length > 0) {
@@ -188,16 +188,16 @@ export class ResourcePool {
       this.inUse.add(resource);
       return resource;
     }
-    
+
     // Create new resource if under limit
     if (this.inUse.size < this.maxSize) {
       const resource = await this.factory();
       this.inUse.add(resource);
       return resource;
     }
-    
+
     // Wait for resource to become available
-    return new Promise((resolve) => {
+    return new Promise(resolve => {
       const checkAvailable = () => {
         if (this.available.length > 0) {
           const resource = this.available.pop();
@@ -210,20 +210,20 @@ export class ResourcePool {
       checkAvailable();
     });
   }
-  
+
   release(resource) {
     if (this.inUse.has(resource)) {
       this.inUse.delete(resource);
       this.available.push(resource);
     }
   }
-  
+
   async drain() {
     // Wait for all resources to be released
     while (this.inUse.size > 0) {
       await new Promise(resolve => setTimeout(resolve, 10));
     }
-    
+
     // Clean up available resources
     this.available = [];
   }
@@ -247,11 +247,11 @@ export function debounce(func, wait) {
  */
 export function throttle(func, limit) {
   let inThrottle;
-  return function(...args) {
+  return function (...args) {
     if (!inThrottle) {
       func.apply(this, args);
       inThrottle = true;
-      setTimeout(() => inThrottle = false, limit);
+      setTimeout(() => (inThrottle = false), limit);
     }
   };
 }
@@ -265,17 +265,17 @@ export class MemoryMonitor {
     this.onThreshold = options.onThreshold || (() => {});
     this.monitoring = false;
   }
-  
+
   start() {
     if (this.monitoring) return;
-    
+
     this.monitoring = true;
     this.interval = setInterval(() => {
       const usage = process.memoryUsage();
       const heapUsed = usage.heapUsed;
       const heapTotal = usage.heapTotal;
       const ratio = heapUsed / heapTotal;
-      
+
       if (ratio > this.threshold) {
         this.onThreshold({
           heapUsed,
@@ -286,7 +286,7 @@ export class MemoryMonitor {
       }
     }, this.checkInterval);
   }
-  
+
   stop() {
     if (this.interval) {
       clearInterval(this.interval);
@@ -294,7 +294,7 @@ export class MemoryMonitor {
       this.monitoring = false;
     }
   }
-  
+
   static getMemoryStats() {
     const usage = process.memoryUsage();
     return {

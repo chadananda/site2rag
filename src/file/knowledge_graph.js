@@ -7,6 +7,7 @@ import path from 'path';
 import {parseFile} from './parser.js';
 import {extractEntitiesWithSlidingWindow} from '../core/context_processor.js';
 import {loadAIConfig} from '../core/ai_config.js';
+import debugLogger from '../services/debug_logger.js';
 
 /**
  * Extract knowledge graph from one or more files
@@ -15,14 +16,14 @@ import {loadAIConfig} from '../core/ai_config.js';
  * @returns {Promise<void>}
  */
 export async function extractGraph(filePaths, outputPath = null) {
-  console.log(`[KNOWLEDGE_GRAPH] Extracting entities from ${filePaths.length} file(s)`);
+  debugLogger.entities(`Extracting entities from ${filePaths.length} file(s)`);
 
   const allEntities = [];
   const sources = [];
 
   for (const filePath of filePaths) {
     try {
-      console.log(`[KNOWLEDGE_GRAPH] Processing: ${filePath}`);
+      debugLogger.entities(`Processing: ${filePath}`);
 
       // Parse the file
       const parsed = parseFile(filePath);
@@ -53,9 +54,9 @@ export async function extractGraph(filePaths, outputPath = null) {
   // Output result
   if (outputPath) {
     fs.writeFileSync(outputPath, serialized, 'utf8');
-    console.log(`[KNOWLEDGE_GRAPH] Knowledge graph saved to: ${outputPath}`);
+    debugLogger.entities(`Knowledge graph saved to: ${outputPath}`);
   } else {
-    console.log(serialized);
+    debugLogger.entities(serialized);
   }
 }
 
@@ -501,7 +502,7 @@ export function parseGraph(graphText) {
  * @returns {Promise<void>}
  */
 export async function mergeGraphs(graphPaths, outputPath) {
-  console.log(`[KNOWLEDGE_GRAPH] Merging ${graphPaths.length} knowledge graphs`);
+  debugLogger.entities(`Merging ${graphPaths.length} knowledge graphs`);
 
   const graphs = [];
   const sources = [];
@@ -517,7 +518,7 @@ export async function mergeGraphs(graphPaths, outputPath) {
         processed_at: new Date().toISOString()
       });
 
-      console.log(`[KNOWLEDGE_GRAPH] Loaded: ${graphPath}`);
+      debugLogger.entities(`Loaded: ${graphPath}`);
     } catch (error) {
       console.error(`[KNOWLEDGE_GRAPH] Failed to load ${graphPath}: ${error.message}`);
     }
@@ -528,9 +529,9 @@ export async function mergeGraphs(graphPaths, outputPath) {
 
   if (outputPath) {
     fs.writeFileSync(outputPath, serialized, 'utf8');
-    console.log(`[KNOWLEDGE_GRAPH] Merged graph saved to: ${outputPath}`);
+    debugLogger.entities(`Merged graph saved to: ${outputPath}`);
   } else {
-    console.log(serialized);
+    debugLogger.entities(serialized);
   }
 }
 
@@ -540,7 +541,7 @@ export async function mergeGraphs(graphPaths, outputPath) {
  * @returns {Promise<void>}
  */
 export async function validateGraph(graphPath) {
-  console.log(`[KNOWLEDGE_GRAPH] Validating: ${graphPath}`);
+  debugLogger.entities(`Validating: ${graphPath}`);
 
   try {
     const content = fs.readFileSync(graphPath, 'utf8');
@@ -552,12 +553,12 @@ export async function validateGraph(graphPath) {
 
     entityTypes.forEach(type => {
       const count = parsed[type] ? parsed[type].length : 0;
-      console.log(`[VALIDATION] ${type}: ${count} entities`);
+      debugLogger.validation(`${type}: ${count} entities`);
       totalEntities += count;
     });
 
     const relationshipCount = parsed.relationships ? parsed.relationships.length : 0;
-    console.log(`[VALIDATION] relationships: ${relationshipCount} relationships`);
+    debugLogger.validation(`relationships: ${relationshipCount} relationships`);
 
     // Check for orphaned relationships
     const allEntityNames = new Set();
@@ -581,13 +582,13 @@ export async function validateGraph(graphPath) {
       });
     }
 
-    console.log(`[VALIDATION] Total entities: ${totalEntities}`);
-    console.log(`[VALIDATION] Orphaned relationships: ${orphanedRelationships}`);
+    debugLogger.validation(`Total entities: ${totalEntities}`);
+    debugLogger.validation(`Orphaned relationships: ${orphanedRelationships}`);
 
     if (orphanedRelationships === 0) {
-      console.log(`[VALIDATION] ✅ Knowledge graph is valid`);
+      debugLogger.validation(`✅ Knowledge graph is valid`);
     } else {
-      console.log(`[VALIDATION] ⚠️  Found ${orphanedRelationships} orphaned relationships`);
+      debugLogger.validation(`⚠️  Found ${orphanedRelationships} orphaned relationships`);
     }
   } catch (error) {
     console.error(`[VALIDATION] ❌ Validation failed: ${error.message}`);

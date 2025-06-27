@@ -161,7 +161,7 @@ export class SiteProcessor {
     // Enable parallel AI processor with proper database coordination
     let parallelProcessor = null;
     const ENABLE_PARALLEL_PROCESSING = true; // Re-enabled with database task coordination
-    
+
     if (
       ENABLE_PARALLEL_PROCESSING &&
       this.options.enhancement &&
@@ -178,10 +178,10 @@ export class SiteProcessor {
           // During crawl, we don't show AI progress bar, just log it
           logger.info(`[AI] Progress: ${current}/${total} AI requests completed`);
         };
-        
+
         // Initialize with empty array - will be updated as pages are processed
         await aiRequestTracker.initialize([], parallelProgressCallback);
-        
+
         parallelProcessor = createParallelAIProcessor(dbInstance, this.options.aiConfig);
         parallelProcessor.start();
         logger.info('[AI] Started parallel AI processor - will process pages as they are crawled');
@@ -200,7 +200,7 @@ export class SiteProcessor {
         await parallelProcessor.stop();
         const stats = parallelProcessor.getStats();
         logger.info(`[AI] Parallel processor completed: ${stats.processed} pages enhanced during crawl`);
-        
+
         // Don't reset tracker - keep cumulative totals across all processing
       }
 
@@ -271,29 +271,35 @@ export class SiteProcessor {
 
           // Pass the aiConfig to tracking
           insertionTracker.startSession(sessionId, this.options.aiConfig);
-          
+
           // Log the config info
-          logger.info(`Started LLM enhancement session: ${this.options.aiConfig.provider}/${this.options.aiConfig.model}`);
+          logger.info(
+            `Started LLM enhancement session: ${this.options.aiConfig.provider}/${this.options.aiConfig.model}`
+          );
         }
 
         // Check how many documents need processing from this crawl session only
         const crawledUrls = Array.from(this.crawlService.foundUrls);
         const placeholders = crawledUrls.map(() => '?').join(',');
-        const unprocessedDocs = placeholders ? 
-          dbInstance.db.prepare(`SELECT url FROM pages WHERE content_status IN ('raw', 'failed', 'processing') AND url IN (${placeholders})`).all(...crawledUrls) :
-          [];
+        const unprocessedDocs = placeholders
+          ? dbInstance.db
+              .prepare(
+                `SELECT url FROM pages WHERE content_status IN ('raw', 'failed', 'processing') AND url IN (${placeholders})`
+              )
+              .all(...crawledUrls)
+          : [];
 
         if (unprocessedDocs.length > 0) {
           logger.info(`[CONTEXT] Found ${unprocessedDocs.length} unprocessed pages from this crawl`);
-          
+
           // Start the progress bar immediately with an estimated total
           // Estimate ~2 AI requests per document as a starting point
           const estimatedTotal = unprocessedDocs.length * 2;
           logger.info(`[AI] Starting AI processing for ${unprocessedDocs.length} documents...`);
-          
+
           // Start progress bar right away with estimated total
           this.crawlService.progressService.startProcessing(estimatedTotal, this.options.aiConfig);
-          
+
           // Initialize the tracker to calculate expected requests
           // The tracker will provide accurate counts based on actual document content
           const progressCallback = (current, total) => {
@@ -307,7 +313,7 @@ export class SiteProcessor {
 
           // Complete processing progress
           this.crawlService.progressService.completeProcessing();
-          
+
           // Don't reset tracker - keep cumulative totals
         } else {
           logger.info(`[CONTEXT] All pages already processed by parallel processor`);

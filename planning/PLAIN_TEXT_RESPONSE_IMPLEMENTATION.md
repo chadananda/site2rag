@@ -7,25 +7,30 @@ The context disambiguation system has been refactored from JSON-based responses 
 ## Key Changes
 
 ### 1. Response Format
+
 - **Before**: AI returned JSON with keyed blocks
 - **After**: AI returns plain text with blocks separated by blank lines
 
 ### 2. Validation System
+
 - **Strict validation**: Only `[[context]]` insertions allowed
 - **Text preservation**: Original text must match exactly (whitespace normalized)
 - **No Unicode normalization**: Avoids unintended text modifications
 
 ### 3. Window Configuration
+
 - **Context window**: 1200 words (provides sufficient context)
 - **Processing window**: 600 words (optimal for mini models)
 - **Minimum block size**: 100 characters (reduced from 200)
 
 ### 4. Processing Improvements
+
 - **Headers skipped**: Lines starting with `#` included in context but not processed
 - **Code blocks skipped**: Detected and excluded from disambiguation
 - **Plain text prompts**: Clear output format instructions
 
 ### 5. AI Client Updates
+
 - **Schema detection**: Automatically detects if schema expects string (plain text)
 - **No JSON parsing**: For string schemas, response used directly
 - **Format parameter removed**: No longer requests JSON format from AI
@@ -40,16 +45,19 @@ The context disambiguation system has been refactored from JSON-based responses 
 ## Implementation Details
 
 ### Context Processor (`context_processor_simple.js`)
+
 - `PlainTextResponseSchema`: Uses `z.string()` for responses
 - Response parsing: Splits by blank lines to separate blocks
 - Block matching: Matches responses to original blocks using validation
 
 ### AI Client (`ai_client.js`)
+
 - Detects string schemas and skips JSON parsing
 - Removed JSON format request for plain text responses
 - Maintains backward compatibility for JSON schemas
 
 ### Prompt Structure
+
 ```
 ========= OUTPUT FORMAT:
 

@@ -34,7 +34,7 @@ export class MarkdownService {
         // Get the href attribute
         const href = node.getAttribute('href');
         if (!href) return content;
-        
+
         // Normalize the content by removing extra whitespace and newlines
         // This prevents links from being broken across multiple lines
         const normalizedContent = content.replace(/\s+/g, ' ').trim();
@@ -43,7 +43,7 @@ export class MarkdownService {
         let decodedHref = href;
         try {
           decodedHref = decodeURIComponent(href);
-        } catch (e) {
+        } catch {
           // If decoding fails, use the original href
           decodedHref = href;
         }
@@ -72,7 +72,7 @@ export class MarkdownService {
               // Decode the final URL as well
               try {
                 absoluteUrl = decodeURIComponent(absoluteUrl);
-              } catch (e) {
+              } catch {
                 // If decoding the final URL fails, keep it as is
               }
             } catch (error) {
@@ -177,7 +177,7 @@ export class MarkdownService {
    */
   addFrontmatter(markdown, metadata = {}) {
     // Filter out undefined values
-    const filteredMeta = Object.fromEntries(Object.entries(metadata).filter(([_, v]) => v !== undefined));
+    const filteredMeta = Object.fromEntries(Object.entries(metadata).filter(([, v]) => v !== undefined));
 
     if (Object.keys(filteredMeta).length === 0) {
       return markdown;

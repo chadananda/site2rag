@@ -66,7 +66,7 @@ describe('Error Utilities', () => {
     it('should be distinguishable from other errors', () => {
       const abortError = new CrawlAborted();
       const limitError = new CrawlLimitReached();
-      
+
       expect(abortError).not.toBeInstanceOf(CrawlLimitReached);
       expect(limitError).not.toBeInstanceOf(CrawlAborted);
     });
@@ -127,11 +127,7 @@ describe('Error Utilities', () => {
 
   describe('Error interoperability', () => {
     it('should work with Promise.reject', async () => {
-      const errors = [
-        new CrawlLimitReached(),
-        new CrawlAborted(),
-        new InvalidUrlError('bad-url')
-      ];
+      const errors = [new CrawlLimitReached(), new CrawlAborted(), new InvalidUrlError('bad-url')];
 
       for (const error of errors) {
         await expect(Promise.reject(error)).rejects.toThrow(error);
@@ -148,7 +144,7 @@ describe('Error Utilities', () => {
       errors.forEach(error => {
         const json = JSON.stringify(error);
         const parsed = JSON.parse(json);
-        
+
         // Standard Error properties don't serialize by default
         // But we can check our custom properties
         expect(parsed).toBeDefined();
@@ -166,11 +162,7 @@ describe('Error Utilities', () => {
     });
 
     it('should maintain Error prototype chain', () => {
-      const errors = [
-        new CrawlLimitReached(),
-        new CrawlAborted(),
-        new InvalidUrlError('test')
-      ];
+      const errors = [new CrawlLimitReached(), new CrawlAborted(), new InvalidUrlError('test')];
 
       errors.forEach(error => {
         expect(error instanceof Error).toBe(true);
@@ -193,7 +185,7 @@ describe('Error Utilities', () => {
     });
 
     it('should handle abort scenarios', () => {
-      const checkAbortSignal = (signal) => {
+      const checkAbortSignal = signal => {
         if (signal?.aborted) {
           throw new CrawlAborted('Operation was aborted by user');
         }
@@ -208,15 +200,15 @@ describe('Error Utilities', () => {
     });
 
     it('should handle URL validation scenarios', () => {
-      const validateUrl = (url) => {
+      const validateUrl = url => {
         if (!url || typeof url !== 'string') {
           throw new InvalidUrlError(url, 'URL must be a non-empty string');
         }
-        
+
         if (url.startsWith('javascript:')) {
           throw new InvalidUrlError(url, 'JavaScript URLs are not allowed');
         }
-        
+
         if (url.startsWith('file://')) {
           throw new InvalidUrlError(url, 'File URLs are not allowed');
         }

@@ -16,19 +16,29 @@ describe('AIRequestTracker', () => {
         {
           docId: 'doc1',
           blocks: [
-            {text: 'This is a long paragraph with more than 100 characters to ensure it passes the minimum length requirement for processing.'},
+            {
+              text: 'This is a long paragraph with more than 100 characters to ensure it passes the minimum length requirement for processing.'
+            },
             {text: '# Header - should be skipped'},
             {text: '```code block - should be skipped```'},
             {text: 'Short text'}, // Less than 100 chars - skipped
-            {text: 'Another long paragraph with sufficient content to be considered eligible for AI processing and context enhancement.'}
+            {
+              text: 'Another long paragraph with sufficient content to be considered eligible for AI processing and context enhancement.'
+            }
           ]
         },
         {
           docId: 'doc2',
           blocks: [
-            {text: 'This document has several eligible blocks that should be counted in the total expected requests for processing.'},
-            {text: 'Second eligible block with enough content to pass the minimum character threshold for AI context processing.'},
-            {text: 'Third eligible block that contains sufficient text to be included in the window calculation for requests.'}
+            {
+              text: 'This document has several eligible blocks that should be counted in the total expected requests for processing.'
+            },
+            {
+              text: 'Second eligible block with enough content to pass the minimum character threshold for AI context processing.'
+            },
+            {
+              text: 'Third eligible block that contains sufficient text to be included in the window calculation for requests.'
+            }
           ]
         }
       ];
@@ -58,11 +68,7 @@ describe('AIRequestTracker', () => {
       const documents = [
         {
           docId: 'doc1',
-          blocks: [
-            {text: '# Header'},
-            {text: 'Short'},
-            {text: '```code```'}
-          ]
+          blocks: [{text: '# Header'}, {text: 'Short'}, {text: '```code```'}]
         }
       ];
       tracker.initialize(documents, null);
@@ -78,7 +84,7 @@ describe('AIRequestTracker', () => {
           blocks: Array(10).fill({text: 'A'.repeat(150)}) // 10 blocks → estimate 2 windows
         },
         {
-          docId: 'doc2', 
+          docId: 'doc2',
           blocks: Array(15).fill({text: 'B'.repeat(150)}) // 15 blocks → estimate 3 windows
         }
       ];
@@ -98,10 +104,12 @@ describe('AIRequestTracker', () => {
 
   describe('trackCompletion', () => {
     it('should increment completed count and notify progress', () => {
-      const documents = [{
-        docId: 'doc1',
-        blocks: Array(5).fill({text: 'A'.repeat(150)})
-      }];
+      const documents = [
+        {
+          docId: 'doc1',
+          blocks: Array(5).fill({text: 'A'.repeat(150)})
+        }
+      ];
 
       let progressUpdates = [];
       const progressCallback = (current, total) => {
@@ -148,10 +156,12 @@ describe('AIRequestTracker', () => {
 
   describe('reset', () => {
     it('should clear all state', () => {
-      const documents = [{
-        docId: 'doc1',
-        blocks: [{text: 'A'.repeat(150)}]
-      }];
+      const documents = [
+        {
+          docId: 'doc1',
+          blocks: [{text: 'A'.repeat(150)}]
+        }
+      ];
 
       tracker.initialize(documents, () => {});
       tracker.trackCompletion();
@@ -177,7 +187,7 @@ describe('AIRequestTracker', () => {
         'Short', // Less than 100 chars
         '![image](url) - should be skipped',
         'Another valid block with sufficient length to be considered eligible for AI context enhancement processing.',
-        ''  // Empty block
+        '' // Empty block
       ];
 
       const count = tracker.countEligibleBlocks(blocks);

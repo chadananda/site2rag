@@ -24,13 +24,13 @@ export class AIRequestTracker {
   async _acquireLock() {
     const prevLock = this._lockPromise;
     let releaseLock;
-    this._lockPromise = new Promise((resolve) => {
+    this._lockPromise = new Promise(resolve => {
       releaseLock = resolve;
     });
     await prevLock;
     return releaseLock;
   }
-  
+
   /**
    * Initialize the tracker with documents to process
    * @param {Array} documents - Array of documents with blocks
@@ -48,23 +48,25 @@ export class AIRequestTracker {
       this.documentEstimates.clear();
       this.documentActuals.clear();
 
-    // Calculate expected requests for each document
-    for (const doc of documents) {
-      const eligibleBlocks = this.countEligibleBlocks(doc.blocks);
-      // Estimate windows based on ~5 blocks per window (600 word windows)
-      // Only create windows if there are eligible blocks
-      const estimatedWindows = eligibleBlocks > 0 ? Math.max(1, Math.ceil(eligibleBlocks / 5)) : 0;
-      this.documentEstimates.set(doc.docId || doc.url, estimatedWindows);
-      this.totalExpected += estimatedWindows;
-    }
+      // Calculate expected requests for each document
+      for (const doc of documents) {
+        const eligibleBlocks = this.countEligibleBlocks(doc.blocks);
+        // Estimate windows based on ~5 blocks per window (600 word windows)
+        // Only create windows if there are eligible blocks
+        const estimatedWindows = eligibleBlocks > 0 ? Math.max(1, Math.ceil(eligibleBlocks / 5)) : 0;
+        this.documentEstimates.set(doc.docId || doc.url, estimatedWindows);
+        this.totalExpected += estimatedWindows;
+      }
 
-    // Ensure initial total is at least as high as cumulative completed
-    if (this.totalExpected < this.totalCompleted) {
-      this.totalExpected = this.totalCompleted;
-    }
-    
-    debugLogger.ai(`[AI-TRACKER] Initialized with ${documents.length} documents, expecting ~${this.totalExpected} AI requests (${this.totalCompleted} already completed)`);
-    
+      // Ensure initial total is at least as high as cumulative completed
+      if (this.totalExpected < this.totalCompleted) {
+        this.totalExpected = this.totalCompleted;
+      }
+
+      debugLogger.ai(
+        `[AI-TRACKER] Initialized with ${documents.length} documents, expecting ~${this.totalExpected} AI requests (${this.totalCompleted} already completed)`
+      );
+
       // Notify initial progress with cumulative counts
       if (this.progressCallback) {
         this.progressCallback(this.totalCompleted, this.totalExpected);
@@ -81,28 +83,28 @@ export class AIRequestTracker {
    */
   countEligibleBlocks(blocks) {
     if (!blocks || !Array.isArray(blocks)) return 0;
-    
+
     return blocks.filter(block => {
-      const text = typeof block === 'string' ? block : (block.text || '');
+      const text = typeof block === 'string' ? block : block.text || '';
       // Ensure text is a string before calling trim
       if (typeof text !== 'string') return false;
       const trimmed = text.trim();
-      
+
       // Skip empty blocks
       if (!trimmed) return false;
-      
+
       // Skip headers
       if (trimmed.startsWith('#')) return false;
-      
+
       // Skip code blocks
       if (trimmed.startsWith('```') || trimmed.match(/^(\s{4}|\t)/)) return false;
-      
+
       // Skip very short blocks (less than 20 chars) - match MIN_BLOCK_CHARS in processor
       if (trimmed.length < 20) return false;
-      
+
       // Skip image blocks
       if (trimmed.startsWith('![')) return false;
-      
+
       return true;
     }).length;
   }
@@ -116,7 +118,7 @@ export class AIRequestTracker {
     // Store the docId for reference
     const previousActual = this.documentActuals.get(docId) || 0;
     this.documentActuals.set(docId, actualRequests);
-    
+
     // If this is a new document or the count changed, recalculate total
     if (previousActual !== actualRequests) {
       this.recalculateTotal();
@@ -128,29 +130,29 @@ export class AIRequestTracker {
    */
   recalculateTotal() {
     let newTotal = 0;
-    
+
     // Add up all actual counts we know
-    for (const [docId, actual] of this.documentActuals) {
+    for (const [, actual] of this.documentActuals) {
       newTotal += actual;
     }
-    
+
     // Add estimates for documents we haven't processed yet
     for (const [docId, estimate] of this.documentEstimates) {
       if (!this.documentActuals.has(docId)) {
         newTotal += estimate;
       }
     }
-    
+
     // Always ensure total is at least as high as completed count
     // This prevents the absurd situation of showing more completed than total
     newTotal = Math.max(newTotal, this.totalCompleted);
-    
+
     // Only update if the new total is higher than current
     // This prevents the total from jumping down as we get actuals
     if (newTotal > this.totalExpected) {
       this.totalExpected = newTotal;
       debugLogger.ai(`[AI-TRACKER] Updated total expected requests to ${this.totalExpected}`);
-      
+
       // Notify progress with new total
       if (this.progressCallback) {
         this.progressCallback(this.totalCompleted, this.totalExpected);
@@ -162,20 +164,20 @@ export class AIRequestTracker {
    * Track a completed AI request
    * @param {string} docId - Document ID (optional)
    */
-  async trackCompletion(docId = null) {
+  async trackCompletion(_docId = null) {
     const release = await this._acquireLock();
     try {
       // docId parameter kept for future use
       this.totalCompleted++;
-      
+
       // If we've exceeded our expected total, update it
       if (this.totalCompleted > this.totalExpected) {
         this.totalExpected = this.totalCompleted;
         debugLogger.ai(`[AI-TRACKER] Adjusting total to match completed: ${this.totalExpected}`);
       }
-      
+
       debugLogger.ai(`[AI-TRACKER] Request completed: ${this.totalCompleted}/${this.totalExpected}`);
-      
+
       // Notify progress
       if (this.progressCallback) {
         this.progressCallback(this.totalCompleted, this.totalExpected);
