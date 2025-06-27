@@ -178,11 +178,12 @@ export class ProgressService {
       return;
     }
     
-    // Check if we're in a TTY environment  
-    const isTTY = process.stderr.isTTY || this.options.forceProgress;
+    // Check if we're in a TTY environment
+    // We'll try to use progress bars even in non-TTY if we can write to stderr
+    const canUseProgressBars = process.stderr.isTTY || (process.stderr && process.stderr.write);
     
-    // In non-TTY environments (npm scripts, CI/CD), use simple logging instead of progress bars
-    if (!isTTY && !this.options.forceProgress) {
+    // Only fall back to simple logging if we really can't output to stderr
+    if (!canUseProgressBars) {
       this.multibar = null;
       this.crawlBar = null;
       this.aiBar = null;
@@ -240,11 +241,20 @@ export class ProgressService {
       barsize: barSize
     });
     
-    // Create AI progress bar  
-    this.aiBar = this.multibar.create(100, 0, { 
-      tokenInfo: chalk.cyan('0 tokens | $0.00')
+    // Create AI progress bar with dynamic token info
+    // Store initial token info in instance for the formatter to access
+    this.aiTokenInfo = chalk.cyan('0 tokens | $0.00');
+    
+    this.aiBar = this.multibar.create(100, 0, {
+      tokenInfo: this.aiTokenInfo
     }, {
-      format: `${chalk.magenta.bold('AI:      ')} ${chalk.magenta.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}/${chalk.yellow.bold('{total}')} reqs | {tokenInfo}`,
+      format: (options, params, payload) => {
+        const bar = options.barCompleteChar.repeat(Math.round(params.progress * options.barsize)) + 
+                   options.barIncompleteChar.repeat(options.barsize - Math.round(params.progress * options.barsize));
+        const percentage = Math.floor(params.progress * 100);
+        const tokenInfo = payload.tokenInfo || this.aiTokenInfo;
+        return `${chalk.magenta.bold('AI:      ')} ${chalk.magenta.bold(bar)} ${chalk.green.bold(percentage + '%')} | ${tokenInfo}`;
+      },
       barsize: barSize
     });
 
@@ -447,6 +457,9 @@ export class ProgressService {
         const tokenStr = tokenData.totalTokens ? tokenData.totalTokens.toLocaleString() : '0';
         tokenInfo = chalk.cyan(`${tokenStr} tokens | ${costStr}`);
       }
+      
+      // Store token info for the formatter
+      this.aiTokenInfo = tokenInfo;
       
       // Update the AI bar with token info
       this.aiBar.update(current, { tokenInfo });
