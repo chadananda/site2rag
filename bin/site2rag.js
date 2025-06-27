@@ -271,6 +271,7 @@ program
   .option('--exclude-patterns <patterns>', 'Exclude URLs matching regex patterns (comma-separated)')
   .option('--include-language <lang>', 'Only crawl pages with specific language (e.g., en, es, fr)')
   .option('--include-patterns <patterns>', 'Only include URLs matching regex patterns (comma-separated)')
+  .option('--force-progress', 'Force visual progress bars even in non-TTY environments')
   .addHelpText(
     'after',
     `
@@ -548,7 +549,8 @@ Examples:
       update: options.update || false, // Pass the update flag to SiteProcessor
       flat: useFlat, // Use config value unless overridden by CLI flag
       enhancement: !options.noEnhancement && options.enhancement !== false, // Enable enhancement unless explicitly disabled
-      filtering: filtering // Pass filtering configuration
+      filtering: filtering, // Pass filtering configuration
+      forceProgress: options.forceProgress || false // Pass force progress flag
     });
     // Set up verbose logging if requested
     const verbose = options.verbose;

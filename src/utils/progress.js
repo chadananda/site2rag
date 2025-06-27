@@ -179,10 +179,10 @@ export class ProgressService {
     }
     
     // Check if we're in a TTY environment  
-    const isTTY = process.stderr.isTTY;
+    const isTTY = process.stderr.isTTY || this.options.forceProgress;
     
     // In non-TTY environments (npm scripts, CI/CD), use simple logging instead of progress bars
-    if (!isTTY) {
+    if (!isTTY && !this.options.forceProgress) {
       this.multibar = null;
       this.crawlBar = null;
       this.aiBar = null;
@@ -217,10 +217,8 @@ export class ProgressService {
     this.multibar = new cliProgress.MultiBar({
       clearOnComplete: false,
       hideCursor: true, // Always true in TTY mode
-      format: `${chalk.cyan.bold('{bar}')} ${chalk.green.bold('{percentage}%')} | ${chalk.yellow.bold('{value}')}${chalk.gray('/')}${chalk.yellow.bold('{total}')}`,
       barCompleteChar: '\u2588',
       barIncompleteChar: '\u2591',
-      barsize: barSize,
       stopOnComplete: false,
       forceRedraw: false, // Don't force redraw on every update
       linewrap: false,
