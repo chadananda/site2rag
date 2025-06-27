@@ -211,25 +211,22 @@ async function displayHeader(aiConfig = null) {
     })
     .join('\n');
 
-  // Create stunning content with perfect spacing
+  // Create content with more compact spacing
   const content = [
-    '',
     coloredAscii,
-    '',
     chalk.red('🔥 ') + chalk.cyan.bold('Website to RAG Knowledge Base Converter ') + chalk.red('🔥'),
     chalk.white('Converting web content to AI-ready markdown with intelligent crawling'),
     chalk.yellow(`Version ${packageJson.version}`) +
       chalk.white(' | ') +
       chalk.cyan('https://github.com/chadananda/site2rag'),
     '',
-    aiStatus,
-    ''
+    aiStatus
   ].join('\n');
 
-  // Create beautiful bordered box
+  // Create bordered box with less padding
   const box = boxen(content, {
-    padding: 1,
-    margin: 1,
+    padding: {top: 0, right: 1, bottom: 0, left: 1},
+    margin: 0,
     borderStyle: 'double',
     borderColor: 'cyan',
     textAlignment: 'center',
