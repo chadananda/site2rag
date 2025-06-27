@@ -34,6 +34,10 @@ export class MarkdownService {
         // Get the href attribute
         const href = node.getAttribute('href');
         if (!href) return content;
+        
+        // Normalize the content by removing extra whitespace and newlines
+        // This prevents links from being broken across multiple lines
+        const normalizedContent = content.replace(/\s+/g, ' ').trim();
 
         // Decode percent-encoded URLs for better readability
         let decodedHref = href;
@@ -56,7 +60,7 @@ export class MarkdownService {
           // For PDF/DOCX, we'll keep the relative path
           // TODO: Download the file to the local folder structure
           logger.info(`[MARKDOWN] Keeping relative link for document: ${decodedHref}`);
-          return `[${content}](${decodedHref}${title})`;
+          return `[${normalizedContent}](${decodedHref}${title})`;
         } else {
           // For all other links, ensure they are absolute
           let absoluteUrl = decodedHref;
@@ -77,7 +81,7 @@ export class MarkdownService {
             }
           }
 
-          return `[${content}](${absoluteUrl}${title})`;
+          return `[${normalizedContent}](${absoluteUrl}${title})`;
         }
       }
     });

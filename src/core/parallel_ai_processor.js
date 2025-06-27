@@ -17,6 +17,7 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
   let intervalId = null;
   let processedUrls = new Set();
   const processorId = `parallel-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  const pendingPromises = new Set(); // Track all pending AI processing promises
 
   async function processPage(page) {
     try {
@@ -40,12 +41,14 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
       // Parse markdown into ALL blocks
       const allBlocks = content.split(/\n{2,}/).map((text, index) => ({text, originalIndex: index}));
 
-      // Identify eligible blocks
+      // Identify eligible blocks - use same criteria as main processor
       const eligibleBlocks = allBlocks.filter(block => {
         const trimmed = block.text.trim();
         if (!trimmed) return false;
-        if (trimmed.startsWith('```') || trimmed.match(/^ {4}/)) return false;
-        if (trimmed.length < 200) return false;
+        if (trimmed.startsWith('#')) return false; // Skip headers
+        if (trimmed.startsWith('```') || trimmed.match(/^(\s{4}|\t)/)) return false; // Skip code blocks
+        if (trimmed.length < 20) return false; // Match MIN_BLOCK_CHARS from context_processor_simple
+        if (trimmed.startsWith('![')) return false; // Skip image blocks
         return true;
       });
 
@@ -63,7 +66,7 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
       };
 
       // Process with AI
-      logger.info(`[AI-PARALLEL] Processing ${eligibleBlocks.length} eligible blocks from ${page.url}`);
+      logger.info(`[AI-PARALLEL] Starting AI processing for ${page.url} with ${eligibleBlocks.length} eligible blocks`);
 
       // Use the shared tracker's progress callback if initialized
       const progressCallback = aiRequestTracker.isInitialized 
@@ -96,7 +99,7 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
         db.markPageContexted(page.url);
 
         const insertionsCount = contextedMarkdown.match(/\[\[.*?\]\]/g)?.length || 0;
-        logger.info(`[AI-PARALLEL] Enhanced ${page.url} with ${insertionsCount} insertions`);
+        logger.info(`[AI-PARALLEL] Completed processing ${page.url} with ${insertionsCount} insertions`);
 
         return true;
       }
@@ -114,10 +117,13 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
     if (!isRunning) return;
 
     try {
-      // Reset any stuck processing pages first (older than 5 minutes)
-      const resetCount = db.resetStuckProcessing(5);
+      // Reset any stuck processing pages first (older than 30 minutes)
+      // Increased from 5 to 30 minutes to allow for longer AI processing times
+      // For testing, use 0.1 minutes (6 seconds) to reset recently stuck pages
+      const resetMinutes = process.env.NODE_ENV === 'test' ? 0.1 : 30;
+      const resetCount = db.resetStuckProcessing(resetMinutes);
       if (resetCount > 0) {
-        logger.info(`[AI-PARALLEL] Reset ${resetCount} stuck processing pages`);
+        logger.info(`[AI-PARALLEL] Reset ${resetCount} stuck processing pages (> 30 min)`);
       }
 
       // Atomically claim pages for processing
@@ -138,10 +144,21 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
           }
         });
 
-        // Process in parallel but don't wait
-        Promise.all(promises).catch(error => {
-          logger.error(`[AI-PARALLEL] Batch processing error: ${error.message}`);
-        });
+        // Process in parallel and track promises
+        const batchPromise = Promise.all(promises)
+          .then(() => {
+            // Remove completed promises from tracking
+            promises.forEach(p => pendingPromises.delete(p));
+          })
+          .catch(error => {
+            logger.error(`[AI-PARALLEL] Batch processing error: ${error.message}`);
+            // Remove failed promises from tracking
+            promises.forEach(p => pendingPromises.delete(p));
+          });
+        
+        // Add all promises to tracking
+        promises.forEach(p => pendingPromises.add(p));
+        pendingPromises.add(batchPromise);
       }
     } catch (error) {
       logger.error(`[AI-PARALLEL] Check error: ${error.message}`);
@@ -162,13 +179,24 @@ export function createParallelAIProcessor(db, aiConfig, checkInterval = 2000) {
       intervalId = setInterval(checkAndProcessNewPages, checkInterval);
     },
 
-    stop() {
+    async stop() {
       if (!isRunning) return;
 
       isRunning = false;
       if (intervalId) {
         clearInterval(intervalId);
         intervalId = null;
+      }
+
+      // Wait for all pending AI processing to complete
+      if (pendingPromises.size > 0) {
+        logger.info(`[AI-PARALLEL] Waiting for ${pendingPromises.size} pending AI requests to complete...`);
+        try {
+          await Promise.all(pendingPromises);
+          logger.info(`[AI-PARALLEL] All pending AI requests completed`);
+        } catch (error) {
+          logger.error(`[AI-PARALLEL] Error waiting for pending requests: ${error.message}`);
+        }
       }
 
       logger.info(`[AI-PARALLEL] Stopped. Processed ${processedUrls.size} pages`);

@@ -115,12 +115,63 @@ export function cleanupInactiveSessions() {
   }
 }
 /**
- * Low-level AI call function
+ * Low-level AI call function with retry logic
  * @param {string} prompt - Prompt to send to the AI
  * @param {object} aiConfig - AI config (provider, host, model, etc)
  * @returns {Promise<string>} - Raw response text
  */
 async function makeAICall(prompt, aiConfig, expectPlainText = false) {
+  const maxRetries = 3;
+  let lastError = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      // Add delay for retries (exponential backoff)
+      if (attempt > 1) {
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000); // Max 10 seconds
+        debugLogger.ai(`[AI] Network retry attempt ${attempt} after ${delay}ms delay...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+      
+      const result = await makeAICallInternal(prompt, aiConfig, expectPlainText);
+      return result;
+    } catch (error) {
+      lastError = error;
+      console.error(`[AI ERROR] Network attempt ${attempt} failed: ${error.message}`);
+      
+      // Check if it's a retryable error
+      const isRetryable = 
+        error.message.includes('Network error') ||
+        error.message.includes('Premature close') ||
+        error.message.includes('ECONNRESET') ||
+        error.message.includes('ETIMEDOUT') ||
+        error.message.includes('fetch failed') ||
+        error.message.includes('timed out') ||
+        (error.message.includes('API request failed') && error.message.includes('500')) ||
+        (error.message.includes('API request failed') && error.message.includes('502')) ||
+        (error.message.includes('API request failed') && error.message.includes('503')) ||
+        (error.message.includes('API request failed') && error.message.includes('504')) ||
+        (error.message.includes('API request failed') && error.message.includes('429')); // Rate limit
+      
+      if (!isRetryable || attempt === maxRetries) {
+        throw error;
+      }
+      
+      console.error(`[AI ERROR] Error is retryable, will retry...`);
+    }
+  }
+  
+  throw lastError;
+}
+
+/**
+ * Internal function that actually makes the AI call
+ * @param {string} prompt - Prompt to send to the AI
+ * @param {object} aiConfig - AI config (provider, host, model, etc)
+ * @param {boolean} expectPlainText - Whether to expect plain text response (vs JSON)
+ * @returns {Promise<string>} - Raw response text
+ */
+async function makeAICallInternal(prompt, aiConfig, expectPlainText = false) {
   const provider = aiConfig.provider || 'ollama';
 
   debugLogger.ai(`makeAICall - Provider: ${provider}`);
@@ -247,7 +298,7 @@ async function makeAICall(prompt, aiConfig, expectPlainText = false) {
       throw new Error('OpenAI API key is required for openai provider');
     }
 
-    const timeoutMs = aiConfig.timeout || 30000; // 30 second default for OpenAI
+    const timeoutMs = aiConfig.timeout || 60000; // 60 second default for OpenAI
     debugLogger.ai(`OpenAI - Timeout set to ${timeoutMs}ms (config: ${aiConfig.timeout}ms)`);
     const timeoutPromise = new Promise((_, reject) => {
       setTimeout(() => reject(new Error(`AI call timed out after ${timeoutMs}ms`)), timeoutMs);
@@ -276,7 +327,19 @@ async function makeAICall(prompt, aiConfig, expectPlainText = false) {
       throw new Error(`OpenAI API request failed: ${response.status} ${response.statusText} - ${errorBody}`);
     }
 
-    const data = await response.json();
+    // Handle response body parsing with better error handling
+    let data;
+    try {
+      data = await response.json();
+    } catch (parseError) {
+      // If we get a premature close or parsing error, it might be a network issue
+      if (parseError.message.includes('Premature close') || parseError.message.includes('Invalid response body')) {
+        debugLogger.ai(`[AI] Network error reading response: ${parseError.message}. This is often transient.`);
+        throw new Error(`Network error reading OpenAI response: ${parseError.message}`);
+      }
+      throw parseError;
+    }
+    
     return data.choices[0].message.content || '';
   }
 
@@ -422,10 +485,11 @@ export async function callAI(prompt, schema, aiConfig) {
       debugLogger.ai(`Last 500 chars: ...${prompt.substring(prompt.length - 500)}`);
     }
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
+    // Reduce to 2 attempts here since makeAICall already has 3 retries for network errors
+    for (let attempt = 1; attempt <= 2; attempt++) {
       // Only delay on retries, not the first attempt
       if (attempt > 1) {
-        await delay(1000 * attempt); // Exponential backoff on retries
+        await delay(2000); // Fixed 2 second delay for validation retries
       }
       try {
         // Check if we're expecting plain text before making the call
@@ -525,15 +589,19 @@ export async function callAI(prompt, schema, aiConfig) {
         if (e.message.includes('API request failed')) {
           console.error(`[AI ERROR] API request failed - check provider configuration`);
         }
+        
+        if (e.message.includes('Network error') || e.message.includes('Premature close')) {
+          console.error(`[AI ERROR] Network issue detected - this is often transient and will be retried`);
+        }
 
         console.error(`[AI ERROR] Full error stack:`, e.stack);
 
-        if (attempt < 3) {
-          console.error(`[AI] Will retry attempt ${attempt + 1}...`);
+        if (attempt < 2) {
+          console.error(`[AI] Will retry validation attempt ${attempt + 1}...`);
           // Delay is handled at the start of the loop
         } else {
-          console.error(`[AI FATAL] All 3 attempts failed. Unable to get valid AI response.`);
-          logger.error(`AI response validation failed after 3 attempts: ${e.message}`);
+          console.error(`[AI FATAL] All validation attempts failed. Unable to get valid AI response.`);
+          logger.error(`AI response validation failed after 2 attempts: ${e.message}`);
         }
       }
     }

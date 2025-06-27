@@ -76,7 +76,10 @@ export const insertionTracker = {
  */
 function extractContextInsertions(text) {
   if (!text) return [];
-  const matches = text.match(/\[\[([^\]]+)\]\]/g) || [];
+  // Handle both string and object blocks
+  const textContent = typeof text === 'string' ? text : (text.text || '');
+  if (typeof textContent !== 'string') return [];
+  const matches = textContent.match(/\[\[([^\]]+)\]\]/g) || [];
   return matches.map(m => m.slice(2, -2)); // Remove [[ and ]]
 }
 
@@ -85,9 +88,10 @@ function extractContextInsertions(text) {
  * @param {Object|string} dbOrPath - Database instance or path
  * @param {Object} aiConfig - AI configuration
  * @param {Function} progressCallback - Progress callback(completed, total)
+ * @param {Object} options - Additional options (like test mode)
  * @returns {Promise<void>}
  */
-export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback = null) {
+export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback = null, options = {}) {
   // Accept either a db instance (CrawlDB) or a path
   let db, shouldClose = false;
   if (typeof dbOrPath === 'string') {
@@ -97,10 +101,16 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
     db = dbOrPath;
   }
 
-  // Reset any stuck processing pages first
-  const resetCount = db.resetStuckProcessing(5);
+  // Reset any stuck processing pages first (older than 30 minutes)
+  // Increased from 5 to 30 minutes to allow for longer AI processing times
+  // For testing, use 0.01 minutes (0.6 seconds) to reset recently stuck pages
+  const isTestMode = process.env.NODE_ENV === 'test' || options.test;
+  const resetMinutes = isTestMode ? 0.01 : 30;
+  const resetCount = db.resetStuckProcessing(resetMinutes);
   if (resetCount > 0) {
-    logger.info(`[CONTEXT] Reset ${resetCount} stuck processing pages before batch processing`);
+    logger.info(`[CONTEXT] Reset ${resetCount} stuck processing pages (> ${resetMinutes} min) before batch processing`);
+  } else {
+    logger.info(`[CONTEXT] No stuck pages to reset (checking pages older than ${resetMinutes} minutes)`);
   }
 
   // Use the database's atomic claim mechanism for batch processing
@@ -110,7 +120,11 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
   // Claim pages in batches until no more are available
   while (true) {
     const batch = db.claimPagesForProcessing(50, batchProcessorId);
-    if (batch.length === 0) break;
+    if (batch.length === 0) {
+      logger.info(`[CONTEXT] No more pages to claim for batch processing`);
+      break;
+    }
+    logger.info(`[CONTEXT] Claimed ${batch.length} pages for batch processing`);
     allRawPages.push(...batch);
   }
   
@@ -152,8 +166,23 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
         originalIndex: index
       }));
 
-      // Use basic metadata
-      const meta = {title: doc.title || '', url: doc.url};
+      // Parse frontmatter to get full metadata
+      let meta = {title: doc.title || '', url: doc.url};
+      if (markdown.startsWith('---')) {
+        const frontmatterEnd = markdown.indexOf('---', 3);
+        if (frontmatterEnd > 0) {
+          const frontmatter = markdown.substring(3, frontmatterEnd);
+          const lines = frontmatter.split('\n');
+          for (const line of lines) {
+            const match = line.match(/^(\w+):\s*(.+)$/);
+            if (match) {
+              const key = match[1];
+              const value = match[2].replace(/^["']|["']$/g, ''); // Remove quotes
+              meta[key] = value;
+            }
+          }
+        }
+      }
 
       // Add document to batch processing list - send blocks with originalIndex preserved
       documentsToProcess.push({
@@ -192,7 +221,10 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
   // Initialize the AI request tracker with all documents
   // This will calculate the expected total requests across all documents
   if (progressCallback) {
-    aiRequestTracker.initialize(documentsToProcess, progressCallback);
+    await aiRequestTracker.initialize(documentsToProcess, progressCallback);
+    // Update progress bar with actual total now that documents are prepared
+    const stats = aiRequestTracker.getStats();
+    progressCallback(stats.totalCompleted, stats.totalExpected);
   }
 
   // Process all documents together
@@ -214,8 +246,10 @@ export async function runContextEnrichment(dbOrPath, aiConfig, progressCallback 
         insertionTracker.trackFile(metadata.filePath, allInsertions);
       }
 
-      // Reassemble enriched markdown
-      const contextedMarkdown = enhancedBlocks.join('\n\n');
+      // Reassemble enriched markdown - extract text from blocks if they're objects
+      const contextedMarkdown = enhancedBlocks
+        .map(block => typeof block === 'string' ? block : (block.text || block))
+        .join('\n\n');
 
       // Preserve frontmatter if present
       let finalMarkdown = contextedMarkdown;
@@ -288,12 +322,34 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
 
     // Get page metadata from database
     const pageData = db.db.prepare('SELECT title FROM pages WHERE url = ?').get(url);
-    const meta = {title: pageData?.title || '', url: url};
+    let meta = {title: pageData?.title || '', url: url};
     
-    // Use simple processor
-    const enhancedBlocks = await enhanceDocumentSimple(allBlocks, meta, aiConfig, {
-      onProgress: null
-    });
+    // Parse frontmatter to get full metadata
+    if (markdown.startsWith('---')) {
+      const frontmatterEnd = markdown.indexOf('---', 3);
+      if (frontmatterEnd > 0) {
+        const frontmatter = markdown.substring(3, frontmatterEnd);
+        const lines = frontmatter.split('\n');
+        for (const line of lines) {
+          const match = line.match(/^(\w+):\s*(.+)$/);
+          if (match) {
+            const key = match[1];
+            const value = match[2].replace(/^["']|["']$/g, ''); // Remove quotes
+            meta[key] = value;
+          }
+        }
+      }
+    }
+    
+    // Use simple processor - pass URL as docId for better tracking
+    const doc = {
+      docId: url,
+      blocks: allBlocks,
+      metadata: meta
+    };
+    
+    const results = await processDocumentsSimple([doc], aiConfig, null);
+    const enhancedBlocks = results[url] || allBlocks;
     
     if (!enhancedBlocks || enhancedBlocks.length === 0) {
       throw new Error('Context enhancement returned no results');
@@ -309,7 +365,9 @@ export async function enhanceSinglePage(url, filePath, aiConfig, db) {
       insertionTracker.trackFile(filePath, allInsertions);
     }
 
-    const contextedMarkdown = enhancedBlocks.join('\n\n');
+    const contextedMarkdown = enhancedBlocks
+      .map(block => typeof block === 'string' ? block : (block.text || block))
+      .join('\n\n');
 
     // Preserve frontmatter if present
     let finalMarkdown = contextedMarkdown;

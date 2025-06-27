@@ -147,7 +147,17 @@ function createSlidingWindows(blocks) {
 
   // Pre-process all blocks to create a cleaned text array for context generation
   const allCleanedBlocks = blocks.map((block, idx) => {
-    const blockText = typeof block === 'string' ? block : block.text || block;
+    const blockText = typeof block === 'string' ? block : (block.text || '');
+    // Ensure blockText is a string
+    if (typeof blockText !== 'string') {
+      debugLogger.ai(`Warning: Block ${idx} is not a string:`, block);
+      return {
+        original: '',
+        cleaned: '',
+        index: idx,
+        words: 0
+      };
+    }
     return {
       original: blockText,
       cleaned: cleanTextForContext(blockText),
@@ -166,7 +176,7 @@ function createSlidingWindows(blocks) {
 
     while (currentWindowIndex < blocks.length && windowWords < PROCESS_WORDS) {
       const block = blocks[currentWindowIndex];
-      const blockText = typeof block === 'string' ? block : block.text || block;
+      const blockText = typeof block === 'string' ? block : (block.text || '');
 
       // Skip headers (lines starting with #) from processing but not from iteration
       if (blockText.trim().startsWith('#')) {
@@ -480,7 +490,9 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
   // Initialize progress with actual request count from tracker if available
   if (progressCallback) {
     const initialTotal = aiRequestTracker.isInitialized ? aiRequestTracker.totalExpected : totalRequests;
-    progressCallback(0, initialTotal);
+    // Get current completed count from tracker to maintain progress continuity
+    const currentCompleted = aiRequestTracker.isInitialized ? aiRequestTracker.totalCompleted : 0;
+    progressCallback(currentCompleted, initialTotal);
   }
 
   // Phase 2: Process all requests in parallel with rate limiting
@@ -620,12 +632,13 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
         completedRequests.count++;
         if (progressCallback) {
           const currentTotal = aiRequestTracker.isInitialized ? aiRequestTracker.totalExpected : totalRequests;
+          debugLogger.ai(`[PROGRESS] Updating progress: ${completedRequests.count}/${currentTotal}`);
           progressCallback(completedRequests.count, currentTotal);
         }
         
         // Track completion in the shared tracker
         if (aiRequestTracker.isInitialized) {
-          aiRequestTracker.trackCompletion(request.docId);
+          await aiRequestTracker.trackCompletion(request.docId);
         }
 
         return {
@@ -643,12 +656,13 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
         completedRequests.count++;
         if (progressCallback) {
           const currentTotal = aiRequestTracker.isInitialized ? aiRequestTracker.totalExpected : totalRequests;
+          debugLogger.ai(`[PROGRESS] Updating progress on failure: ${completedRequests.count}/${currentTotal}`);
           progressCallback(completedRequests.count, currentTotal);
         }
         
         // Track completion in the shared tracker even on failure
         if (aiRequestTracker.isInitialized) {
-          aiRequestTracker.trackCompletion(request.docId);
+          await aiRequestTracker.trackCompletion(request.docId);
         }
 
         // Return original blocks on error
@@ -719,7 +733,9 @@ export async function processDocumentsSimple(documents, aiConfig, progressCallba
         for (const originalIndex of window.blockIndices) {
           const key = String(originalIndex);
           if (window.enhancedBlocks[key]) {
-            debugLogger.ai(`Replacing block ${originalIndex} from window ${window.windowIndex}`);
+            // Log document:block replacement for duplicate detection with timestamp
+            const timestamp = new Date().toISOString().slice(11, 23); // HH:MM:SS.mmm
+            debugLogger.ai(`[BLOCK-REPLACE] ${timestamp} ${docId}:${originalIndex} - Window ${window.windowIndex}`);
             finalBlocks[originalIndex] = window.enhancedBlocks[key];
           }
         }

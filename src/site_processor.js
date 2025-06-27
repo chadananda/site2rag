@@ -180,7 +180,7 @@ export class SiteProcessor {
         };
         
         // Initialize with empty array - will be updated as pages are processed
-        aiRequestTracker.initialize([], parallelProgressCallback);
+        await aiRequestTracker.initialize([], parallelProgressCallback);
         
         parallelProcessor = createParallelAIProcessor(dbInstance, this.options.aiConfig);
         parallelProcessor.start();
@@ -197,12 +197,11 @@ export class SiteProcessor {
 
       // Stop parallel processor if running
       if (parallelProcessor) {
-        parallelProcessor.stop();
+        await parallelProcessor.stop();
         const stats = parallelProcessor.getStats();
         logger.info(`[AI] Parallel processor completed: ${stats.processed} pages enhanced during crawl`);
         
-        // Reset the tracker for batch processing phase
-        aiRequestTracker.reset();
+        // Don't reset tracker - keep cumulative totals across all processing
       }
 
       if (this.found.length === 1 && this.options.maxDepth === 0) {
@@ -215,8 +214,8 @@ export class SiteProcessor {
     } catch (err) {
       // Stop parallel processor on error
       if (parallelProcessor) {
-        parallelProcessor.stop();
-        aiRequestTracker.reset();
+        await parallelProcessor.stop();
+        // Don't reset tracker on error - keep totals for debugging
       }
 
       if (!(err instanceof CrawlLimitReached)) {
@@ -281,11 +280,19 @@ export class SiteProcessor {
         const crawledUrls = Array.from(this.crawlService.foundUrls);
         const placeholders = crawledUrls.map(() => '?').join(',');
         const unprocessedDocs = placeholders ? 
-          dbInstance.db.prepare(`SELECT url FROM pages WHERE content_status IN ('raw', 'failed') AND url IN (${placeholders})`).all(...crawledUrls) :
+          dbInstance.db.prepare(`SELECT url FROM pages WHERE content_status IN ('raw', 'failed', 'processing') AND url IN (${placeholders})`).all(...crawledUrls) :
           [];
 
         if (unprocessedDocs.length > 0) {
           logger.info(`[CONTEXT] Found ${unprocessedDocs.length} unprocessed pages from this crawl`);
+          
+          // Start the progress bar immediately with an estimated total
+          // Estimate ~2 AI requests per document as a starting point
+          const estimatedTotal = unprocessedDocs.length * 2;
+          logger.info(`[AI] Starting AI processing for ${unprocessedDocs.length} documents...`);
+          
+          // Start progress bar right away with estimated total
+          this.crawlService.progressService.startProcessing(estimatedTotal, this.options.aiConfig);
           
           // Initialize the tracker to calculate expected requests
           // The tracker will provide accurate counts based on actual document content
@@ -293,48 +300,15 @@ export class SiteProcessor {
             // Use the tracker's total which will be dynamically updated
             this.crawlService.progressService.updateProcessing(current, total);
           };
-          
-          // Get all documents that need processing to initialize the tracker
-          const docsToProcess = [];
-          for (const doc of unprocessedDocs) {
-            try {
-              const pageData = dbInstance.db.prepare('SELECT file_path, title FROM pages WHERE url = ?').get(doc.url);
-              if (pageData && pageData.file_path && fs.existsSync(pageData.file_path)) {
-                const markdown = await fs.promises.readFile(pageData.file_path, 'utf8');
-                let content = markdown;
-                if (markdown.startsWith('---')) {
-                  const frontmatterEnd = markdown.indexOf('---', 3);
-                  if (frontmatterEnd > 0) {
-                    content = markdown.substring(frontmatterEnd + 3).trim();
-                  }
-                }
-                const blocks = content.split(/\n{2,}/).map((text, index) => ({text, originalIndex: index}));
-                docsToProcess.push({
-                  docId: doc.url,
-                  blocks: blocks,
-                  metadata: {title: pageData.title || '', url: doc.url}
-                });
-              }
-            } catch (err) {
-              logger.warn(`[CONTEXT] Failed to prepare doc ${doc.url}: ${err.message}`);
-            }
-          }
-          
-          // Initialize tracker with all documents to get accurate total
-          aiRequestTracker.initialize(docsToProcess, progressCallback);
-          const stats = aiRequestTracker.getStats();
-          
-          // Pass the AI config to display provider/model info
-          this.crawlService.progressService.startProcessing(stats.totalExpected, this.options.aiConfig);
 
           // Run the main context enrichment for all raw pages
-          await runContextEnrichment(dbInstance, this.options.aiConfig, progressCallback);
+          // This will handle all the document preparation internally
+          await runContextEnrichment(dbInstance, this.options.aiConfig, progressCallback, {test: this.options.test});
 
           // Complete processing progress
           this.crawlService.progressService.completeProcessing();
           
-          // Reset tracker after batch processing
-          aiRequestTracker.reset();
+          // Don't reset tracker - keep cumulative totals
         } else {
           logger.info(`[CONTEXT] All pages already processed by parallel processor`);
         }
@@ -362,10 +336,11 @@ export class SiteProcessor {
 
       if (dbInstance && this.options.aiConfig && this.options.aiConfig.provider) {
         // Find pages that need context enhancement retry
+        // Only retry pages that have actually failed, not ones currently processing
         const retryStmt = dbInstance.db.prepare(`
             SELECT url, file_path 
             FROM pages 
-            WHERE content_status IN ('rate_limited', 'timeout', 'failed', 'processing') 
+            WHERE content_status IN ('rate_limited', 'timeout', 'failed') 
             AND file_path IS NOT NULL
           `);
         const retryPages = retryStmt.all();

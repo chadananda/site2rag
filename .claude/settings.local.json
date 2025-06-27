@@ -128,7 +128,8 @@
       "Bash(env)",
       "Bash(test:*)",
       "Bash(ANTHROPIC_API_KEY=\"$ANTHROPIC_API_KEY\" npm run test:bahai 2 >& 1)",
-      "Bash(DEBUG=true npm run test:quicktest:haiku 2 >& 1)"
+      "Bash(DEBUG=true npm run test:quicktest:haiku 2 >& 1)",
+      "Bash(DEBUG=ai node ./bin/site2rag.js https://bahai-education.org/dunbar-interview-companion-study-kitab-i-iqan --limit 1 --output tests/tmp/sites/pdf-test --test)"
     ],
     "deny": []
   }

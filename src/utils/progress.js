@@ -296,7 +296,7 @@ export class ProgressService {
       aiInfo = `AI enhancement using ${chalk.cyan(provider)}/${chalk.cyan(model)}`;
     }
 
-    console.log(chalk.blue(`\nProcessing content with ${aiInfo}:\n`));
+    console.log(chalk.blue(`\nPreparing content for ${aiInfo}:\n`));
 
     // Create new progress bar for processing
     const terminalWidth = process.stdout.columns || 80;
@@ -334,6 +334,11 @@ export class ProgressService {
         this.multibar.setTotal(total);
       }
       this.multibar.update(current);
+      
+      // Force a render to ensure the progress bar is visible
+      if (this.multibar.render) {
+        this.multibar.render();
+      }
     }
   }
 

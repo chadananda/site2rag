@@ -432,6 +432,7 @@ export class CrawlDB {
     // Use a transaction to ensure atomicity
     const transaction = this.db.transaction(() => {
       // Find unclaimed raw pages
+      // Only claim pages that haven't been successfully processed
       const pages = this.db.prepare(`
         SELECT url, file_path, title 
         FROM pages 
@@ -455,6 +456,9 @@ export class CrawlDB {
         WHERE url IN (${placeholders})
       `).run(timestamp, `processor:${processorId}`, ...urls);
       
+      // Log claiming for debugging
+      logger.info(`[DB] Processor ${processorId} claimed ${pages.length} pages for processing`);
+      
       return pages;
     });
     
@@ -472,6 +476,9 @@ export class CrawlDB {
           context_error = NULL
       WHERE url = ?
     `).run(url);
+    
+    // Log completion for debugging
+    logger.info(`[DB] Page marked as contexted: ${url}`);
   }
 
   /**
@@ -486,13 +493,16 @@ export class CrawlDB {
           context_error = ?
       WHERE url = ?
     `).run(error, url);
+    
+    // Log failure for debugging
+    logger.warn(`[DB] Page marked as failed: ${url} - ${error}`);
   }
 
   /**
    * Reset stuck processing pages (for recovery)
    * @param {number} staleMinutes - Minutes after which processing is considered stuck
    */
-  resetStuckProcessing(staleMinutes = 10) {
+  resetStuckProcessing(staleMinutes = 30) {
     const staleTime = new Date(Date.now() - staleMinutes * 60 * 1000).toISOString();
     
     const result = this.db.prepare(`
