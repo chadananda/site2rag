@@ -428,8 +428,7 @@ export class CrawlService {
     this.progressService =
       options.progressService ||
       new ProgressService({
-        updateFrequency: options.progressUpdateFrequency || 500,
-        testMode: this.testMode
+        updateFrequency: options.progressUpdateFrequency || 500
       });
 
     this.assetStats = {
@@ -599,6 +598,7 @@ export class CrawlService {
         debugLogger.crawl(`Starting progress - maxPages: ${this.maxPages}, initial totalUrls: ${totalUrls}`);
       }
 
+      // Initial setup complete
       this.progressService.start({
         totalUrls: totalUrls,
         isReCrawl: this.isReCrawl,
@@ -704,6 +704,7 @@ export class CrawlService {
         // Use eligible URLs for accurate total
         const finalTotal = this.eligibleUrls.size;
 
+        // Final stats captured
         this.progressService.updateStats({
           totalUrls: finalTotal,
           crawledUrls: this.visitedUrls.size,
@@ -787,14 +788,23 @@ export class CrawlService {
     if (!this._sitemapFirstMode) {
       // Only add to eligible if not already there (crawl() will also add it)
       if (!this.eligibleUrls.has(normalizedUrl)) {
+        // Check if we already have enough eligible URLs to reach the limit
+        if (this.maxPages > 0 && this.eligibleUrls.size >= this.maxPages) {
+          logger.crawl(`Not adding ${normalizedUrl} to eligible - already have enough URLs (${this.eligibleUrls.size}/${this.maxPages})`);
+          return;
+        }
         this.eligibleUrls.add(normalizedUrl);
+        // URL added to eligible set
       }
 
       // Update progress bar with eligible URLs only
       if (this.progressService) {
         const totalEligible = this.eligibleUrls.size;
+        // Cap the total at maxPages if set
+        const progressTotal = this.maxPages > 0 ? Math.min(totalEligible, this.maxPages) : totalEligible;
+        // Update progress with capped total
         this.progressService.updateStats({
-          totalUrls: totalEligible,
+          totalUrls: progressTotal,
           queuedUrls: this.queuedUrls.size
         });
       }
@@ -838,19 +848,29 @@ export class CrawlService {
     const validUrls = allSitemapUrls.filter(sitemapUrl => this.urlFilter.shouldCrawlUrl(sitemapUrl.url));
     logger.info(`After path/pattern filtering: ${validUrls.length} valid URLs to crawl`);
 
-    // Add all valid URLs to eligible set
+    // Add valid URLs to eligible set, but respect maxPages limit
+    let addedCount = 0;
     for (const sitemapUrl of validUrls) {
+      // Stop adding URLs if we've reached the limit
+      if (this.maxPages > 0 && this.eligibleUrls.size >= this.maxPages) {
+        logger.info(`Stopping sitemap URL addition at limit: ${this.maxPages}`);
+        break;
+      }
       this.eligibleUrls.add(sitemapUrl.url);
+      addedCount++;
     }
 
     // Update progress bar with final eligible count
     if (this.progressService) {
       const totalEligible = this.eligibleUrls.size;
+      // Cap at maxPages if set
+      const progressTotal = this.maxPages > 0 ? Math.min(totalEligible, this.maxPages) : totalEligible;
+      // Progress total set from sitemap
       this.progressService.updateStats({
-        totalUrls: totalEligible,
+        totalUrls: progressTotal,
         queuedUrls: 0
       });
-      logger.info(`Set progress total to ${totalEligible} eligible URLs from sitemap`);
+      logger.info(`Set progress total to ${progressTotal} eligible URLs from sitemap (added ${addedCount} of ${validUrls.length} available)`);
     }
 
     // Process each valid URL directly
@@ -1927,6 +1947,7 @@ ${markdownContent}`;
       // Successfully processed the page - add to found URLs list
       this.foundUrls.add(normalizedUrl);
       logger.crawl(`Added URL to found list: ${normalizedUrl} (${this.foundUrls.size}/${this.maxPages})`);
+      // URL added to foundUrls
       this.totalUrlsMapped++;
       if (this.totalUrlsMapped % 100 === 0) {
         logger.crawl(`Total URLs mapped so far: ${this.totalUrlsMapped}`);
@@ -1936,6 +1957,7 @@ ${markdownContent}`;
       if (this.progressService) {
         // Always use eligible URLs for the total
         const totalEligible = this.eligibleUrls.size;
+        // Update progress after processing
         this.progressService.updateStats({
           totalUrls: totalEligible,
           crawledUrls: this.foundUrls.size
@@ -2019,8 +2041,15 @@ ${markdownContent}`;
                   if (!this._sitemapFirstMode) {
                     // Only count if not already in eligible URLs
                     if (!this.eligibleUrls.has(normalizedLink)) {
-                      this.eligibleUrls.add(normalizedLink);
-                      newUrlCount++;
+                      // Check if we already have enough eligible URLs to reach the limit
+                      // This prevents adding excess URLs that will never be crawled
+                      if (this.maxPages > 0 && this.eligibleUrls.size >= this.maxPages) {
+                        // Skip - already have enough URLs
+                      } else {
+                        this.eligibleUrls.add(normalizedLink);
+                        newUrlCount++;
+                        // URL added to eligible set
+                      }
                     }
                   } else {
                     // In sitemap mode, just count for logging but don't add to eligible
@@ -2041,8 +2070,9 @@ ${markdownContent}`;
               // Only update progress total if we're not in sitemap-first mode
               const totalEligible = this.eligibleUrls.size;
               // If maxPages is set, use the minimum of eligible URLs and maxPages
-              const progressTotal = this.maxPages ? Math.min(totalEligible, this.maxPages) : totalEligible;
+              const progressTotal = this.maxPages > 0 ? Math.min(totalEligible, this.maxPages) : totalEligible;
 
+              // Update progress with capped total
               this.progressService.updateStats({
                 totalUrls: progressTotal,
                 queuedUrls: this.queuedUrls.size
@@ -2405,6 +2435,11 @@ ${markdownContent}`;
             if (this.urlFilter.shouldCrawlUrl(url)) {
               // Also check domain filtering if enabled
               if (!this.options.sameDomain || this.isInternalUrl(url)) {
+                // Check if we've reached the limit before adding
+                if (this.maxPages > 0 && this.eligibleUrls.size >= this.maxPages) {
+                  logger.info(`Stopping sitemap processing at limit: ${this.maxPages}`);
+                  break;
+                }
                 this.queuedUrls.add(url);
                 this.eligibleUrls.add(url);
                 eligibleCount++;

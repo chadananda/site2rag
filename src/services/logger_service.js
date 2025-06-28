@@ -7,6 +7,7 @@ class LoggerService {
   constructor(options = {}) {
     this.debug = options.debug || false;
     this.verbose = options.verbose || false;
+    this.testMode = options.testMode || false; // Add test mode flag
     this.logPrefix = options.prefix || '[SITE2RAG]';
     // Define log types with their properties
     this.logTypes = {
@@ -118,6 +119,7 @@ class LoggerService {
   configure(options = {}) {
     if (options.debug !== undefined) this.debug = options.debug;
     if (options.verbose !== undefined) this.verbose = options.verbose;
+    if (options.testMode !== undefined) this.testMode = options.testMode;
     if (options.prefix) this.logPrefix = options.prefix;
 
     // Update log type settings based on new debug/verbose settings
@@ -164,6 +166,11 @@ class LoggerService {
       }
     }
 
+    // In test mode, suppress all console output except errors
+    // Progress bars are handled separately and should still display
+    if (this.testMode && type !== 'ERROR') {
+      return;
+    }
     const reset = '\x1b[0m';
     console.log(`${logType.color}${this.logPrefix} ${logType.prefix}${reset} ${message}`);
   }

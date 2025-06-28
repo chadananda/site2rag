@@ -51,8 +51,8 @@ export class FileLoggerService {
       // Redirect console output
       this.redirectConsole();
       this.isActive = true;
-      // Log initialization
-      this.originalConsole.log(`[FILE_LOGGER] Log file created: ${this.logFile}`);
+      // Log initialization - suppress in test mode
+      // File creation is silent in test mode to avoid console clutter
       return this.logFile;
     } catch (error) {
       this.originalConsole.error(`[FILE_LOGGER] Failed to initialize file logging: ${error.message}`);
@@ -73,17 +73,9 @@ export class FileLoggerService {
         const message = format(...args);
         // Write to file
         this.logStream.write(`[${timestamp}] ${prefix} ${message}\n`);
-        // In test mode, suppress most console output except critical messages
-        if (this.testMode) {
-          // Only show errors and critical warnings on console
-          if (method === 'error') {
-            this.originalConsole.error(...args);
-          }
-          // All other output goes only to file
-        } else {
-          // In non-test mode, write to both file and console
-          this.originalConsole[method](...args);
-        }
+        // In test mode, still show console output for UI elements
+        // The --test flag should only affect debug logging to file, not UI
+        this.originalConsole[method](...args);
       };
     };
     // Redirect all console methods
@@ -101,9 +93,8 @@ export class FileLoggerService {
         // Write to log file
         const timestamp = new Date().toISOString();
         this.logStream.write(`[${timestamp}] [STDERR] ${chunk}`);
-        // Don't write to actual stderr in test mode
-        if (callback) callback();
-        return true;
+        // Still write to actual stderr so progress bars appear
+        return this.originalStderrWrite.call(process.stderr, chunk, encoding, callback);
       };
     }
   }
@@ -164,10 +155,8 @@ export class FileLoggerService {
     // Restore console
     this.restoreConsole();
     this.isActive = false;
-    // Final message to console
-    if (this.logFile) {
-      this.originalConsole.log(`\n[FILE_LOGGER] Log file saved: ${this.logFile}`);
-    }
+    // Final message suppressed in test mode to avoid console clutter
+    // Log file path is already known from initialization
   }
   /**
    * Get the current log file path

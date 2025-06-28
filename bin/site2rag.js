@@ -213,6 +213,7 @@ async function displayHeader(aiConfig = null) {
 
   // Create content with more compact spacing
   const content = [
+    '',  // Empty line at top
     coloredAscii,
     chalk.red('🔥 ') + chalk.cyan.bold('Website to RAG Knowledge Base Converter ') + chalk.red('🔥'),
     chalk.white('Converting web content to AI-ready markdown with intelligent crawling'),
@@ -608,6 +609,11 @@ Examples:
       crawlDb.finalizeSession();
       // Close file logger if active
       fileLogger.close();
+      
+      // Finalize progress bars before exit
+      if (processor && processor.crawlService && processor.crawlService.progressService) {
+        processor.crawlService.progressService.finalize();
+      }
     }
     process.exit(0);
   });

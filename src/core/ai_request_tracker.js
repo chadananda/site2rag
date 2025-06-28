@@ -58,7 +58,8 @@ export class AIRequestTracker {
         const eligibleBlocks = this.countEligibleBlocks(doc.blocks);
         // Estimate windows based on ~5 blocks per window (600 word windows)
         // Only create windows if there are eligible blocks
-        const estimatedWindows = eligibleBlocks > 0 ? Math.max(1, Math.ceil(eligibleBlocks / 5)) : 0;
+        // Use a more conservative estimate - assume 3 blocks per window average
+        const estimatedWindows = eligibleBlocks > 0 ? Math.max(1, Math.ceil(eligibleBlocks / 3)) : 0;
         this.documentEstimates.set(doc.docId || doc.url, estimatedWindows);
         this.totalExpected += estimatedWindows;
       }
@@ -215,7 +216,7 @@ export class AIRequestTracker {
     
     // Pricing per 1K tokens (add more models as needed)
     const pricing = {
-      'gpt-4o': { prompt: 0.005, completion: 0.015 },
+      'gpt-4o': { prompt: 0.0025, completion: 0.01 }, // Updated pricing as of late 2024
       'gpt-4o-mini': { prompt: 0.00015, completion: 0.0006 },
       'claude-3-haiku-20240307': { prompt: 0.00025, completion: 0.00125 },
       'claude-3-5-sonnet-20241022': { prompt: 0.003, completion: 0.015 },

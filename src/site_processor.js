@@ -58,8 +58,8 @@ export class SiteProcessor {
       filtering: options.filtering || {}
     };
 
-    // Configure logger based on debug option
-    logger.configure({debug: this.options.debug});
+    // Configure logger based on debug and test options
+    logger.configure({debug: this.options.debug, testMode: this.options.test});
 
     // Log important configuration details
     logger.info(`Max depth: ${this.options.maxDepth}`, true);
@@ -204,6 +204,11 @@ export class SiteProcessor {
       this.found = await this.crawlService.crawlSite(this.options.startUrl);
       logger.info(`Crawl complete. Processed ${this.crawlService.foundUrls.length} URLs.`, true);
 
+      // Complete the crawling progress bar
+      if (this.crawlService.progressService) {
+        this.crawlService.progressService.completeCrawling();
+      }
+
       // Stop parallel processor if running
       if (parallelProcessor) {
         await parallelProcessor.stop();
@@ -232,6 +237,10 @@ export class SiteProcessor {
         throw err;
       } else {
         logger.info('Crawl limit reached, stopping crawl');
+        // Complete the crawling progress bar when limit is reached
+        if (this.crawlService.progressService) {
+          this.crawlService.progressService.completeCrawling();
+        }
       }
     }
     return this.found;
@@ -301,17 +310,19 @@ export class SiteProcessor {
         if (unprocessedDocs.length > 0) {
           logger.info(`[CONTEXT] Found ${unprocessedDocs.length} unprocessed pages from this crawl`);
 
-          // Start the progress bar immediately with an estimated total
-          // Estimate ~2 AI requests per document as a starting point
-          const estimatedTotal = unprocessedDocs.length * 2;
           logger.info(`[AI] Starting AI processing for ${unprocessedDocs.length} documents...`);
 
-          // Start progress bar right away with estimated total
-          this.crawlService.progressService.startProcessing(estimatedTotal, this.options.aiConfig);
+          // Don't start the AI bar with a fixed estimate - let the tracker calculate the actual total
+          // The AI bar will be created/updated when we get the first progress callback with accurate counts
 
           // Initialize the tracker to calculate expected requests
           // The tracker will provide accurate counts based on actual document content
           const progressCallback = (current, total) => {
+            // Start the AI bar if it doesn't exist yet (with accurate total from tracker)
+            if (!this.crawlService.progressService.aiBar && total > 0) {
+              this.crawlService.progressService.startProcessing(total, this.options.aiConfig);
+            }
+            
             // Include token data in progress updates
             const tokenData = {
               totalTokens: aiRequestTracker.totalTokensUsed,
@@ -325,12 +336,27 @@ export class SiteProcessor {
           // This will handle all the document preparation internally
           await runContextEnrichment(dbInstance, this.options.aiConfig, progressCallback, {test: this.options.test});
 
-          // Complete processing progress
-          this.crawlService.progressService.completeProcessing();
+          // Get final token stats before completing
+          const finalTokenData = {
+            totalTokens: aiRequestTracker.totalTokensUsed,
+            totalCost: aiRequestTracker.totalCost
+          };
+          
+          // Complete processing progress with final token data
+          this.crawlService.progressService.completeProcessing(finalTokenData);
 
           // Don't reset tracker - keep cumulative totals
         } else {
           logger.info(`[CONTEXT] All pages already processed by parallel processor`);
+          
+          // Get final token stats from tracker
+          const finalTokenData = {
+            totalTokens: aiRequestTracker.totalTokensUsed,
+            totalCost: aiRequestTracker.totalCost
+          };
+          
+          // Still need to complete the processing progress bar with final token data
+          this.crawlService.progressService.completeProcessing(finalTokenData);
         }
 
         // Log insertion tracking summary if test mode was enabled
