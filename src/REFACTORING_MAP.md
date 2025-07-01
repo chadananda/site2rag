@@ -58,6 +58,13 @@ utils/performanceOptimizer.js                       [NEW - Performance utilities
 ├── debounce(func, wait) → function                 [Debounce utility]
 ├── throttle(func, limit) → function                [Throttle utility]
 └── MemoryMonitor class                             [Memory usage tracking]
+
+utils/resourceCleanup.js                            [NEW - Resource management]
+├── ResourceCleanupManager class                    [Automatic resource cleanup]
+├── globalCleanupManager instance                   [Global cleanup singleton]
+├── cleanupTestTempFiles(dir) → Promise<void>       [Clean old temp files]
+├── createManagedDatabase(factory, id) → db         [DB with auto-cleanup]
+└── MemoryMonitor class                             [Memory threshold monitoring]
 ```
 
 ### ⚠️ **MEDIUM SAFETY** (Stateful but Moveable with Care)

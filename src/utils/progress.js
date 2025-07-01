@@ -6,6 +6,7 @@ import {readFileSync} from 'fs';
 import {join, dirname} from 'path';
 import {fileURLToPath} from 'url';
 import debugLogger from '../services/debug_logger.js';
+import logger from '../services/logger_service.js';
 import {aiRequestTracker} from '../core/ai_request_tracker.js';
 
 /**
@@ -127,14 +128,16 @@ export class ProgressService {
         debugLogger.progress(`Setting totalUrls to ${initialStats.totalUrls}, maxPages: ${this.maxPages}`);
       }
     }
+    
+    // Store enhancement status
+    this.enhancementEnabled = initialStats.enhancement !== false;
 
     // Display the site URL being processed
     const siteUrl = initialStats.siteUrl || 'Unknown site';
-    if (this.isReCrawl) {
-      console.log(chalk.blue(`\nUpdating site download: ${chalk.bold(siteUrl)}\n`));
-    } else {
-      console.log(chalk.green(`\nDownloading site: ${chalk.bold(siteUrl)}\n`));
-    }
+    // Store site info for display in progress bar instead of console.log
+    this.siteInfo = this.isReCrawl 
+      ? chalk.blue(`Updating: ${chalk.bold(siteUrl)}`)
+      : chalk.green(`Downloading: ${chalk.bold(siteUrl)}`);
     
     // Check if we're in a TTY environment
     // We'll try to use progress bars even in non-TTY if we can write to stderr
@@ -150,12 +153,9 @@ export class ProgressService {
       
       // Set up simple progress logging interval
       this.progressLogInterval = setInterval(() => {
-        const crawlProgress = this.maxPages 
-          ? `Crawl: ${this.stats.crawledUrls}/${this.maxPages} pages`
-          : `Crawl: ${this.stats.crawledUrls} pages`;
-        const aiProgress = `AI: ${this.stats.aiEnhanced} enhanced`;
-        console.log(chalk.dim(`Progress: ${crawlProgress}, ${aiProgress}`));
-      }, 5000); // Log every 5 seconds
+        // In non-TTY mode, progress updates are handled differently
+        // Stats are tracked but not displayed to avoid console spam
+      }, 5000); // Keep interval for potential future use
       
       return;
     }
@@ -191,7 +191,12 @@ export class ProgressService {
     const total = this.stats.totalUrls || 1;
     
     // Simple, clean approach - just two progress bars with clear labels
-    console.log(''); // Space after "Downloading site:"
+    // Progress bars handle their own spacing
+    
+    // Display the initial site info message
+    if (this.multibar) {
+      this.multibar.log(this.siteInfo + '\n');
+    }
     
     // Create crawl progress bar
     this.crawlBar = this.multibar.create(total, 0, {}, {
@@ -204,25 +209,30 @@ export class ProgressService {
       barsize: barSize
     });
     
-    // Create AI progress bar with dynamic token info
-    // Store initial token info in instance for the formatter to access
-    this.aiTokenInfo = chalk.cyan('0 tokens | $0.00');
-    
-    // Use pending AI config if it was set early (from parallel processing)
-    const aiTotal = this.pendingAIConfig ? this.pendingAIConfig.totalRequests : 100;
-    
-    this.aiBar = this.multibar.create(aiTotal, 0, {
-      tokenInfo: this.aiTokenInfo
-    }, {
-      format: (options, params, _payload) => {
-        const bar = options.barCompleteChar.repeat(Math.round(params.progress * options.barsize)) + 
-                   options.barIncompleteChar.repeat(options.barsize - Math.round(params.progress * options.barsize));
-        const percentage = Math.floor(params.progress * 100);
-        const tokenInfo = _payload.tokenInfo || this.aiTokenInfo;
-        return `${chalk.magenta.bold('AI:      ')} ${chalk.magenta.bold(bar)} ${chalk.green.bold(percentage + '%')} | ${tokenInfo}`;
-      },
-      barsize: barSize
-    });
+    // Only create AI progress bar if enhancement is enabled
+    if (this.enhancementEnabled) {
+      // Store initial token info in instance for the formatter to access
+      this.aiTokenInfo = chalk.cyan('0 tokens | $0.00');
+      
+      // Use pending AI config if it was set early (from parallel processing)
+      const aiTotal = this.pendingAIConfig ? this.pendingAIConfig.totalRequests : 100;
+      
+      this.aiBar = this.multibar.create(aiTotal, 0, {
+        tokenInfo: this.aiTokenInfo
+      }, {
+        format: (options, params, _payload) => {
+          const bar = options.barCompleteChar.repeat(Math.round(params.progress * options.barsize)) + 
+                     options.barIncompleteChar.repeat(options.barsize - Math.round(params.progress * options.barsize));
+          const percentage = Math.floor(params.progress * 100);
+          const tokenInfo = _payload.tokenInfo || this.aiTokenInfo;
+          return `${chalk.magenta.bold('AI:      ')} ${chalk.magenta.bold(bar)} ${chalk.green.bold(percentage + '%')} | ${tokenInfo}`;
+        },
+        barsize: barSize
+      });
+    } else {
+      this.aiBar = null;
+      this.aiTokenInfo = null;
+    }
 
     if (process.env.DEBUG) {
       debugLogger.progress(`Starting dual progress bars - initial totalUrls: ${total}`);
@@ -264,7 +274,7 @@ export class ProgressService {
    */
   displayHeader() {
     // Clear the console first
-    console.clear();
+    // Don't clear console - let progress bars manage display
 
     // Create separate figlet texts for 'Site' and 'RAG'
     const siteFiglet = figlet.textSync('Site', this.figletOptions);
@@ -286,41 +296,9 @@ export class ProgressService {
       combinedLines.push(siteLines[i] + chalk.yellow(twoLines[i]) + ragLines[i]);
     }
 
-    // Create a fiery gradient effect
-    const lines = combinedLines;
-    const coloredLines = lines.map((line, i) => {
-      // Create a gradient from red to yellow based on line position
-      if (i < lines.length / 3) {
-        return chalk.red(line); // Top third: red
-      } else if (i < (lines.length * 2) / 3) {
-        return chalk.hex('#FF8C00')(line); // Middle third: dark orange
-      } else {
-        return chalk.yellow(line); // Bottom third: yellow
-      }
-    });
-
-    // Create the header box with centered content but left-aligned box
-    const header = boxen(
-      coloredLines.join('\n') +
-        '\n\n' +
-        chalk.cyan('🔥 Website to RAG Knowledge Base Converter 🔥') +
-        '\n' +
-        chalk.white('Converting web content to AI-ready markdown with intelligent crawling') +
-        '\n' +
-        chalk.hex('#FF8C00')(`Version ${this.version} | https://github.com/chadananda/site${chalk.yellow('2')}rag`),
-      {
-        padding: 1,
-        margin: 0, // Remove margin to align with progress bars
-        borderStyle: 'double',
-        borderColor: 'red',
-        backgroundColor: '#111',
-        textAlignment: 'center', // Center text inside the box
-        float: 'left' // Keep box left-aligned
-      }
-    );
-
-    // Display the header
-    console.log(header);
+    // Header creation removed to maintain clean progress bar output
+    // Site info is displayed through the progress bar instead
+    // ASCII art generation kept for potential future use but not displayed
   }
 
   /**
@@ -394,18 +372,19 @@ export class ProgressService {
     process.stdout.write('\x1b[1A'); // Move up one line
     process.stdout.write('\x1b[2K\r'); // Clear that line too
 
-    // Display AI provider and model information
-    let aiInfo = 'AI enhancement';
+    // Store AI provider and model information for display
     if (aiConfig) {
       const provider = aiConfig.provider || aiConfig.fallbackName || 'unknown';
       const model = aiConfig.model || 'default';
-      aiInfo = `AI enhancement using ${chalk.cyan(provider)}/${chalk.cyan(model)}`;
+      this.aiProviderInfo = `${chalk.cyan(provider)}/${chalk.cyan(model)}`;
+    } else {
+      this.aiProviderInfo = 'unknown';
     }
 
     // Only show this message if we're not about to create dual bars
     // This prevents the message from appearing when parallel processing is enabled
     if (!this.pendingAIConfig) {
-      console.log(chalk.blue(`\nPreparing content for ${aiInfo}:\n`));
+      // AI preparation status shown in progress bar
     }
 
     // Create new progress bar for processing
@@ -536,7 +515,7 @@ export class ProgressService {
 
     // Only show completion message if AI processing actually happened
     if (this.stats.aiEnhanced > 0 || this.stats.aiFailed > 0) {
-      console.log(`\n${chalk.green('✓')} ${chalk.green('AI processing completed successfully!')}\n`);
+      // Success message will be shown after progress bars complete
     }
   }
 
@@ -563,7 +542,7 @@ export class ProgressService {
       if (process.stdout.isTTY) {
         process.stdout.write('\x1B[?25h');
       }
-      console.log('\n'); // Add some spacing after the bars
+      // Progress bars handle their own spacing
       return;
     }
     
@@ -579,7 +558,7 @@ export class ProgressService {
       }
       
       // Print a final newline for clean exit
-      console.log('');
+      // Progress bars handle their own spacing
     }
   }
 
@@ -607,9 +586,9 @@ export class ProgressService {
     // In non-TTY mode, show final summary
     if (this.nonTTYMode) {
       if (this.isReCrawl) {
-        console.log(`\n✓ Re-crawl completed successfully! ${this.stats.newPages} new, ${this.stats.updatedPages} updated, ${this.stats.unchangedPages} unchanged, ${this.stats.crawledUrls} total pages\n`);
+        this.multibar.log(`\n${chalk.green('✓')} Re-crawl completed successfully! ${this.stats.newPages} new, ${this.stats.updatedPages} updated, ${this.stats.unchangedPages} unchanged, ${this.stats.crawledUrls} total pages\n`);
       } else {
-        console.log(`\n✓ Download completed successfully! Downloaded ${this.stats.crawledUrls} pages\n`);
+        this.multibar.log(`\n${chalk.green('✓')} Download completed successfully! Downloaded ${this.stats.crawledUrls} pages\n`);
       }
       return;
     }
@@ -696,8 +675,10 @@ export class ProgressService {
       process.stdout.cursorTo(0);
     }
 
-    // Print the completion message with blank lines above and below for readability
-    console.log('\n' + message + '\n');
+    // Use multibar log method to display message without interfering with progress bars
+    if (this.multibar) {
+      this.multibar.log(message);
+    }
   }
 
   /**
@@ -1048,8 +1029,8 @@ export class ProgressService {
       backgroundColor: '#111'
     });
 
-    // Print the summary with blank lines above and below for readability
-    console.log('\n' + summary + '\n');
+    // Display summary using logger to avoid console interference
+    logger.info(summary);
   }
 }
 

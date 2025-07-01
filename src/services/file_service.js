@@ -137,13 +137,39 @@ This file contains HTML blocks that were removed during content processing.
    * @returns {string} - Full file path
    */
   getOutputPath(domain, filename, createDir = true) {
-    // Path traversal protection
-    if (filename && (filename.includes('../') || filename.includes('..\\') || path.isAbsolute(filename))) {
-      throw new Error('Invalid filename: potential path traversal detected');
-    }
-    if (domain && (domain.includes('../') || domain.includes('..\\') || path.isAbsolute(domain))) {
-      throw new Error('Invalid domain: potential path traversal detected');
-    }
+    // Enhanced path traversal protection
+    const validatePathComponent = (component, name) => {
+      if (!component) return;
+      
+      // Check for null bytes
+      if (component.includes('\0')) {
+        throw new Error(`Invalid ${name}: contains null byte`);
+      }
+      
+      // Check for path traversal patterns
+      const traversalPatterns = ['../', '..\\', '.%2e', '%2e.', '%252e'];
+      const normalizedComponent = component.toLowerCase();
+      
+      for (const pattern of traversalPatterns) {
+        if (normalizedComponent.includes(pattern)) {
+          throw new Error(`Invalid ${name}: potential path traversal detected`);
+        }
+      }
+      
+      // Check for absolute paths
+      if (path.isAbsolute(component)) {
+        throw new Error(`Invalid ${name}: absolute paths not allowed`);
+      }
+      
+      // Check for dangerous characters (including control characters)
+      // eslint-disable-next-line no-control-regex
+      if (/[<>:"|?*\x00-\x1f]/g.test(component)) {
+        throw new Error(`Invalid ${name}: contains dangerous characters`);
+      }
+    };
+    
+    validatePathComponent(filename, 'filename');
+    validatePathComponent(domain, 'domain');
     // Ensure the output directory exists
     if (createDir && !fs.existsSync(this.outputDir)) {
       logger.info(`Creating output directory: ${this.outputDir}`);
@@ -152,7 +178,17 @@ This file contains HTML blocks that were removed during content processing.
 
     if (this.flat) {
       // Flat mode: all files in top-level directory with path-derived names
-      return path.join(this.outputDir, this.generateFlatFilename(filename));
+      const flatFilename = this.generateFlatFilename(filename);
+      const finalPath = path.join(this.outputDir, flatFilename);
+      
+      // Verify the resolved path is within output directory
+      const resolvedPath = path.resolve(finalPath);
+      const resolvedOutputDir = path.resolve(this.outputDir);
+      if (!resolvedPath.startsWith(resolvedOutputDir + path.sep) && resolvedPath !== resolvedOutputDir) {
+        throw new Error('Path traversal detected: resolved path escapes output directory');
+      }
+      
+      return finalPath;
     }
 
     // Hierarchical mode: preserve directory structure
@@ -175,6 +211,13 @@ This file contains HTML blocks that were removed during content processing.
     } else {
       // No path separators, just use the filename directly
       outputPath = path.join(this.outputDir, filename);
+    }
+
+    // Final validation: ensure resolved path is within output directory
+    const resolvedPath = path.resolve(outputPath);
+    const resolvedOutputDir = path.resolve(this.outputDir);
+    if (!resolvedPath.startsWith(resolvedOutputDir + path.sep) && resolvedPath !== resolvedOutputDir) {
+      throw new Error('Path traversal detected: resolved path escapes output directory');
     }
 
     return outputPath;

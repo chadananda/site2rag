@@ -12,6 +12,14 @@ That's it! Your entire documentation site is now a clean, searchable, AI-ready k
 
 ---
 
+## ✨ What's New (v0.5.3)
+
+- **🤖 AI Enhancement ON by Default**: Context disambiguation automatically improves RAG retrieval accuracy
+- **📊 Dual Progress Bars**: Real-time tracking of both crawling and AI processing progress
+- **💰 Token Usage Tracking**: Live display of AI token consumption and costs
+- **🔄 Smart Update Detection**: Lightning-fast incremental updates using ETags and content hashing
+- **🎯 Accurate Progress**: Progress bars now show exact counts based on --limit parameter
+
 ## ✨ Why site2rag?
 
 ---
@@ -285,7 +293,7 @@ All disambiguation context is derived **only** from information found elsewhere 
 ### Basic Usage
 
 ```bash
-# Convert any documentation site with RAG disambiguation
+# Convert any documentation site with AI-enhanced RAG disambiguation (enabled by default)
 npx site2rag docs.react.dev
 npx site2rag kubernetes.io/docs
 npx site2rag python.org/dev/peps
@@ -295,6 +303,9 @@ npx site2rag docs.example.com --flat
 
 # With smart LLM fallback (automatically selects best available AI)
 npx site2rag docs.example.com --auto-fallback
+
+# Disable AI enhancement for basic extraction only
+npx site2rag docs.example.com --no-enhancement
 
 # That's it! Your knowledge base is ready 🎉
 ```
@@ -312,8 +323,11 @@ npx site2rag docs.example.com --update
 # Debug mode with test logging
 npx site2rag docs.example.com --debug --test
 
-# Use specific AI provider
+# Use specific AI provider for enhancement
 npx site2rag docs.example.com --use_gpt4o --flat
+
+# Disable AI enhancement completely
+npx site2rag docs.example.com --no-enhancement
 
 # Real-world example from our test suite
 npx site2rag bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-education --flat --test --use_gpt4o
@@ -321,9 +335,9 @@ npx site2rag bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-edu
 
 ---
 
-## 🤖 AI Integration (Optional)
+## 🤖 AI Integration
 
-`site2rag` includes optional AI features for enhanced content processing with support for multiple providers:
+`site2rag` includes AI-powered context enhancement (enabled by default) with support for multiple providers:
 
 ### Smart LLM Fallback (Recommended)
 
@@ -332,6 +346,10 @@ npx site2rag bahai-education.org --limit 20 --output ./tests/tmp/sites/bahai-edu
 npx site2rag docs.example.com --auto-fallback
 # 🔄 Auto-fallback enabled, trying: gpt4o → gpt4o-mini → opus4 → gpt4-turbo → ollama
 # ✅ gpt4o: openai/gpt-4o available
+
+# Progress bars show real-time status:
+# Crawling: ███████████████████████████████████ 100% | 47 pages
+# AI:       █████████████████░░░░░░░░░░░░░░░░░░ 48% | 15,234 tokens | $0.08
 ```
 
 ### Specific AI Provider Selection
@@ -374,10 +392,14 @@ npx site2rag docs.example.com --auto-fallback --fallback-order "gpt4o,opus4,olla
 ### No AI? No Problem!
 
 ```bash
-# Works perfectly without any AI
+# Disable AI enhancement for basic extraction only
 npx site2rag docs.example.com --no-enhancement
+# → Uses excellent heuristic-based content extraction without AI enhancement
+
+# If no AI is available, the tool automatically falls back to basic extraction
+npx site2rag docs.example.com
 # ⚠ AI Processing: AI not available
-# → Falls back to excellent heuristic-based content extraction
+# → Falls back to heuristic-based content extraction
 ```
 
 **Privacy First**: Local AI processing with Ollama means your data never leaves your machine! 🔒
@@ -388,11 +410,11 @@ npx site2rag docs.example.com --no-enhancement
 
 ### Large Documentation Sites
 
-| Site                | Pages      | First Run  | Update Time | Storage |
-| ------------------- | ---------- | ---------- | ----------- | ------- |
-| Kubernetes Docs     | 47K pages  | 12 minutes | 30 seconds  | 450MB   |
-| AWS Documentation   | 89K pages  | 23 minutes | 45 seconds  | 890MB   |
-| React Documentation | 1.2K pages | 45 seconds | 3 seconds   | 12MB    |
+| Site                | Pages      | First Run  | Update Time | Storage | AI Tokens |
+| ------------------- | ---------- | ---------- | ----------- | ------- | --------- |
+| Kubernetes Docs     | 47K pages  | 12 minutes | 30 seconds  | 450MB   | ~2.5M     |
+| AWS Documentation   | 89K pages  | 23 minutes | 45 seconds  | 890MB   | ~4.8M     |
+| React Documentation | 1.2K pages | 45 seconds | 3 seconds   | 12MB    | ~65K      |
 
 ### Update Efficiency
 
@@ -446,35 +468,37 @@ npx site2rag docs.example.com --clean
 ### Production RAG Pipeline
 
 ```bash
-# Use auto-fallback for maximum reliability
-npx site2rag docs.kubernetes.io --auto-fallback --flat --limit 1000
-# 🔄 Tries: gpt4o → gpt4o-mini → opus4 → gpt4-turbo → ollama
+# Use OpenAI GPT-4o for high-quality processing
+npx site2rag docs.kubernetes.io --use_gpt4o --flat --limit 1000
 # 📁 Flat structure perfect for vector databases
+# 💰 Token usage tracked in real-time
 ```
 
 ### Development & Testing
 
 ```bash
-# Test mode with specific model and debugging
-npx site2rag docs.example.com --use_gpt4o_mini --test --debug --limit 10
+# Test mode with local Ollama for cost-effective development
+npx site2rag docs.example.com --use_ollama --test --debug --limit 10
 # 🧪 Detailed logging for development
-# 💰 Cost-effective testing with mini model
+# 🔒 Local processing keeps data private
 ```
 
 ### High-Quality Content Processing
 
 ```bash
-# Use premium models for best results
-npx site2rag important-docs.com --use_opus4 --verbose
-# 🎯 Claude 3.5 Sonnet for highest quality context enhancement
+# Use Claude 3.5 Haiku for fast, quality results
+npx site2rag important-docs.com --use_haiku --verbose
+# 🎯 Anthropic Claude for excellent context enhancement
+# ⚡ Haiku model optimized for speed
 ```
 
-### Custom Provider Fallback
+### Privacy-First Local Processing
 
 ```bash
-# Prefer local processing, fallback to cloud
-npx site2rag docs.example.com --auto-fallback --fallback-order "ollama,gpt4o_mini,opus4"
-# 🔒 Privacy-first with intelligent fallback
+# Use local Ollama to keep all data on your machine
+npx site2rag sensitive-docs.com --use_ollama
+# 🔒 No data leaves your computer
+# 🏛️ Runs on your local GPU/CPU
 ```
 
 ### Update Existing Knowledge Base
@@ -504,7 +528,7 @@ npx site2rag docs.example.com --update --auto-fallback
 | `--dry-run` | Show what would be crawled without downloading | `--dry-run` |
 | `-d, --debug` | Enable debug mode to save removed content blocks | `--debug` |
 | `--test` | Enable test mode with detailed skip/download decision logging | `--test` |
-| `--no-enhancement` | Extract entities only, do not enhance text content | `--no-enhancement` |
+| `--no-enhancement` | Disable AI text enhancement (extraction only) | `--no-enhancement` |
 
 ### 🎯 New Filtering Options (v0.4.0+)
 
@@ -557,17 +581,9 @@ npx site2rag knowledge-site.com \
 
 | Option | Description | Requirements |
 | --- | --- | --- |
-| `--auto-fallback` | Enable smart LLM fallback (try best available LLM) | Any AI API key |
-| `--fallback-order <sequence>` | Custom fallback order (comma-separated) | `--fallback-order "gpt4o,opus4,ollama"` |
 | `--use_gpt4o` | Use OpenAI GPT-4o | `OPENAI_API_KEY` |
-| `--use_gpt4o_mini` | Use OpenAI GPT-4o-mini | `OPENAI_API_KEY` |
-| `--use_gpt4_turbo` | Use OpenAI GPT-4 Turbo | `OPENAI_API_KEY` |
-| `--use_o1_mini` | Use OpenAI o1-mini | `OPENAI_API_KEY` |
-| `--use_opus4` | Use Anthropic Claude 3.5 Sonnet | `ANTHROPIC_API_KEY` |
 | `--use_haiku` | Use Anthropic Claude 3.5 Haiku | `ANTHROPIC_API_KEY` |
-| `--use_mistral_large` | Use Mistral Large | `MISTRAL_API_KEY` |
-| `--use_perplexity` | Use Perplexity API | `PERPLEXITY_API_KEY` |
-| `--use_r1_grok` | Use xAI Grok | `XAI_API_KEY` |
+| `--use_ollama` | Use local Ollama with qwen2.5:14b model | Ollama installed |
 | `--anthropic <env_var>` | Use Anthropic Claude API with key from environment variable | Custom env var |
 
 ### Site Configuration
@@ -586,7 +602,8 @@ Each site gets its own `.site2rag/config.json`:
     "content_classification": true,
     "context_injection": true,
     "rag_disambiguation": true,
-    "cache_context": true
+    "cache_context": true,
+    "track_token_usage": true
   },
   "crawl_settings": {
     "max_depth": 5,

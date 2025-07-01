@@ -255,8 +255,8 @@ Watch for these and stop immediately:
 - **Concurrency**: 10 parallel AI calls with rate limiting
 - **Minimum Block Size**: 100 characters (filters out trivial content)
 - **Response Format**: Plain text with blank line separators (no JSON)
-- **Primary Provider**: Claude 3.5 Haiku (default, best for disambiguation)
-- **Fallback Order**: haiku → gpt4o → opus4 → gpt4-turbo → ollama
+- **Primary Provider**: AI enhancement is ON by default (uses available provider)
+- **Available Providers**: haiku (Claude 3.5), gpt4o (OpenAI), ollama (local)
 - **Validation**: Strict - only `[[context]]` insertions allowed, original text preserved
 - **Processing**: Headers and code blocks skipped, only content blocks enhanced
 
@@ -265,4 +265,5 @@ Watch for these and stop immediately:
 - Set crawling output to a subfolder of --output tests/tmp/sites/ like --output tests/tmp/sites/quicktest
 - Always use npm scripts and avoid bash so that you can run tests and diagnosis without permission or pause
 - **Never add files directly to the tests/tmp folder. All files go in the appropriate subfolder such as tests/tmp/scripts/**
+- Always use npm scripts for testing, for temporary tests, modify test:quicktest
 - Always use npm scripts for testing, for temporary tests, modify test:quicktest

@@ -147,8 +147,18 @@ export function getDB(dbPath) {
 
   while (!dbReady) {
     try {
-      // Explicitly open the database with write permissions
-      dbInstance = new Database(paths.session, {readonly: false});
+      // Explicitly open the database with write permissions and performance optimizations
+      dbInstance = new Database(paths.session, {
+        readonly: false,
+        fileMustExist: false,
+        timeout: 5000 // 5 second busy timeout to prevent database locked errors
+      });
+      // Enable WAL mode for better concurrency and performance
+      dbInstance.pragma('journal_mode = WAL');
+      dbInstance.pragma('synchronous = NORMAL'); // Faster writes while maintaining durability
+      dbInstance.pragma('cache_size = -32000'); // 32MB cache
+      dbInstance.pragma('temp_store = MEMORY'); // Use memory for temp tables
+      dbInstance.pragma('mmap_size = 268435456'); // 256MB memory-mapped I/O
       const res = dbInstance.pragma('integrity_check', {simple: true});
 
       if (res !== 'ok') {
@@ -191,6 +201,18 @@ export function getDB(dbPath) {
 
   // Initialize schema
   initDbSchema(dbInstance);
+  
+  // Create indexes for performance
+  try {
+    dbInstance.exec(`
+      CREATE INDEX IF NOT EXISTS idx_pages_status ON pages(content_status);
+      CREATE INDEX IF NOT EXISTS idx_pages_crawled ON pages(last_crawled);
+      CREATE INDEX IF NOT EXISTS idx_sitemap_processed ON sitemap_urls(processed, language);
+      CREATE INDEX IF NOT EXISTS idx_sitemap_priority ON sitemap_urls(priority DESC, lastmod DESC);
+    `);
+  } catch (e) {
+    logger.warn('[DB] Failed to create indexes:', e);
+  }
 
   // Create CrawlDB instance
   return new CrawlDB(paths, dbInstance);
@@ -304,10 +326,48 @@ export class CrawlDB {
   }
 
   /**
+   * Prepare a SQL statement
+   * @param {string} sql - SQL statement to prepare
+   * @returns {Object} - Prepared statement
+   */
+  prepare(sql) {
+    return this.db.prepare(sql);
+  }
+
+  /**
+   * Execute a SQL statement
+   * @param {string} sql - SQL statement to execute
+   */
+  exec(sql) {
+    return this.db.exec(sql);
+  }
+
+  /**
+   * Run a pragma command
+   * @param {string} pragma - Pragma command
+   * @param {Object} options - Pragma options
+   */
+  pragma(pragma, options) {
+    return this.db.pragma(pragma, options);
+  }
+
+  /**
    * Insert or update a page in the database
    * @param {Object} page - Page data
    */
   upsertPage(page) {
+    // Validate URL to prevent malicious inputs
+    if (!page.url || typeof page.url !== 'string') {
+      throw new Error('Invalid page URL');
+    }
+    
+    // Basic URL validation to prevent injection
+    try {
+      new URL(page.url);
+    } catch {
+      throw new Error('Malformed URL: ' + page.url);
+    }
+    
     // Ensure optional fields are always present for SQL binding
     if (!('title' in page)) page.title = null;
     if (!('file_path' in page)) page.file_path = null;
@@ -354,6 +414,10 @@ export class CrawlDB {
    * @returns {Object|undefined} - Page data or undefined if not found
    */
   getPage(url) {
+    // Validate URL to prevent malicious inputs
+    if (!url || typeof url !== 'string') {
+      return undefined;
+    }
     return this.db.prepare('SELECT * FROM pages WHERE url = ?').get(url);
   }
 
@@ -375,6 +439,17 @@ export class CrawlDB {
    * @param {Object} sitemapUrl - Sitemap URL data
    */
   upsertSitemapUrl(sitemapUrl) {
+    // Validate URL to prevent malicious inputs
+    if (!sitemapUrl.url || typeof sitemapUrl.url !== 'string') {
+      throw new Error('Invalid sitemap URL');
+    }
+    
+    // Basic URL validation
+    try {
+      new URL(sitemapUrl.url);
+    } catch {
+      throw new Error('Malformed sitemap URL: ' + sitemapUrl.url);
+    }
     const stmt = this.db.prepare(`
       INSERT INTO sitemap_urls (url, language, priority, lastmod, changefreq, discovered_from_sitemap, processed)
       VALUES (@url, @language, @priority, @lastmod, @changefreq, @discovered_from_sitemap, @processed)
@@ -398,13 +473,15 @@ export class CrawlDB {
    * @returns {Array} - Array of sitemap URL objects
    */
   getFilteredSitemapUrls(filters = {}) {
-    let query = 'SELECT * FROM sitemap_urls';
+    // Build query with proper parameterization to prevent SQL injection
     const conditions = [];
-    const params = {};
+    const params = [];
+    
+    let query = 'SELECT * FROM sitemap_urls';
 
     if (filters.language) {
-      conditions.push('language = @language');
-      params.language = filters.language;
+      conditions.push('language = ?');
+      params.push(filters.language);
     }
 
     if (filters.unprocessedOnly) {
@@ -417,13 +494,13 @@ export class CrawlDB {
 
     query += ' ORDER BY priority DESC, lastmod DESC';
 
-    if (filters.limit) {
-      query += ' LIMIT @limit';
-      params.limit = filters.limit;
+    if (filters.limit && typeof filters.limit === 'number') {
+      query += ' LIMIT ?';
+      params.push(Math.max(1, Math.floor(filters.limit)));
     }
 
     const stmt = this.db.prepare(query);
-    return stmt.all(params);
+    return stmt.all(...params);
   }
 
   /**
@@ -470,36 +547,41 @@ export class CrawlDB {
           const batchSize = 100;
           for (let i = 0; i < urls.length; i += batchSize) {
             const batch = urls.slice(i, i + batchSize);
-            const placeholders = batch.map(() => '?').join(',');
-            const timestamp = new Date().toISOString();
-
-            this.db
-              .prepare(
-                `
+            // Use a prepared statement with proper parameterization
+            const updateStmt = this.db.prepare(`
               UPDATE pages 
               SET content_status = 'processing',
                   last_context_attempt = ?,
                   context_error = ?
-              WHERE url IN (${placeholders})
-            `
-              )
-              .run(timestamp, `processor:${processorId}`, ...batch);
+              WHERE url = ?
+            `);
+            const timestamp = new Date().toISOString();
+            
+            // Use a transaction for batch updates
+            const updateBatch = this.db.transaction((urls) => {
+              for (const url of urls) {
+                updateStmt.run(timestamp, `processor:${processorId}`, url);
+              }
+            });
+            updateBatch(batch);
           }
         } else {
-          const placeholders = urls.map(() => '?').join(',');
-          const timestamp = new Date().toISOString();
-
-          this.db
-            .prepare(
-              `
+          // For smaller batches, use individual updates in a transaction
+          const updateStmt = this.db.prepare(`
             UPDATE pages 
             SET content_status = 'processing',
                 last_context_attempt = ?,
                 context_error = ?
-            WHERE url IN (${placeholders})
-          `
-            )
-            .run(timestamp, `processor:${processorId}`, ...urls);
+            WHERE url = ?
+          `);
+          const timestamp = new Date().toISOString();
+          
+          const updateAll = this.db.transaction((urls) => {
+            for (const url of urls) {
+              updateStmt.run(timestamp, `processor:${processorId}`, url);
+            }
+          });
+          updateAll(urls);
         }
 
         // Log claiming for debugging

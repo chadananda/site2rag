@@ -1,5 +1,6 @@
 import fetch from 'node-fetch';
 import logger from '../services/logger_service.js';
+import { checkServiceAvailable } from './fetchWithTimeout.js';
 
 /**
  * Estimate token count for a text string
@@ -15,12 +16,7 @@ export function estimateTokens(text) {
 export async function aiServiceAvailable({provider = 'ollama', host} = {}) {
   if (provider === 'ollama') {
     const ollamaHost = host || process.env.OLLAMA_HOST || 'http://localhost:11434';
-    try {
-      const res = await fetch(`${ollamaHost}/api/tags`, {timeout: 2000});
-      return res.ok;
-    } catch {
-      return false;
-    }
+    return await checkServiceAvailable(`${ollamaHost}/api/tags`, 2000);
   }
   // Add future checks for other providers here
   return false;

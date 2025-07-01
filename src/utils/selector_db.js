@@ -4,7 +4,13 @@ import Database from 'better-sqlite3';
 
 export class SelectorDB {
   constructor(dbPath) {
-    this.db = new Database(dbPath);
+    this.db = new Database(dbPath, {
+      timeout: 5000, // 5 second busy timeout
+      fileMustExist: false
+    });
+    // Enable WAL mode for better concurrency
+    this.db.pragma('journal_mode = WAL');
+    this.db.pragma('synchronous = NORMAL');
     this.initSchema();
   }
   initSchema() {
@@ -15,6 +21,10 @@ export class SelectorDB {
         delete_count INTEGER DEFAULT 0,
         last_seen TEXT
       );
+    `);
+    // Create index for performance
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_selector_counts ON block_selectors(keep_count DESC, delete_count DESC);
     `);
   }
   recordSelector(selector, action) {

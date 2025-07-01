@@ -1,6 +1,6 @@
 {
   "name": "site2rag",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "CLI tool to convert websites into RAG-ready local markdown knowledge bases with AI-powered content improvement.",
   "main": "index.js",
   "bin": {
@@ -32,6 +32,8 @@
     "test:ui": "rm -rf tests/tmp/sites/ui-test && node ./bin/site2rag.js https://example.com --limit 2 --output tests/tmp/sites/ui-test --use_gpt4o",
     "test:ui:notty": "rm -rf tests/tmp/sites/ui-test && node ./bin/site2rag.js https://example.com --limit 2 --output tests/tmp/sites/ui-test --use_gpt4o 2>&1 | cat",
     "test:bahai.org": "rm -rf tests/tmp/sites/bahai.org && node ./bin/site2rag.js https://www.bahai.org/library --include-patterns \"/library\" --flat --limit 20 --output tests/tmp/sites/bahai.org --test",
+    "test:bahai.org-refresh": "node ./bin/site2rag.js https://www.bahai.org/library --include-patterns \"/library\" --flat --limit 20 --output tests/tmp/sites/bahai.org 2>&1 | tee tests/tmp/bahai-refresh.log",
+    "test:bahai.org-refresh:check": "echo 'Checking for skipped assets and pages:' && grep -E '(Skipping|unchanged|already exists|FAST_CHANGE|Checking.*hash)' tests/tmp/bahai-refresh.log | wc -l && echo 'Sample skips:' && grep -E '(Skipping|unchanged|FAST_CHANGE)' tests/tmp/bahai-refresh.log | head -10",
     "test:reference.bahai.org": "rm -rf tests/tmp/sites/reference.bahai.org && node ./bin/site2rag.js https://reference.bahai.org --flat --limit 20 --output tests/tmp/sites/reference.bahai.org --no-enhancement --test",
     "test:env": "node tests/tmp/scripts/test-env-npm.js",
     "test:api-minimal": "node tests/tmp/scripts/test-api-minimal.js",

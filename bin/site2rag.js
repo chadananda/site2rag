@@ -24,6 +24,7 @@ import {loadAIConfig, getLLMConfigFromFlags} from '../src/core/ai_config.js';
 import {insertionTracker} from '../src/core/context_enrichment.js';
 import {settingsMenu, loadGlobalAISettings, promptForAISettings, saveGlobalAISettings} from '../src/cli/settings.js';
 import {aiServiceAvailable} from '../src/utils/ai_utils.js';
+import {ProcessLock} from '../src/utils/processLock.js';
 import fs from 'fs';
 import path from 'path';
 import {program} from 'commander';
@@ -153,20 +154,37 @@ const configPath = process.env.SITE2RAG_CONFIG_PATH || defaultConfigPath;
 async function displayHeader(aiConfig = null) {
   // Check AI status properly with async
   let aiStatus = '';
+  let aiWarning = '';
   try {
-    const available = await aiServiceAvailable();
-    if (available && aiConfig) {
+    if (aiConfig) {
       const provider = aiConfig.provider || 'unknown';
       const model = aiConfig.model || 'default';
-      aiStatus = chalk.cyan(`🧠 AI Processing: ${provider}/${model} ready`);
-    } else if (available) {
-      // Default to Ollama if no config provided
-      aiStatus = chalk.cyan('🧠 AI Processing: ollama/qwen2.5:14b ready');
+      
+      // Check if the specific AI service is available
+      const available = await aiServiceAvailable({ provider, host: aiConfig.host });
+      
+      if (available) {
+        aiStatus = chalk.cyan(`🧠 AI Processing: ${provider}/${model} ready`);
+      } else {
+        aiStatus = chalk.yellow(`⚠  AI Processing: ${provider} not available`);
+        if (provider === 'ollama') {
+          aiWarning = chalk.yellow('\n\n   ⚠  Ollama is not running. Start it with: ollama serve');
+        } else {
+          aiWarning = chalk.yellow(`\n\n   ⚠  ${provider} service is not accessible`);
+        }
+      }
     } else {
-      aiStatus = chalk.yellow('⚠ AI Processing: AI not available');
+      // No AI config, check default Ollama
+      const available = await aiServiceAvailable();
+      if (available) {
+        aiStatus = chalk.cyan('🧠 AI Processing: ollama/qwen2.5:14b ready');
+      } else {
+        aiStatus = chalk.gray('🧠 AI Processing: Disabled (Ollama not running)');
+        aiWarning = chalk.gray('\n\n   💡 To enable AI enhancement, start Ollama: ollama serve');
+      }
     }
   } catch {
-    aiStatus = chalk.yellow('⚠ AI Processing: AI not available');
+    aiStatus = chalk.yellow('⚠  AI Processing: Error checking AI service');
   }
 
   // Use ANSI Shadow font with spaced text for better 2 visibility
@@ -235,6 +253,11 @@ async function displayHeader(aiConfig = null) {
   });
 
   console.log(box);
+  
+  // Display warning message outside the box if AI is not available
+  if (aiWarning) {
+    console.log(aiWarning);
+  }
 }
 
 program
@@ -532,6 +555,15 @@ Examples:
     if (url) {
       console.clear(); // Clear screen before showing header
       await displayHeader(aiConfig);
+    }
+
+    // Acquire process lock to prevent multiple instances
+    const processLock = new ProcessLock(site2ragDir);
+    if (!processLock.acquire()) {
+      logger.error('Another instance of site2rag is already running for this output directory.');
+      logger.error('If you believe this is an error, remove the lock file at:');
+      logger.error(path.join(site2ragDir, 'site2rag.lock'));
+      process.exit(1);
     }
 
     const processor = new SiteProcessor(url, {

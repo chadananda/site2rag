@@ -574,7 +574,7 @@ export class CrawlService {
             }
 
             // Check database file paths
-            const dbPath = this.contentService.db.name;
+            const dbPath = this.contentService.db.paths?.main || 'unknown';
             logger.info(`[DB] Current database file: ${dbPath}`);
           } catch (err) {
             logger.error(`[DB] Error accessing database: ${err.message}`);
@@ -603,7 +603,8 @@ export class CrawlService {
         totalUrls: totalUrls,
         isReCrawl: this.isReCrawl,
         siteUrl: this.options.startUrl || this.domain,
-        maxPages: this.maxPages // Pass the limit for reference
+        maxPages: this.maxPages, // Pass the limit for reference
+        enhancement: this.options.enhancement // Pass enhancement status
       });
     }
 

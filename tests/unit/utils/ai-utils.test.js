@@ -41,7 +41,9 @@ describe('AI Utils', () => {
       const result = await aiServiceAvailable({provider: 'ollama'});
 
       expect(result).toBe(true);
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:11434/api/tags', {timeout: 2000});
+      expect(mockFetch).toHaveBeenCalledWith('http://localhost:11434/api/tags', {
+        signal: expect.any(AbortSignal)
+      });
     });
 
     it('should return false when Ollama service is not available', async () => {
@@ -71,7 +73,9 @@ describe('AI Utils', () => {
         host: 'http://custom-host:11434'
       });
 
-      expect(mockFetch).toHaveBeenCalledWith('http://custom-host:11434/api/tags', {timeout: 2000});
+      expect(mockFetch).toHaveBeenCalledWith('http://custom-host:11434/api/tags', {
+        signal: expect.any(AbortSignal)
+      });
     });
 
     it('should use OLLAMA_HOST environment variable when set', async () => {
@@ -80,7 +84,9 @@ describe('AI Utils', () => {
 
       await aiServiceAvailable({provider: 'ollama'});
 
-      expect(mockFetch).toHaveBeenCalledWith('http://env-host:11434/api/tags', {timeout: 2000});
+      expect(mockFetch).toHaveBeenCalledWith('http://env-host:11434/api/tags', {
+        signal: expect.any(AbortSignal)
+      });
     });
 
     it('should default to localhost when no host provided', async () => {
@@ -88,7 +94,9 @@ describe('AI Utils', () => {
 
       await aiServiceAvailable();
 
-      expect(mockFetch).toHaveBeenCalledWith('http://localhost:11434/api/tags', {timeout: 2000});
+      expect(mockFetch).toHaveBeenCalledWith('http://localhost:11434/api/tags', {
+        signal: expect.any(AbortSignal)
+      });
     });
 
     it('should return false for unknown providers', async () => {
