@@ -195,7 +195,7 @@ export class ProgressService {
     
     // Create crawl progress bar
     this.crawlBar = this.multibar.create(total, 0, {}, {
-      format: (options, params, payload) => {
+      format: (options, params, _payload) => {
         const bar = options.barCompleteChar.repeat(Math.round(params.progress * options.barsize)) + 
                    options.barIncompleteChar.repeat(options.barsize - Math.round(params.progress * options.barsize));
         const percentage = Math.floor(params.progress * 100);
@@ -214,11 +214,11 @@ export class ProgressService {
     this.aiBar = this.multibar.create(aiTotal, 0, {
       tokenInfo: this.aiTokenInfo
     }, {
-      format: (options, params, payload) => {
+      format: (options, params, _payload) => {
         const bar = options.barCompleteChar.repeat(Math.round(params.progress * options.barsize)) + 
                    options.barIncompleteChar.repeat(options.barsize - Math.round(params.progress * options.barsize));
         const percentage = Math.floor(params.progress * 100);
-        const tokenInfo = payload.tokenInfo || this.aiTokenInfo;
+        const tokenInfo = _payload.tokenInfo || this.aiTokenInfo;
         return `${chalk.magenta.bold('AI:      ')} ${chalk.magenta.bold(bar)} ${chalk.green.bold(percentage + '%')} | ${tokenInfo}`;
       },
       barsize: barSize
@@ -369,11 +369,11 @@ export class ProgressService {
       this.aiBar = this.multibar.create(totalRequests, 0, {
         tokenInfo: this.aiTokenInfo
       }, {
-        format: (options, params, payload) => {
+        format: (options, params, _payload) => {
           const bar = options.barCompleteChar.repeat(Math.round(params.progress * options.barsize)) + 
                      options.barIncompleteChar.repeat(options.barsize - Math.round(params.progress * options.barsize));
           const percentage = Math.floor(params.progress * 100);
-          const tokenInfo = payload.tokenInfo || this.aiTokenInfo;
+          const tokenInfo = _payload.tokenInfo || this.aiTokenInfo;
           return `${chalk.magenta.bold('AI:      ')} ${chalk.magenta.bold(bar)} ${chalk.green.bold(percentage + '%')} | ${tokenInfo}`;
         },
         barsize: barSize

@@ -303,21 +303,29 @@ This file contains HTML blocks that were removed during content processing.
       }
 
       // Create documents directory within the hostname directory
+      // In flat mode, we need to include the URL path in the filename to avoid overwrites
+      let saveFilename = filename;
+      if (this.flat) {
+        // Generate flat filename from full URL path to avoid conflicts
+        saveFilename = this.generateFlatFilename(urlObj.pathname);
+        logger.info(`[DOCS] Using flat filename: ${saveFilename} for ${absoluteUrl}`);
+      }
+      
       const documentsDir = path.join(hostname, 'documents');
-      const outputPath = this.getOutputPath(documentsDir, filename);
+      const outputPath = this.getOutputPath(documentsDir, saveFilename);
 
       // Save the document
       await this.writeBinaryFile(outputPath, buffer);
 
       // Calculate the relative path from the hostname directory
-      const relativePath = path.join('documents', filename);
+      const relativePath = path.join('documents', saveFilename);
 
       logger.info(`[DOCUMENT] Saved document to ${outputPath}`);
       return {
         success: true,
         relativePath,
         fullPath: outputPath,
-        filename
+        filename: saveFilename
       };
     } catch (error) {
       logger.error(`[DOCUMENT] Error downloading document: ${error.message}`);

@@ -1,6 +1,6 @@
 {
   "name": "site2rag",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "CLI tool to convert websites into RAG-ready local markdown knowledge bases with AI-powered content improvement.",
   "main": "index.js",
   "bin": {
@@ -31,6 +31,7 @@
     "test:quicktest:interactive": "rm -rf tests/tmp/sites/quicktest && DEBUG=ai node ./bin/site2rag.js https://bahai-education.org/the-ocean-adventure --limit 5 --output tests/tmp/sites/quicktest --use_gpt4o --test",
     "test:ui": "rm -rf tests/tmp/sites/ui-test && node ./bin/site2rag.js https://example.com --limit 2 --output tests/tmp/sites/ui-test --use_gpt4o",
     "test:ui:notty": "rm -rf tests/tmp/sites/ui-test && node ./bin/site2rag.js https://example.com --limit 2 --output tests/tmp/sites/ui-test --use_gpt4o 2>&1 | cat",
+    "test:bahai.org": "rm -rf tests/tmp/sites/bahai.org && node ./bin/site2rag.js https://www.bahai.org/library --include-patterns \"/library\" --flat --limit 20 --output tests/tmp/sites/bahai.org --test",
     "test:env": "node tests/tmp/scripts/test-env-npm.js",
     "test:api-minimal": "node tests/tmp/scripts/test-api-minimal.js",
     "test:debug-crawl": "rm -rf tests/tmp/sites/debug-crawl && node ./bin/site2rag.js https://bahai-education.org/the-ocean-adventure --limit 5 --output tests/tmp/sites/debug-crawl --no-enhancement --verbose 2>&1 | tee tests/tmp/debug-crawl.log",

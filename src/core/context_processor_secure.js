@@ -322,7 +322,7 @@ export async function processDocumentsSecure(documents, aiConfig, progressCallba
         aiTimer();
         // Extract content and usage from the response
         const response = aiResponse.content || aiResponse; // Handle both old and new format
-        const usage = aiResponse.usage || null;
+        // const _usage = aiResponse.usage || null; // TODO: Implement usage tracking
         if (!response) {
           throw new Error('Invalid AI response - empty response');
         }

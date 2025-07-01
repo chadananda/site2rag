@@ -2358,8 +2358,21 @@ ${markdownContent}`;
         }
 
         // Save the binary file
-        logger.info(`[BINARY_TRACKING] Saving binary file: ${filename} to ${hostname}/documents`);
-        const savedPath = await this.fileService.saveBinaryFile(buffer, `${hostname}/documents`, filename);
+        // In flat mode, we need to include the URL path in the filename to avoid overwriting
+        let saveFilename = filename;
+        if (this.fileService.flat) {
+          try {
+            const urlObj = new URL(url);
+            // Generate flat filename from full path to avoid conflicts
+            saveFilename = this.fileService.generateFlatFilename(urlObj.pathname);
+            logger.info(`[BINARY_TRACKING] Using flat filename: ${saveFilename} for ${url}`);
+          } catch (err) {
+            logger.warn(`[BINARY] Error generating flat filename: ${err.message}, using: ${filename}`);
+          }
+        }
+        
+        logger.info(`[BINARY_TRACKING] Saving binary file: ${saveFilename} to ${hostname}/documents`);
+        const savedPath = await this.fileService.saveBinaryFile(buffer, `${hostname}/documents`, saveFilename);
         logger.info(`[BINARY_TRACKING] Successfully saved binary file: ${savedPath}`);
 
         // Mark download as complete in progress service
@@ -2606,8 +2619,16 @@ ${markdownContent}`;
         }
 
         // Save the document
+        // In flat mode, we need to include the URL path in the filename to avoid overwriting
+        let saveFilename = filename;
+        if (this.fileService.flat) {
+          // Generate flat filename from full path to avoid conflicts
+          saveFilename = this.fileService.generateFlatFilename(urlObj.pathname);
+          logger.info(`[DOCS] Using flat filename: ${saveFilename} for ${docUrl}`);
+        }
+        
         const {hostname} = new URL(pageUrl);
-        const savedPath = await this.fileService.saveBinaryFile(Buffer.from(buffer), hostname, filename);
+        const savedPath = await this.fileService.saveBinaryFile(Buffer.from(buffer), hostname, saveFilename);
 
         logger.info(`[DOCS] Saved document to: ${savedPath}`);
 
