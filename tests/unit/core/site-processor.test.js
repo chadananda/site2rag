@@ -1,4 +1,4 @@
-import {describe, it, expect, beforeEach} from 'vitest';
+import {describe, it, expect, beforeEach, afterEach} from 'vitest';
 import fs from 'fs';
 import {join} from 'path';
 import {SiteProcessor} from '../../../src/site_processor.js';

@@ -57,7 +57,6 @@ describe('aiServiceAvailable with AbortController', () => {
     // Create a promise that never resolves to simulate timeout
     mockFetch.mockImplementation(() => new Promise(() => {}));
 
-    const startTime = Date.now();
     const resultPromise = aiServiceAvailable({provider: 'ollama'});
 
     // Fast-forward time by 2 seconds

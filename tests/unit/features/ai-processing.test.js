@@ -1,4 +1,4 @@
-import {describe, it, expect, beforeEach} from 'vitest';
+import {describe, it, expect, beforeEach, vi} from 'vitest';
 import fs from 'fs';
 import {join} from 'path';
 import {CrawlDB} from '../../../src/db.js';

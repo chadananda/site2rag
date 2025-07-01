@@ -5,7 +5,7 @@ import {
   extractEntitiesWithSlidingWindow,
   enhanceBlocksWithEntityContext,
   enhanceBlocksWithCaching
-} from '../../src/context.js';
+} from '../../src/core/context_processor.js';
 
 const PERF_OUTPUT_DIR = path.join(process.cwd(), 'tests', 'tmp', 'performance');
 

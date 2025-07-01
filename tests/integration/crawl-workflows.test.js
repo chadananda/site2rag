@@ -1,9 +1,9 @@
 import {describe, it, expect, beforeAll, afterAll} from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import {SiteState} from '../../src/site_state.js';
+import {SiteState} from '../../src/core/site_state.js';
 import {SiteProcessor} from '../../src/site_processor.js';
-import {DefaultCrawlState} from '../../src/crawl_state.js';
+import {DefaultCrawlState} from '../../src/core/crawl_state.js';
 import {getDB} from '../../src/db.js';
 
 const TEST_OUTPUT = path.join(process.cwd(), 'tests', 'tmp', 'integration', 'crawl-workflows');

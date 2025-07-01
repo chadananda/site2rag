@@ -1,7 +1,7 @@
 import {describe, it, expect, beforeEach, afterEach} from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import {ConfigManager} from '../../src/config_manager.js';
+import {ConfigManager} from '../../../src/config_manager.js';
 
 const TEST_CONFIG = path.resolve('./tests/tmp/test.crawlrc.json');
 

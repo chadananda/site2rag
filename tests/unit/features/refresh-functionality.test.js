@@ -430,7 +430,7 @@ describe('Refresh Functionality', () => {
           stats.totalChecked++;
           if (result.updated === false) stats.skipped++;
           else stats.updated++;
-        } catch (e) {
+        } catch {
           stats.errors++;
           stats.totalChecked++;
         }
