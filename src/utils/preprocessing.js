@@ -154,7 +154,29 @@ export class NavigationRemover {
       'style',
       'noscript',
       '.sr-only',
-      '.visually-hidden'
+      '.visually-hidden',
+      // Additional patterns for navigation menus
+      '.menu',
+      '.navigation',
+      '.navbar',
+      '.nav-menu',
+      '.site-menu',
+      '.main-menu',
+      '.primary-nav',
+      '.secondary-nav',
+      '.mobile-nav',
+      '.desktop-nav',
+      '.dropdown-menu',
+      '.submenu',
+      '.nav-list',
+      '.nav-links',
+      '.nav-items',
+      // Patterns for repeated menu structures
+      '[class*="menu-"][class*="duplicate"]',
+      '[id*="menu-"][id*="copy"]',
+      '.hidden-menu',
+      '.offcanvas-menu',
+      '.collapsed-nav'
     ];
     navigationSelectors.forEach(selector => $(selector).remove());
     this.removeTemplateElements($);

@@ -484,6 +484,41 @@ export function generateConsistentSelector($, element) {
 }
 
 /**
+ * Remove duplicate content blocks (e.g., repeated navigation menus)
+ * @param {Object} $ - Cheerio instance
+ * @param {Object} content - Content element to clean
+ * @returns {Object} - Content with duplicates removed
+ */
+export function removeDuplicateBlocks($, content) {
+  const seenTexts = new Map();
+  const blockMinLength = 50; // Minimum length to consider as a duplicate block
+  
+  // Process all direct children and navigation-like elements
+  content.find('nav, header, footer, aside, div, ul, ol').each((_, elem) => {
+    const $elem = $(elem);
+    const text = $elem.text().trim();
+    
+    // Skip if too short
+    if (text.length < blockMinLength) return;
+    
+    // Normalize text for comparison (remove extra whitespace, lowercase)
+    const normalizedText = text.replace(/\s+/g, ' ').toLowerCase();
+    
+    // Check if we've seen this exact text before
+    if (seenTexts.has(normalizedText)) {
+      // This is a duplicate - remove it
+      logger.info(`[DUPLICATE] Removing duplicate block with ${text.length} chars`);
+      $elem.remove();
+    } else {
+      // First time seeing this text - remember it
+      seenTexts.set(normalizedText, true);
+    }
+  });
+  
+  return content;
+}
+
+/**
  * Clean up extracted content by removing nested navigation elements
  * @param {Object} $ - Cheerio instance
  * @param {Object} content - Content element to clean
@@ -659,16 +694,19 @@ export class ContentService {
         this.trackSelectorDecision(selector, decision, blocks, reason);
       }
     });
+    
+    // Remove duplicate content blocks (e.g., repeated navigation menus)
+    const deduplicatedMain = removeDuplicateBlocks($, cleanedMain);
 
     // Process links in the main content - convert relative to absolute and handle documents
     if (url && this.fileService) {
-      await this.processLinks($, cleanedMain, url);
+      await this.processLinks($, deduplicatedMain, url);
     }
 
     // Apply AI-based block classification if enabled
     if (this.aiConfig && this.aiConfig.blockClassificationEnabled) {
       try {
-        await this.applyBlockClassification($, cleanedMain, removedBlocks);
+        await this.applyBlockClassification($, deduplicatedMain, removedBlocks);
       } catch (error) {
         logger.error('[AI] Error applying block classification:', error);
       }
@@ -685,11 +723,11 @@ export class ContentService {
 
       // Save debug information if URL is provided
       if (url) {
-        this.saveDebugInfo(url, $, cleanedMain, removedBlocks);
+        this.saveDebugInfo(url, $, deduplicatedMain, removedBlocks);
       }
     }
 
-    return {$, html: $.html(cleanedMain), main: cleanedMain, links, metadata, removedBlocks};
+    return {$, html: $.html(deduplicatedMain), main: deduplicatedMain, links, metadata, removedBlocks};
   }
 
   /**
