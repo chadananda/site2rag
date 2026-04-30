@@ -38,7 +38,7 @@ defaults:
     s3_region: us-east-1
     s3_access_key_env: S3_ACCESS_KEY
     s3_secret_key_env: S3_SECRET_KEY
-    public_url_template: https://archive.tower-nas.example.com/{domain}/{path}
+    public_url_template: https://{domain}.lnker.com/{path}
     upload_html: true
     upload_documents: true
     upload_assets: true

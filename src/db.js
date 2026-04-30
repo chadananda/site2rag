@@ -96,6 +96,35 @@ CREATE TABLE IF NOT EXISTS assets (
   gone_since TEXT,
   backup_url TEXT, backup_etag TEXT, backup_archived_at TEXT
 );
+CREATE TABLE IF NOT EXISTS pdf_quality (
+  url TEXT PRIMARY KEY,
+  content_hash TEXT,
+  scored_at TEXT,
+  avg_chars_per_page REAL,
+  readable_pages_pct REAL,
+  has_text_layer INT,
+  word_quality_estimate REAL,
+  composite_score REAL,
+  pages INT
+);
+CREATE TABLE IF NOT EXISTS pdf_upgrade_queue (
+  url TEXT PRIMARY KEY,
+  content_hash TEXT,
+  priority REAL,
+  status TEXT DEFAULT 'pending',
+  queued_at TEXT,
+  started_at TEXT,
+  finished_at TEXT,
+  upgraded_pdf_path TEXT,
+  before_score REAL,
+  after_score REAL,
+  score_improvement REAL,
+  pages_processed INT,
+  method TEXT,
+  bad_sample TEXT,
+  emailed INT DEFAULT 0,
+  error TEXT
+);
 CREATE TABLE IF NOT EXISTS asset_refs (
   asset_hash TEXT NOT NULL,
   referencing_url TEXT NOT NULL,

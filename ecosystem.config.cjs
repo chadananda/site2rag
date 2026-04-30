@@ -19,6 +19,37 @@ module.exports = {
       merge_logs: true
     },
     {
+      name: 'lnker-server',
+      script: './bin/lnker-server.js',
+      cwd: __dirname,
+      interpreter: 'node',
+      env: { NODE_ENV: 'production', SITE2RAG_ROOT, LNKER_PORT: '7841' },
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '256M',
+      out_file: '../logs/lnker-server.out.log',
+      error_file: '../logs/lnker-server.err.log',
+      merge_logs: true
+    },
+    {
+      name: 'pdf-report-server',
+      script: './bin/report-server.js',
+      cwd: __dirname,
+      interpreter: 'node',
+      env: {
+        NODE_ENV: 'production',
+        SITE2RAG_ROOT,
+        REPORT_PORT: '7840',
+        UPGRADE_REPORT_PATH: path.join(SITE2RAG_ROOT, 'report')
+      },
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '128M',
+      out_file: '../logs/report-server.out.log',
+      error_file: '../logs/report-server.err.log',
+      merge_logs: true
+    },
+    {
       name: 'site2rag-updater',
       script: './bin/updater.js',
       cwd: __dirname,
