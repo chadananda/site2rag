@@ -1,0 +1,6 @@
+app/node_modules/
+app/.env
+logs/
+websites_mirror/
+websites_md/
+*.sqlite

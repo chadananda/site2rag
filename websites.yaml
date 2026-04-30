@@ -1,0 +1,72 @@
+version: 1
+defaults:
+  check_every_days: 3
+  timeout_seconds: 1800
+  user_agent: site2rag/1.0
+  max_concurrent_sites: 1
+  same_domain_only: true
+  max_depth: 8
+  respect_robots_txt: true
+  sitemap:
+    enabled: true
+    diff_every_hours: 24
+    fallback_to_crawl: true
+    include_languages: []
+  classify:
+    enabled: true
+    word_threshold: 200
+  ocr:
+    mode: reconcile
+    engines: [mistral, claude]
+    pass_bounding_boxes: true
+    confidence_short_circuit: true
+    agreement_skip_threshold: 0.97
+    confidence_skip_threshold: 0.92
+    reconciler: claude
+    min_text_chars_per_page: 50
+    flag_threshold: 0.85
+  assets:
+    enabled: true
+    types: [image, document]
+    image_max_bytes: 10485760
+    dedupe_by_hash: true
+    rewrite_links: true
+  archive:
+    enabled: false
+    s3_endpoint: https://s3.tower-nas.local
+    s3_bucket: site2rag-archive
+    s3_region: us-east-1
+    s3_access_key_env: S3_ACCESS_KEY
+    s3_secret_key_env: S3_SECRET_KEY
+    public_url_template: https://archive.tower-nas.example.com/{domain}/{path}
+    upload_html: true
+    upload_documents: true
+    upload_assets: true
+    upload_md: false
+    versioning: true
+    rewrite_html_assets: false
+    respect_archive_block: true
+  metadata:
+    sources: [json_ld, opengraph, meta_tags, byline]
+    extract_author_bio: true
+  document:
+    backlink_format: both
+    backlink_granularity: paragraph
+  retention:
+    gone_grace_days: 90
+    freeze_on_degradation:
+      enabled: true
+      net_loss_threshold_pct: 10
+      net_loss_min_pages: 50
+      window_days: 30
+    preserve_always: false
+  llm:
+    providers:
+      claude:
+        api_key_env: ANTHROPIC_API_KEY
+        models: { vision: claude-opus-4-7 }
+      mistral:
+        api_key_env: MISTRAL_API_KEY
+        models: { ocr: mistral-ocr-latest }
+    rate_limit: { requests_per_minute: 60 }
+sites: []
