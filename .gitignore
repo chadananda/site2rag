@@ -1,5 +1,5 @@
-app/node_modules/
-app/.env
+node_modules/
+.env
 logs/
 websites_mirror/
 websites_md/
