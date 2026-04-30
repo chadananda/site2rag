@@ -50,6 +50,26 @@ module.exports = {
       merge_logs: true
     },
     {
+      name: 'pdf-upgrade-worker',
+      script: './bin/pdf-upgrade-worker.js',
+      cwd: __dirname,
+      interpreter: 'node',
+      env: {
+        NODE_ENV: 'production',
+        SITE2RAG_ROOT,
+        LOCAL_LLM: process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:8000/v1',
+        LOCAL_LLM_MODEL: process.env.LOCAL_LLM_MODEL || 'llava'
+      },
+      autorestart: true,
+      watch: false,
+      min_uptime: '30s',
+      restart_delay: 60000,
+      max_memory_restart: '512M',
+      out_file: '../logs/pdf-upgrade.out.log',
+      error_file: '../logs/pdf-upgrade.err.log',
+      merge_logs: true
+    },
+    {
       name: 'site2rag-updater',
       script: './bin/updater.js',
       cwd: __dirname,
