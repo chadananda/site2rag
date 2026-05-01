@@ -15,6 +15,7 @@ self.addEventListener('activate', e => {
 });
 
 self.addEventListener('fetch', e => {
+  if (e.request.method !== 'GET') return;
   const url = new URL(e.request.url);
   // Never cache: API calls, version check, localhost dev
   if (url.pathname.startsWith('/api/') || url.pathname === '/version.json') return;

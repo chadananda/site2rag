@@ -153,7 +153,11 @@ if ('serviceWorker' in navigator) {
   <template x-if="activeSite">
     <div>
       <!-- Section header -->
-      <h3 class="text-base font-semibold text-gray-700 mb-3" x-text="activeSite.domain + ' PDF Assets'"></h3>
+      <h3 class="text-base font-semibold text-gray-700 mb-3">
+        <a :href="activeSite.url" target="_blank" rel="noopener"
+           class="hover:text-blue-600 hover:underline" x-text="activeSite.domain"></a>
+        <span class="text-gray-400 font-normal"> PDF Assets</span>
+      </h3>
 
       <!-- Tabs -->
       <div class="flex items-end border-b border-gray-200 mb-4 gap-0">
@@ -229,8 +233,15 @@ if ('serviceWorker' in navigator) {
           <!-- Doc rows -->
           <div class="space-y-2 mb-4">
             <template x-for="doc in docs" :key="doc.url">
-              <div class="bg-white border border-gray-200 rounded-xl p-3 flex gap-3 shadow-sm hover:shadow-md transition-shadow"
-                   :class="{'opacity-40': doc.skip, 'ring-1 ring-blue-300': doc.status==='processing'}">
+              <div class="border rounded-xl p-3 flex gap-3 shadow-sm hover:shadow-md transition-shadow"
+                   :class="[
+                     doc.skip ? 'opacity-40' : '',
+                     doc.status==='processing' ? 'bg-green-50 border-green-200 ring-1 ring-green-300' :
+                     activeTab==='upgraded'     ? 'bg-green-50 border-green-200' :
+                     activeTab==='adequate'     ? 'bg-blue-50 border-blue-200' :
+                     doc.status==='failed'      ? 'bg-red-50 border-red-200' :
+                                                  'bg-white border-gray-200'
+                   ]">
 
                 <!-- Thumbnail -->
                 <button @click="openDetail(doc)" class="shrink-0 focus:outline-none self-start mt-0.5" title="View details">
