@@ -9,7 +9,7 @@
 <link rel="stylesheet" href="/tailwind.css?v=4">
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script>
-// Service worker + auto-reload on new deploy
+// Service worker — auto-reload when new SW activates (no prompt)
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('/sw.js').then(reg => {
     reg.addEventListener('updatefound', () => {
@@ -20,18 +20,6 @@ if ('serviceWorker' in navigator) {
     setInterval(() => reg.update(), 30000);
   });
 }
-// Version polling — reloads page when a new build is deployed
-let _buildId = null;
-async function checkVersion() {
-  try {
-    const r = await fetch('/version.json', { cache: 'no-store' });
-    const { build } = await r.json();
-    if (_buildId && _buildId !== build) { location.reload(); return; }
-    _buildId = build;
-  } catch {}
-}
-checkVersion();
-setInterval(checkVersion, 30000);
 </script>
 <style>
   :root{color-scheme:light}
@@ -54,7 +42,7 @@ setInterval(checkVersion, 30000);
   <!-- Header -->
   <div class="flex items-center justify-between mb-4">
     <div class="flex items-center gap-3">
-      <h1 class="text-base font-bold tracking-tight mono">site2rag</h1>
+      <h1 class="text-base font-bold tracking-tight mono" x-text="'site2rag'+(appVersion?' v'+appVersion:'')">site2rag</h1>
       <span class="text-xs text-gray-400">archival mirror &amp; PDF upgrade monitor</span>
     </div>
     <div class="flex items-center gap-2 text-xs text-gray-400 mono">
@@ -434,6 +422,7 @@ function app() {
     filters: { q: '', status: '', score_max: 1, sort: 'score_asc' },
     loading: false, apiStatus: '', apiError: '', lastRefresh: '',
     expandedDoc: null,
+    appVersion: '', _buildId: null,
     _searchTimer: null,
     scoreCls, statusCls, statusLabel, scoreLabel, effortEstimate,
 
@@ -476,7 +465,18 @@ function app() {
       return 0;
     },
 
+    async checkVersion() {
+      try {
+        const r = await fetch('/version.json', { cache: 'no-store' });
+        const { build, v } = await r.json();
+        if (this._buildId && this._buildId !== build) { location.reload(); return; }
+        this._buildId = build;
+        this.appVersion = v || '';
+      } catch {}
+    },
+
     async init() {
+      await this.checkVersion();
       await this.loadSites();
       setInterval(() => this.refresh(), 30000);
     },
@@ -497,6 +497,7 @@ function app() {
     },
 
     async refresh() {
+      await this.checkVersion();
       const res = await fetch(`${API_BASE}/api/sites`).catch(() => null);
       if (!res?.ok) return;
       const data = await res.json();
