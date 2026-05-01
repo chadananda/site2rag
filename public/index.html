@@ -4,8 +4,35 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>site2rag</title>
+<link rel="manifest" href="/manifest.json">
+<meta name="theme-color" content="#111827">
 <link rel="stylesheet" href="/tailwind.css?v=4">
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script>
+// Service worker + auto-reload on new deploy
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').then(reg => {
+    reg.addEventListener('updatefound', () => {
+      reg.installing.addEventListener('statechange', function() {
+        if (this.state === 'activated') location.reload();
+      });
+    });
+    setInterval(() => reg.update(), 30000);
+  });
+}
+// Version polling — reloads page when a new build is deployed
+let _buildId = null;
+async function checkVersion() {
+  try {
+    const r = await fetch('/version.json', { cache: 'no-store' });
+    const { build } = await r.json();
+    if (_buildId && _buildId !== build) { location.reload(); return; }
+    _buildId = build;
+  } catch {}
+}
+checkVersion();
+setInterval(checkVersion, 30000);
+</script>
 <style>
   :root{color-scheme:light}
   [x-cloak]{display:none!important}

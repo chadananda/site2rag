@@ -14,7 +14,7 @@
     "lint": "eslint src/ bin/ tests/",
     "postinstall": "node bin/setup.js",
     "build:css": "echo '@import \"tailwindcss\";' > public/tw-input.css && node_modules/.bin/tailwindcss -i public/tw-input.css -o public/tailwind.css --minify && rm public/tw-input.css",
-    "deploy:ui": "npm run build:css && npx wrangler pages deploy public/ --project-name=site2rag-report"
+    "deploy:ui": "node scripts/deploy-ui.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.37.0",
