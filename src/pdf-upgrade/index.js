@@ -3,6 +3,7 @@
 import { existsSync, copyFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
+import Anthropic from '@anthropic-ai/sdk';
 import { loadConfig, getMirrorRoot, mirrorDir, metaDir } from '../config.js';
 import { openDb } from '../db.js';
 import { bossAvailable, reocrDocument } from './reocr.js';
@@ -10,9 +11,49 @@ import { rebuildPdf } from './rebuild.js';
 import { scorePdf, saveQualityScore } from './score.js';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes between docs
+const SUMMARIZE_BATCH = 10; // Haiku summaries to generate per tick
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 
 const log = (msg) => console.log(`[pdf-upgrade] ${new Date().toISOString().slice(0,19)} ${msg}`);
+
+/** Generate Haiku AI summaries for the top N pending queue items that don't have one yet. */
+const summarizeTopPending = async (db, domain) => {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) return;
+  const rows = db.prepare(`
+    SELECT q.url, pq.pdf_title, pq.excerpt, h.hosted_title, h.host_url as source_url
+    FROM pdf_upgrade_queue q
+    JOIN pdf_quality pq ON q.url = pq.url
+    LEFT JOIN hosts h ON q.url = h.hosted_url
+    WHERE q.status = 'pending' AND pq.ai_summarized_at IS NULL
+    ORDER BY q.priority DESC
+    LIMIT ?`).all(SUMMARIZE_BATCH);
+  if (!rows.length) return;
+
+  const client = new Anthropic({ apiKey });
+  let done = 0;
+  for (const row of rows) {
+    try {
+      const title = row.hosted_title || row.pdf_title || row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ');
+      const prompt = `PDF title: ${title}\nURL: ${row.url}${row.source_url ? `\nFound on: ${row.source_url}` : ''}${row.excerpt ? `\nExcerpt: ${row.excerpt.slice(0, 400)}` : ''}\n\nWrite exactly 2 lines:\n1. One sentence summary of this document.\n2. Author: [name or Unknown]`;
+      const msg = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001', max_tokens: 120,
+        messages: [{ role: 'user', content: prompt }]
+      });
+      const text = msg.content[0]?.text || '';
+      const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
+      const summary = lines[0] || null;
+      const authorLine = lines.find(l => l.toLowerCase().startsWith('author:'));
+      const author = authorLine ? authorLine.replace(/^author:\s*/i, '').trim() : null;
+      db.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_summarized_at=? WHERE url=?')
+        .run(summary, author, new Date().toISOString(), row.url);
+      done++;
+    } catch (e) {
+      log(`summarize failed: ${row.url}: ${e.message}`);
+    }
+  }
+  if (done) log(`Summarized ${done} pending docs via Haiku`);
+};
 
 /** Process one queued PDF document. */
 const processOne = async (db, domain, row) => {
@@ -104,9 +145,15 @@ const tick = async () => {
   }
 
   if (bestRow && bestDb) {
+    // Summarize top pending items before starting the long OCR job
+    await summarizeTopPending(bestDb, bestDomain);
     await processOne(bestDb, bestDomain, bestRow);
   } else {
     log('No pending items');
+    // Still summarize if there are unsummarized queue items
+    for (const { db, domain } of openDbs) {
+      await summarizeTopPending(db, domain);
+    }
   }
 
   // Close all dbs
