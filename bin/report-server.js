@@ -48,12 +48,13 @@ const PER_PAGE = 50;
 const corsHeaders = {
   'Access-Control-Allow-Origin': CORS_ORIGIN,
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type',
-  'Cache-Control': 'no-cache'
+  'Access-Control-Allow-Headers': 'Content-Type'
 };
+const noCacheHeaders = { ...corsHeaders, 'Cache-Control': 'no-cache, no-store' };
+const cacheHeaders = (maxAge = 86400) => ({ ...corsHeaders, 'Cache-Control': `public, max-age=${maxAge}` });
 
 const json = (res, data, status = 200) => {
-  res.writeHead(status, { 'Content-Type': 'application/json', ...corsHeaders });
+  res.writeHead(status, { 'Content-Type': 'application/json', ...noCacheHeaders });
   res.end(JSON.stringify(data));
 };
 const err = (res, status, msg) => json(res, { error: msg }, status);
@@ -276,7 +277,7 @@ createServer(async (req, res) => {
     const thumbPath = join(thumbDir, `x${hash}_${w}w.jpg`);
 
     if (existsSync(thumbPath)) {
-      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400', ...corsHeaders });
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', ...cacheHeaders(604800) });
       return res.end(readFileSync(thumbPath));
     }
 
@@ -289,7 +290,7 @@ createServer(async (req, res) => {
           const db2 = safeOpenDb(domain);
           if (db2) { try { db2.prepare('UPDATE pdf_quality SET thumbnail_path=? WHERE url=?').run(thumbPath, docUrl); } finally { db2.close(); } }
         }
-        res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400', ...corsHeaders });
+        res.writeHead(200, { 'Content-Type': 'image/jpeg', ...cacheHeaders(604800) });
         return res.end(readFileSync(thumbPath));
       }
     } catch (e) {
@@ -309,7 +310,7 @@ createServer(async (req, res) => {
     finally { db.close(); }
     if (!row?.upgraded_pdf_path || !existsSync(row.upgraded_pdf_path)) return err(res, 404, 'upgraded pdf not found');
     const filename = decodeURIComponent(docUrl.split('/').pop()) || 'document.pdf';
-    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control': 'public, max-age=3600', ...corsHeaders });
+    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${filename}"`, ...cacheHeaders(3600) });
     return res.end(readFileSync(row.upgraded_pdf_path));
   }
 
