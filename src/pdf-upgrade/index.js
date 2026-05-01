@@ -87,9 +87,18 @@ const processOne = async (db, domain, row) => {
   log(`Processing: ${row.url} (priority ${row.priority.toFixed(2)})`);
 
   try {
-    // Get page count from quality score row
-    const quality = db.prepare('SELECT pages FROM pdf_quality WHERE url=?').get(row.url);
+    // Get quality data and metadata for embedding
+    const quality = db.prepare(`
+      SELECT pq.pages, pq.pdf_title, pq.ai_summary, pq.ai_author, h.hosted_title, h.host_url as source_url
+      FROM pdf_quality pq LEFT JOIN hosts h ON pq.url=h.hosted_url WHERE pq.url=?`).get(row.url);
     const numPages = quality?.pages || 1;
+    const slug = row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
+    const meta = {
+      title:   quality?.hosted_title || quality?.pdf_title || (slug.length > 3 && !/^\d+$/.test(slug) ? slug : null) || undefined,
+      author:  quality?.ai_author && quality.ai_author !== 'Unknown' ? quality.ai_author : undefined,
+      subject: quality?.ai_summary || undefined,
+      keywords: ['site2rag', domain, ...(quality?.source_url ? [quality.source_url] : []), row.url]
+    };
 
     // Re-OCR via boss
     let ocrResults;
@@ -106,7 +115,7 @@ const processOne = async (db, domain, row) => {
     const upgradedDir = join(mirrorDir(domain), '.upgraded');
     mkdirSync(upgradedDir, { recursive: true });
     const outputPath = join(upgradedDir, `x${hash}.pdf`);
-    const { success, method, error } = await rebuildPdf(page.local_path, outputPath, ocrResults);
+    const { success, method, error } = await rebuildPdf(page.local_path, outputPath, ocrResults, meta);
 
     if (!success) throw new Error(error);
 

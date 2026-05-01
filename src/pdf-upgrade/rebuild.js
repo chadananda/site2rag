@@ -12,15 +12,12 @@ const execFileAsync = promisify(execFile);
  * @param {string} inputPdfPath - Original PDF
  * @param {string} outputPdfPath - Where to write upgraded PDF/A-3
  * @param {Array<{pageNo,text_md}>} ocrResults - Per-page OCR text
+ * @param {object} [meta] - Optional metadata: { title, author, subject, keywords[] }
  * @returns {object} { success, method, error }
  */
-export const rebuildPdf = async (inputPdfPath, outputPdfPath, ocrResults) => {
+export const rebuildPdf = async (inputPdfPath, outputPdfPath, ocrResults, meta = {}) => {
   mkdirSync(dirname(outputPdfPath), { recursive: true });
 
-  // Write a sidecar text file (one page per \f separator) for OCRmyPDF --sidecar-input
-  // OCRmyPDF doesn't support sidecar input directly, so we use --force-ocr with tesseract skip
-  // and inject text via pdf-lib invisible text as a fallback approach.
-  // Primary approach: OCRmyPDF with --redo-ocr for cleaner PDF/A output.
   try {
     const args = [
       inputPdfPath,
@@ -28,19 +25,22 @@ export const rebuildPdf = async (inputPdfPath, outputPdfPath, ocrResults) => {
       '--output-type', 'pdfa-3',
       '--pdfa-image-compression', 'lossless',
       '--optimize', '1',
-      '--skip-text',       // don't re-OCR pages that already have text
+      '--skip-text',
       '--rotate-pages',
       '--deskew',
       '--clean',
       '--jobs', '2',
       '--quiet'
     ];
+    if (meta.title)   args.push('--title',   meta.title);
+    if (meta.author)  args.push('--author',  meta.author);
+    if (meta.subject) args.push('--subject', meta.subject);
+    if (meta.keywords?.length) args.push('--keywords', meta.keywords.join(', '));
     await execFileAsync('ocrmypdf', args, { timeout: 300_000 });
     return { success: true, method: 'ocrmypdf-pdfa3' };
   } catch (err) {
-    // Fallback: copy original and embed text with pdf-lib
     try {
-      const result = await injectTextLayer(inputPdfPath, outputPdfPath, ocrResults);
+      const result = await injectTextLayer(inputPdfPath, outputPdfPath, ocrResults, meta);
       return { success: true, method: 'pdf-lib-overlay', ...result };
     } catch (err2) {
       return { success: false, method: null, error: `ocrmypdf: ${err.message}; pdf-lib: ${err2.message}` };
@@ -49,7 +49,7 @@ export const rebuildPdf = async (inputPdfPath, outputPdfPath, ocrResults) => {
 };
 
 /** Inject invisible text overlay per page using pdf-lib. */
-const injectTextLayer = async (inputPdfPath, outputPdfPath, ocrResults) => {
+const injectTextLayer = async (inputPdfPath, outputPdfPath, ocrResults, meta = {}) => {
   const { PDFDocument, rgb, StandardFonts } = await import('pdf-lib');
   const pdfBytes = readFileSync(inputPdfPath);
   const pdfDoc = await PDFDocument.load(pdfBytes, { ignoreEncryption: true });
@@ -76,11 +76,15 @@ const injectTextLayer = async (inputPdfPath, outputPdfPath, ocrResults) => {
     });
   }
 
-  // XMP metadata
-  const now = new Date().toISOString();
-  pdfDoc.setTitle(pdfDoc.getTitle() || '');
-  pdfDoc.setModificationDate(new Date());
-  pdfDoc.setKeywords(['OCR-upgraded', 'site2rag', now.slice(0, 10)]);
+  // Embed metadata
+  const now = new Date();
+  if (meta.title)  pdfDoc.setTitle(meta.title);
+  if (meta.author) pdfDoc.setAuthor(meta.author);
+  if (meta.subject) pdfDoc.setSubject(meta.subject);
+  pdfDoc.setProducer('site2rag OCR upgrade');
+  pdfDoc.setCreator('site2rag');
+  pdfDoc.setModificationDate(now);
+  pdfDoc.setKeywords([...(meta.keywords || []), 'OCR-upgraded', 'site2rag', now.toISOString().slice(0, 10)]);
 
   const outBytes = await pdfDoc.save({ addDefaultPage: false });
   writeFileSync(outputPdfPath, outBytes);
