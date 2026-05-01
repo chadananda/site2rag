@@ -1,10 +1,31 @@
-// site2rag API server -- live data from SQLite, served to the Cloudflare Pages frontend.
-// Routes: GET /api/sites, GET /api/docs, GET /api/runs
+// site2rag API + frontend server. Routes: GET /api/sites, /api/docs, /api/runs; static public/ for everything else.
 import { createServer } from 'http';
-import { existsSync } from 'fs';
-import { join } from 'path';
+import { existsSync, readFileSync } from 'fs';
+import { join, extname, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { loadConfig, getMirrorRoot } from '../src/config.js';
 import { openDb } from '../src/db.js';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PUBLIC_DIR = join(__dirname, '..', 'public');
+const STATIC_MIME = {
+  '.html': 'text/html; charset=utf-8', '.css': 'text/css', '.js': 'application/javascript',
+  '.json': 'application/json', '.png': 'image/png', '.jpg': 'image/jpeg',
+  '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
+};
+const serveStatic = (res, reqPath) => {
+  const filePath = join(PUBLIC_DIR, reqPath === '/' ? 'index.html' : reqPath);
+  if (!existsSync(filePath)) {
+    // SPA fallback: serve index.html for unknown paths
+    const index = join(PUBLIC_DIR, 'index.html');
+    if (!existsSync(index)) { res.writeHead(404); return res.end('Not found'); }
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+    return res.end(readFileSync(index));
+  }
+  const mime = STATIC_MIME[extname(filePath).toLowerCase()] || 'application/octet-stream';
+  res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'public, max-age=3600' });
+  res.end(readFileSync(filePath));
+};
 
 const PORT = parseInt(process.env.REPORT_PORT || '7840', 10);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://site2rag.lnker.com';
@@ -38,8 +59,17 @@ const siteSummary = (domain, siteUrl) => {
     const totals = db.prepare(`
       SELECT
         COUNT(*) as total_pages,
-        SUM(CASE WHEN mime_type='application/pdf' AND gone=0 THEN 1 ELSE 0 END) as total_pdfs
+        SUM(CASE WHEN mime_type='application/pdf' AND gone=0 THEN 1 ELSE 0 END) as total_pdfs,
+        SUM(CASE WHEN mime_type LIKE 'text/html%' AND gone=0 THEN 1 ELSE 0 END) as total_html
       FROM pages
+    `).get();
+    const classify = db.prepare(`
+      SELECT
+        SUM(CASE WHEN page_role='content' THEN 1 ELSE 0 END) as content,
+        SUM(CASE WHEN page_role='index' THEN 1 ELSE 0 END) as index_pages,
+        SUM(CASE WHEN page_role='host_page' THEN 1 ELSE 0 END) as host_pages,
+        SUM(CASE WHEN page_role IS NOT NULL THEN 1 ELSE 0 END) as classified
+      FROM pages WHERE gone=0 AND mime_type LIKE 'text/html%'
     `).get();
     const pdf = db.prepare(`
       SELECT
@@ -51,7 +81,13 @@ const siteSummary = (domain, siteUrl) => {
       FROM pdf_quality q
       LEFT JOIN pdf_upgrade_queue u ON q.url = u.url
     `).get();
-    const lastRun = db.prepare(`SELECT started_at, status FROM runs ORDER BY id DESC LIMIT 1`).get();
+    const exp = db.prepare(`
+      SELECT
+        SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) as ok,
+        SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed
+      FROM exports
+    `).get();
+    const lastRun = db.prepare(`SELECT started_at, finished_at, status FROM runs ORDER BY id DESC LIMIT 1`).get();
     const doneDocs = db.prepare(`SELECT started_at, finished_at FROM pdf_upgrade_queue WHERE status='done' AND finished_at IS NOT NULL`).all();
     const avgSec = doneDocs.length
       ? doneDocs.reduce((a, d) => a + (new Date(d.finished_at) - new Date(d.started_at)) / 1000, 0) / doneDocs.length
@@ -59,13 +95,20 @@ const siteSummary = (domain, siteUrl) => {
     return {
       domain, url: siteUrl, available: true,
       total_pages: totals.total_pages || 0,
+      total_html: totals.total_html || 0,
       total_pdfs: totals.total_pdfs || 0,
+      pages_classified: classify.classified || 0,
+      pages_content: classify.content || 0,
+      pages_index: classify.index_pages || 0,
+      pages_host: classify.host_pages || 0,
       scored: pdf.scored || 0,
       upgraded: pdf.upgraded || 0,
       pending: pdf.pending || 0,
       processing: pdf.processing || 0,
       failed: pdf.failed || 0,
       eta_seconds: (pdf.pending || 0) * avgSec,
+      md_exported: exp.ok || 0,
+      md_failed: exp.failed || 0,
       last_run: lastRun || null
     };
   } finally { db.close(); }
@@ -183,7 +226,7 @@ createServer((req, res) => {
     return json(res, recentRuns(sites));
   }
 
-  err(res, 404, 'Not found');
+  return serveStatic(res, path);
 }).listen(PORT, '127.0.0.1', () => {
   console.log(`[report-server] API listening on http://127.0.0.1:${PORT}`);
 });

@@ -7,6 +7,7 @@ import * as cheerio from 'cheerio';
 import { mirrorDir } from './config.js';
 import { upsertPage, markGoneUrls } from './db.js';
 import { compileRules, applyFollowOverride, stripQueryParams } from './rules.js';
+import { scorePdf, saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
 // Document MIME types that get treated as downloadable documents
 const DOC_MIMES = new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.oasis.opendocument.text', 'application/epub+zip', 'text/plain']);
 const DOC_EXTS = new Set(['.pdf', '.doc', '.docx', '.odt', '.epub', '.txt']);
@@ -161,9 +162,23 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     const isNew = !existing;
     const isChanged = existing && existing.content_hash !== contentHash;
     if (isNew || isChanged) {
-      mkdirSync(dirname(mirrorPath), { recursive: true });
-      writeFileSync(mirrorPath, buf);
-      if (isNew) stats.new_pages++; else stats.changed++;
+      try {
+        mkdirSync(dirname(mirrorPath), { recursive: true });
+        writeFileSync(mirrorPath, buf);
+        if (isNew) stats.new_pages++; else stats.changed++;
+      } catch (writeErr) {
+        console.warn(`[mirror] skipping ${canonical}: ${writeErr.message}`);
+        continue;
+      }
+      if (mimeType === 'application/pdf') {
+        try {
+          const metrics = await scorePdf(mirrorPath);
+          saveQualityScore(db, canonical, contentHash, metrics);
+          maybeQueue(db, canonical, contentHash, metrics.composite_score);
+        } catch (scoreErr) {
+          console.warn(`[mirror] score failed ${canonical}: ${scoreErr.message}`);
+        }
+      }
     }
     upsertPage(db, {
       url: canonical,
@@ -192,5 +207,21 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   }
   // Mark pages not seen this run as gone
   stats.gone = markGoneUrls(db, runStartedAt);
+  // Backfill scores for any PDFs that were downloaded but never scored
+  const unscored = db.prepare(`
+    SELECT p.url, p.local_path, p.content_hash FROM pages p
+    LEFT JOIN pdf_quality q ON p.url=q.url
+    WHERE p.mime_type='application/pdf' AND p.gone=0 AND p.local_path IS NOT NULL AND q.url IS NULL
+  `).all();
+  for (const row of unscored) {
+    if (!existsSync(row.local_path)) continue;
+    try {
+      const metrics = await scorePdf(row.local_path);
+      saveQualityScore(db, row.url, row.content_hash, metrics);
+      maybeQueue(db, row.url, row.content_hash, metrics.composite_score);
+    } catch (scoreErr) {
+      console.warn(`[mirror] backfill score failed ${row.url}: ${scoreErr.message}`);
+    }
+  }
   return stats;
 };

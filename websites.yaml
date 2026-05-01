@@ -7,6 +7,10 @@ defaults:
   same_domain_only: true
   max_depth: 8
   respect_robots_txt: true
+  export_md: true
+  pdf_upgrade:
+    enabled: true
+    score_threshold: 0.7
   sitemap:
     enabled: true
     diff_every_hours: 24
