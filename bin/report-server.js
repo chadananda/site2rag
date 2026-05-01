@@ -278,6 +278,59 @@ createServer(async (req, res) => {
     return json(res, recentRuns(sites));
   }
 
+  if (path === '/api/docs/summarize-batch' && req.method === 'POST') {
+    const domain = url.searchParams.get('site');
+    const limit = Math.min(200, parseInt(url.searchParams.get('limit') || '100', 10));
+    if (!domain) return err(res, 400, 'site param required');
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return err(res, 503, 'ANTHROPIC_API_KEY not set');
+
+    // Fetch unsummarized image PDFs sorted by worst score
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, 'db unavailable');
+    let rows;
+    try {
+      rows = db.prepare(`
+        SELECT q.url, q.pdf_title, q.excerpt, h.hosted_title, h.host_url as source_url
+        FROM pdf_quality q
+        LEFT JOIN hosts h ON q.url=h.hosted_url
+        WHERE q.ai_summarized_at IS NULL
+          AND (q.has_text_layer=0 OR q.has_text_layer IS NULL OR q.readable_pages_pct < 0.4)
+        ORDER BY COALESCE(q.composite_score, 1) ASC
+        LIMIT ?`).all(limit);
+    } finally { db.close(); }
+
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', ...corsHeaders });
+
+    const client = new Anthropic({ apiKey });
+    let done = 0;
+    for (const row of rows) {
+      try {
+        const title = row.hosted_title || row.pdf_title || row.url.split('/').pop().replace(/\.pdf$/i,'').replace(/[_-]/g,' ');
+        const prompt = `PDF title: ${title}\nURL: ${row.url}${row.source_url ? `\nFound on: ${row.source_url}` : ''}${row.excerpt ? `\nExcerpt: ${row.excerpt.slice(0,400)}` : ''}\n\nWrite exactly 2 lines:\n1. One sentence summary of this document.\n2. Author: [name or Unknown]`;
+        const msg = await client.messages.create({
+          model: 'claude-haiku-4-5-20251001', max_tokens: 120,
+          messages: [{ role: 'user', content: prompt }]
+        });
+        const text = msg.content[0]?.text || '';
+        const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
+        const summary = lines[0] || null;
+        const authorLine = lines.find(l => l.toLowerCase().startsWith('author:'));
+        const author = authorLine ? authorLine.replace(/^author:\s*/i,'').trim() : null;
+        const db2 = safeOpenDb(domain);
+        if (db2) {
+          try { db2.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_summarized_at=? WHERE url=?').run(summary, author, new Date().toISOString(), row.url); }
+          finally { db2.close(); }
+        }
+      } catch (e) {
+        console.error(`[batch-summarize] ${row.url}: ${e.message}`);
+      }
+      done++;
+      res.write(`data:${JSON.stringify({ done, total: rows.length })}\n\n`);
+    }
+    return res.end();
+  }
+
   if (path === '/api/docs/summarize' && req.method === 'POST') {
     const domain = url.searchParams.get('site');
     const docUrl = url.searchParams.get('url');

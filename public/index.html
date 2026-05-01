@@ -108,35 +108,36 @@ if ('serviceWorker' in navigator) {
             <div><span class="font-bold mono text-green-600" x-text="fmt(s.upgraded)"></span><span class="text-gray-400 ml-1">upgraded</span></div>
           </div>
 
-          <!-- Upgrade progress segmented bar -->
-          <div class="mb-2">
-            <div class="flex justify-between text-xs text-gray-400 mb-1">
-              <span>upgrade progress</span>
-              <span class="mono" x-text="upgradeProgressLabel(s)"></span>
+          <!-- Spider progress (full width, main task) -->
+          <div class="mb-3">
+            <div class="flex justify-between text-xs mb-1">
+              <span class="text-gray-500 font-medium">spidering</span>
+              <span class="mono text-gray-600" x-text="fmt(s.total_pages)+' pages · '+fmt(s.total_pdfs)+' PDFs'"></span>
             </div>
-            <div class="seg-bar">
-              <!-- Done (green) -->
-              <div class="seg-fill bg-green-400" :style="'width:'+upgradeSegPct(s,'done')+'%'" :title="fmt(s.upgraded)+' upgraded'"></div>
-              <!-- Processing (animated blue) -->
-              <div class="seg-fill bg-blue-400 processing-pulse" :style="'width:'+upgradeSegPct(s,'processing')+'%'" :title="fmt(s.processing)+' running'"></div>
-              <!-- Pending (amber) -->
-              <div class="seg-fill bg-amber-300" :style="'width:'+upgradeSegPct(s,'pending')+'%'" :title="fmt(s.pending)+' queued'"></div>
+            <div class="prog-bar" style="height:8px">
+              <div class="prog-fill" :style="'width:'+siteProgressPct(s,'pages')+'%'"
+                   :class="s.last_run?.status==='running' ? 'bg-blue-400 processing-pulse' : 'bg-gray-500'"></div>
             </div>
+            <div class="text-xs text-gray-400 mt-0.5" x-text="s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started')"></div>
           </div>
 
-          <!-- Mini bars row -->
-          <div class="grid grid-cols-3 gap-2 text-xs">
-            <div>
-              <div class="flex justify-between text-gray-400 mb-0.5"><span>spidering</span><span class="mono" x-text="fmt(s.total_pages)"></span></div>
-              <div class="prog-bar"><div class="prog-fill bg-gray-400" :style="'width:'+siteProgressPct(s,'pages')+'%'"></div></div>
+          <!-- Upgrade progress segmented bar -->
+          <div>
+            <div class="flex justify-between text-xs mb-1">
+              <span class="text-gray-500 font-medium">PDF upgrade</span>
+              <span class="mono text-gray-600" x-text="upgradeProgressLabel(s)"></span>
             </div>
-            <div>
-              <div class="flex justify-between text-gray-400 mb-0.5"><span>scored</span><span class="mono" x-text="fmt(s.scored)+'/'+fmt(s.total_pdfs)"></span></div>
-              <div class="prog-bar"><div class="prog-fill bg-blue-400" :style="'width:'+siteProgressPct(s,'scored')+'%'"></div></div>
+            <div class="seg-bar" style="height:8px">
+              <div class="seg-fill bg-green-400" :style="'width:'+upgradeSegPct(s,'done')+'%'" :title="fmt(s.upgraded)+' upgraded'"></div>
+              <div class="seg-fill bg-blue-400 processing-pulse" :style="'width:'+upgradeSegPct(s,'processing')+'%'" :title="fmt(s.processing)+' running'"></div>
+              <div class="seg-fill bg-amber-300" :style="'width:'+upgradeSegPct(s,'pending')+'%'" :title="fmt(s.pending)+' queued'"></div>
             </div>
-            <div>
-              <div class="flex justify-between text-gray-400 mb.0.5"><span>exported</span><span class="mono" x-text="fmt(s.md_exported)+'/'+fmt(s.total_html)"></span></div>
-              <div class="prog-bar"><div class="prog-fill bg-purple-400" :style="'width:'+siteProgressPct(s,'exported')+'%'"></div></div>
+            <div class="flex gap-3 text-xs text-gray-400 mt-0.5">
+              <span x-show="s.upgraded" class="text-green-600" x-text="fmt(s.upgraded)+' done'"></span>
+              <span x-show="s.processing" class="text-blue-500" x-text="fmt(s.processing)+' running'"></span>
+              <span x-show="s.pending" class="text-amber-600" x-text="fmt(s.pending)+' queued'"></span>
+              <span x-show="s.failed" class="text-red-500" x-text="fmt(s.failed)+' failed'"></span>
+              <span x-show="s.skipped" class="text-gray-400" x-text="fmt(s.skipped)+' skipped'"></span>
             </div>
           </div>
         </button>
@@ -151,13 +152,23 @@ if ('serviceWorker' in navigator) {
       <div class="flex items-end border-b border-gray-200 mb-4 gap-0">
         <button class="tab-btn" :class="activeTab==='queue'?'active':''" @click="switchTab('queue')">
           Needs Upgrade
-          <span class="ml-1.5 text-xs mono font-normal text-gray-400" x-text="activeTab==='queue'?'('+docsTotal+')':''"></span>
+          <span class="ml-1.5 text-xs mono font-normal text-gray-400" x-text="activeTab==='queue'?'('+fmt(docsTotal)+')':''"></span>
         </button>
         <button class="tab-btn" :class="activeTab==='upgraded'?'active':''" @click="switchTab('upgraded')">
           Upgraded
-          <span class="ml-1.5 text-xs mono font-normal text-gray-400" x-text="activeTab==='upgraded'?'('+docsTotal+')':''"></span>
+          <span class="ml-1.5 text-xs mono font-normal text-gray-400" x-text="activeTab==='upgraded'?'('+fmt(docsTotal)+')':''"></span>
         </button>
-        <div class="ml-auto pb-1 text-xs text-gray-400 mono" x-text="activeTab!=='queue'||!docsTotal?'':docsTotal+' image PDFs'+(loading?' …':'')"></div>
+        <div class="ml-auto pb-1 flex items-center gap-2">
+          <template x-if="activeTab==='queue' && !summarizingBatch">
+            <button @click="summarizeBatch()"
+                    class="text-xs px-2 py-0.5 rounded border border-blue-200 text-blue-600 hover:bg-blue-50 transition-colors">
+              ✦ Summarize top 100
+            </button>
+          </template>
+          <template x-if="summarizingBatch">
+            <span class="text-xs text-blue-500 animate-pulse mono" x-text="'summarizing '+summarizeProgress+'…'"></span>
+          </template>
+        </div>
       </div>
 
       <!-- Filter bar -->
@@ -526,6 +537,7 @@ function app() {
     loading: false, apiStatus: '', apiError: '', lastRefresh: '',
     expandedDoc: null,
     activeTab: 'queue',
+    summarizingBatch: false, summarizeProgress: '',
     appVersion: '', _buildId: null,
     _searchTimer: null,
     fmt, scorePillCls, scoreBlockCls, scoreLabel, effortEstimate, cannotUpgrade,
@@ -536,6 +548,35 @@ function app() {
 
     openDetail(doc) { this.expandedDoc = { ...doc }; },
     closeDetail() { this.expandedDoc = null; },
+
+    async summarizeBatch() {
+      if (this.summarizingBatch || !this.activeSite) return;
+      this.summarizingBatch = true;
+      this.summarizeProgress = '0/100';
+      try {
+        const res = await fetch(`${API_BASE}/api/docs/summarize-batch?site=${this.activeSite.domain}&limit=100`, { method: 'POST' });
+        if (res.ok) {
+          const reader = res.body.getReader();
+          const dec = new TextDecoder();
+          let buf = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+            for (const line of lines) {
+              if (line.startsWith('data:')) {
+                try { const d = JSON.parse(line.slice(5)); this.summarizeProgress = d.done+'/'+d.total; } catch {}
+              }
+            }
+          }
+          await this.loadDocs();
+        }
+      } catch {}
+      this.summarizingBatch = false;
+      this.summarizeProgress = '';
+    },
 
     async summarize(doc) {
       if (doc._summarizing) return;
