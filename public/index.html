@@ -281,7 +281,7 @@
     <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
       <div class="flex gap-4 p-5">
         <div class="shrink-0">
-          <img :src="thumbSrc(expandedDoc, true)" :alt="docTitle(expandedDoc)"
+          <img :src="thumbSrc(expandedDoc)" :alt="docTitle(expandedDoc)"
                class="rounded border border-gray-100 w-48 cursor-pointer"
                @click="window.open(expandedDoc.url,'_blank')"
                title="Click to open PDF"
@@ -402,7 +402,6 @@ function timeAgo(iso) {
 function app() {
   return {
     sites: [], activeSite: null,
-    ikEndpoint: '', thumbWidth: 180, previewWidth: 600,
     docs: [], topDocs: [], restDocs: [],
     docsTotal: 0, docsPage: 1, docsPages: 1,
     filters: { q: '', status: '', score_max: 1, sort: 'score_asc' },
@@ -411,11 +410,7 @@ function app() {
     _searchTimer: null,
     scoreCls, statusCls, statusLabel, scoreLabel, effortEstimate,
 
-    thumbSrc(doc, large = false) {
-      if (this.ikEndpoint) {
-        const w = large ? this.previewWidth : this.thumbWidth;
-        return `${this.ikEndpoint}/site2rag/${this.activeSite?.domain}/tr:w-${w},f-jpg/${doc.path_slug}.jpg`;
-      }
+    thumbSrc(doc) {
       return `${API_BASE}/api/thumbnail?url=${encodeURIComponent(doc.url)}`;
     },
 
@@ -465,9 +460,6 @@ function app() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         this.sites = data.sites || (Array.isArray(data) ? data : []);
-        this.ikEndpoint = data.imagekit_endpoint || '';
-        this.thumbWidth = data.thumb_width || 180;
-        this.previewWidth = data.preview_width || 600;
         this.apiStatus = 'connected'; this.apiError = '';
         if (!this.activeSite && this.sites.length) await this.selectSite(this.sites[0]);
         else if (this.activeSite) {
@@ -482,10 +474,7 @@ function app() {
       if (!res?.ok) return;
       const data = await res.json();
       this.sites = data.sites || (Array.isArray(data) ? data : []);
-      if (this.activeSite) {
-        const u = this.sites.find(s => s.domain === this.activeSite.domain);
-        if (u) this.activeSite = u;
-      }
+      if (this.activeSite) { const u = this.sites.find(s => s.domain === this.activeSite.domain); if (u) this.activeSite = u; }
       this.lastRefresh = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     },
 

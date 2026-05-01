@@ -57,13 +57,13 @@ const mapDoc = (d, domain) => ({
   archive_url: d.status === 'done' && d.upgraded_pdf_path
     ? `https://${domain}.lnker.com/_upgraded/${d.path_slug || d.url.replace(/[^a-z0-9]/gi,'_').slice(-60)}.pdf`
     : null,
-  thumbnail_url: `/api/thumbnail?url=${encodeURIComponent(d.url)}`,
 });
 
 /** Generate a JPEG thumbnail of PDF page 1 using pdftoppm. Returns true on success. */
 const generateThumb = async (pdfPath, outPath) => {
   const prefix = outPath.replace(/\.jpg$/, '');
-  await execFileAsync('pdftoppm', ['-f', '1', '-l', '1', '-r', '72', '-jpeg', '-jpegopt', 'quality=75', pdfPath, prefix]);
+  // 36dpi → ~300px wide for letter-size PDF: good for both card thumbnail and modal preview
+  await execFileAsync('pdftoppm', ['-f', '1', '-l', '1', '-r', '36', '-jpeg', '-jpegopt', 'quality=80', pdfPath, prefix]);
   // pdftoppm writes prefix-1.jpg or prefix-01.jpg depending on page count
   for (const candidate of [`${prefix}-1.jpg`, `${prefix}-01.jpg`, `${prefix}-001.jpg`]) {
     if (existsSync(candidate)) { renameSync(candidate, outPath); return true; }
@@ -201,16 +201,7 @@ createServer(async (req, res) => {
   const sites = cfg.sites.map(s => ({ domain: new URL(s.url).hostname, url: s.url }));
 
   if (path === '/api/sites') {
-    const thumbCfg = cfg.defaults?.thumbnails || {};
-    // Only expose Imagekit endpoint when R2 is configured (so uploads work)
-    const r2Ready = !!(process.env.S3_ACCESS_KEY && process.env.S3_SECRET_KEY);
-    const ikEndpoint = r2Ready ? (thumbCfg.imagekit_endpoint || '') : '';
-    return json(res, {
-      sites: sites.map(s => siteSummary(s.domain, s.url)),
-      imagekit_endpoint: ikEndpoint,
-      thumb_width: thumbCfg.thumb_width || 180,
-      preview_width: thumbCfg.preview_width || 600
-    });
+    return json(res, { sites: sites.map(s => siteSummary(s.domain, s.url)) });
   }
 
   if (path === '/api/docs') {
