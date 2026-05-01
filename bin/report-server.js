@@ -2,6 +2,7 @@
 import { createServer } from 'http';
 import { existsSync, readFileSync, mkdirSync, renameSync } from 'fs';
 import { join, extname, dirname } from 'path';
+import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
@@ -75,10 +76,9 @@ const mapDoc = (d, domain) => ({
 });
 
 /** Generate a JPEG thumbnail of PDF page 1 using pdftoppm. Returns true on success. */
-const generateThumb = async (pdfPath, outPath) => {
+const generateThumb = async (pdfPath, outPath, dpi = 36) => {
   const prefix = outPath.replace(/\.jpg$/, '');
-  // 36dpi → ~300px wide for letter-size PDF: good for both card thumbnail and modal preview
-  await execFileAsync('pdftoppm', ['-f', '1', '-l', '1', '-r', '36', '-jpeg', '-jpegopt', 'quality=80', pdfPath, prefix]);
+  await execFileAsync('pdftoppm', ['-f', '1', '-l', '1', '-r', String(dpi), '-jpeg', '-jpegopt', 'quality=80', pdfPath, prefix]);
   // pdftoppm writes prefix-1.jpg or prefix-01.jpg depending on page count
   for (const candidate of [`${prefix}-1.jpg`, `${prefix}-01.jpg`, `${prefix}-001.jpg`]) {
     if (existsSync(candidate)) { renameSync(candidate, outPath); return true; }
@@ -255,9 +255,11 @@ createServer(async (req, res) => {
     finally { db.close(); }
     if (!row?.local_path || !existsSync(row.local_path)) return err(res, 404, 'pdf not found');
 
-    const slug = row.path_slug || docUrl.replace(/[^a-z0-9]/gi, '_').slice(-80);
-    const thumbDir = join(getMirrorRoot(), domain, '_meta', 'thumbnails');
-    const thumbPath = join(thumbDir, `${slug}.jpg`);
+    const w = Math.min(1200, Math.max(50, parseInt(url.searchParams.get('w') || '300', 10)));
+    const dpi = Math.max(6, Math.round(w / 8.5)); // letter-size: 8.5" wide
+    const hash = createHash('sha256').update(docUrl).digest('hex').slice(0, 16);
+    const thumbDir = join(getMirrorRoot(), domain, '.thumbs');
+    const thumbPath = join(thumbDir, `${hash}-${w}.jpg`);
 
     if (existsSync(thumbPath)) {
       res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400', ...corsHeaders });
@@ -266,11 +268,13 @@ createServer(async (req, res) => {
 
     try {
       mkdirSync(thumbDir, { recursive: true });
-      const ok = await generateThumb(row.local_path, thumbPath);
+      const ok = await generateThumb(row.local_path, thumbPath, dpi);
       if (ok && existsSync(thumbPath)) {
-        // Cache path in DB so API responses include it without re-checking filesystem
-        const db2 = safeOpenDb(domain);
-        if (db2) { try { db2.prepare('UPDATE pdf_quality SET thumbnail_path=? WHERE url=?').run(thumbPath, docUrl); } finally { db2.close(); } }
+        // Store default-size path in DB for fast API lookup
+        if (w === 300) {
+          const db2 = safeOpenDb(domain);
+          if (db2) { try { db2.prepare('UPDATE pdf_quality SET thumbnail_path=? WHERE url=?').run(thumbPath, docUrl); } finally { db2.close(); } }
+        }
         res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400', ...corsHeaders });
         return res.end(readFileSync(thumbPath));
       }

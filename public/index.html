@@ -375,7 +375,7 @@ if ('serviceWorker' in navigator) {
     <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
       <div class="flex gap-5 p-6">
         <div class="shrink-0">
-          <img :src="thumbSrc(expandedDoc)" :alt="docTitle(expandedDoc)"
+          <img :src="thumbSrc(expandedDoc, 600)" :alt="docTitle(expandedDoc)"
                class="rounded-lg w-40 cursor-pointer"
                style="box-shadow:0 2px 12px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06)"
                @click="window.open(expandedDoc.url,'_blank')"
@@ -538,8 +538,8 @@ function app() {
     _searchTimer: null,
     fmt, scorePillCls, scoreBlockCls, scoreLabel, effortEstimate, cannotUpgrade,
 
-    thumbSrc(doc) {
-      return `${API_BASE}/api/thumbnail?url=${encodeURIComponent(doc.url)}`;
+    thumbSrc(doc, w = 300) {
+      return `${API_BASE}/api/thumbnail?url=${encodeURIComponent(doc.url)}&w=${w}`;
     },
 
     openDetail(doc) { this.expandedDoc = { ...doc }; },
