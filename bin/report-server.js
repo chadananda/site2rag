@@ -164,8 +164,7 @@ const siteDocs = (domain, params) => {
     const offset = (page - 1) * PER_PAGE;
 
     const wheres = ["p.gone=0", "p.mime_type='application/pdf'",
-      "p.url NOT LIKE '%.doc'", "p.url NOT LIKE '%.docx'",
-      "p.url NOT LIKE '%.xls'", "p.url NOT LIKE '%.xlsx'"];
+      "LOWER(p.url) LIKE '%.pdf'"];
     const vals = [];
 
     // Tab filtering
