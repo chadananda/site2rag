@@ -10,7 +10,8 @@ const WORKER_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'score-worke
 const CONCURRENCY = Math.max(1, cpus().length - 2);
 
 const scoreOne = (pdfPath) => new Promise((resolve) => {
-  const w = new Worker(WORKER_SCRIPT, { workerData: { pdfPath } });
+  // execArgv: [] prevents --input-type or other flags from being inherited by workers
+  const w = new Worker(WORKER_SCRIPT, { workerData: { pdfPath }, execArgv: [] });
   w.once('message', resolve);
   w.once('error', (e) => resolve({ ok: false, error: e.message }));
   w.once('exit', (code) => { if (code !== 0) resolve({ ok: false, error: `exit ${code}` }); });
