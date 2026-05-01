@@ -169,9 +169,14 @@ const siteDocs = (domain, params) => {
     // Tab filtering
     if (tab === 'upgraded') {
       wheres.push("u.status='done'");
+    } else if (tab === 'adequate') {
+      // Adequate: PDFs already readable enough, not in upgrade queue
+      wheres.push("(u.url IS NULL OR u.status IS NULL)");
+      wheres.push("q.composite_score >= 0.7");
+      wheres.push("(q.skip IS NULL OR q.skip=0)");
     } else {
-      // Queue tab: only image PDFs (no/poor text layer) not yet done
-      wheres.push("u.status IS NULL OR u.status != 'done'");
+      // Failed tab (default): image PDFs needing upgrade, not yet done
+      wheres.push("(u.status IS NULL OR u.status != 'done')");
       wheres.push("(q.has_text_layer=0 OR q.has_text_layer IS NULL OR q.readable_pages_pct < 0.4)");
       wheres.push("(q.skip IS NULL OR q.skip=0)");
     }
@@ -191,7 +196,9 @@ const siteDocs = (domain, params) => {
     };
     const orderBy = tab === 'upgraded'
       ? (orderMap[sort] || 'COALESCE(u.score_improvement, 0) DESC')
-      : (orderMap[sort] || orderMap.score_asc);
+      : tab === 'adequate'
+        ? (orderMap[sort] || orderMap.score_desc)
+        : (orderMap[sort] || orderMap.score_asc);
     const where = wheres.join(' AND ');
 
     const total = db.prepare(`SELECT COUNT(*) as n FROM pages p
