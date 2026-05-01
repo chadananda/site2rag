@@ -259,7 +259,7 @@ createServer(async (req, res) => {
     const dpi = Math.max(6, Math.round(w / 8.5)); // letter-size: 8.5" wide
     const hash = createHash('sha256').update(docUrl).digest('hex').slice(0, 16);
     const thumbDir = join(getMirrorRoot(), domain, '.thumbs');
-    const thumbPath = join(thumbDir, `${hash}-${w}.jpg`);
+    const thumbPath = join(thumbDir, `x${hash}_${w}w.jpg`);
 
     if (existsSync(thumbPath)) {
       res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400', ...corsHeaders });
