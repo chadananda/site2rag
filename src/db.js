@@ -147,6 +147,15 @@ CREATE TABLE IF NOT EXISTS llm_calls (
   called_at TEXT
 );
 `;
+/** Run ALTER TABLE migrations for columns added after initial schema. */
+const migrate = (db) => {
+  const addCol = (table, col, type) => {
+    try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`); } catch {}
+  };
+  addCol('pdf_quality', 'pdf_title', 'TEXT');
+  addCol('pdf_quality', 'excerpt', 'TEXT');
+};
+
 /** Open (or create) site.sqlite for a domain. Returns better-sqlite3 db instance. */
 export const openDb = (domain) => {
   const dir = metaDir(domain);
@@ -155,6 +164,7 @@ export const openDb = (domain) => {
   db.pragma('journal_mode = WAL');
   db.pragma('foreign_keys = ON');
   db.exec(DDL);
+  migrate(db);
   return db;
 };
 /** Insert a new run row, return run id. */
