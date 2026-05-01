@@ -42,7 +42,7 @@ const writeStatusYaml = (siteConfig, db, runStats, runId) => {
   const nextGrace = db.prepare('SELECT MIN(gone_since) FROM pages WHERE gone=1 AND archive_only=0').get()?.['MIN(gone_since)'] || null;
   const classStats = db.prepare('SELECT page_role, COUNT(*) as cnt FROM pages WHERE gone=0 GROUP BY page_role').all();
   const classMap = Object.fromEntries(classStats.map(r => [r.page_role, r.cnt]));
-  const exportRow = db.prepare('SELECT COUNT(*) as written, SUM(CASE WHEN status="ok" THEN 0 ELSE 1 END) as failed FROM exports').get();
+  const exportRow = db.prepare("SELECT COUNT(*) as written, SUM(CASE WHEN status='ok' THEN 0 ELSE 1 END) as failed FROM exports").get();
   const ocrStats = db.prepare('SELECT SUM(pages) as total, SUM(ocr_used) as ocr_used FROM exports WHERE ocr_used=1').get();
   const archiveRow = db.prepare('SELECT COUNT(*) as cnt FROM pages WHERE backup_url IS NOT NULL').get();
   const tokenRows = db.prepare('SELECT provider, SUM(tokens_in) as tin, SUM(tokens_out) as tout FROM llm_calls GROUP BY provider').all();
