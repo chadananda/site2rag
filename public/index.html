@@ -121,22 +121,27 @@ if ('serviceWorker' in navigator) {
             <div class="text-xs text-gray-400 mt-0.5" x-text="s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started')"></div>
           </div>
 
-          <!-- Upgrade progress segmented bar -->
+          <!-- Upgrade progress segmented bar: green=done, red=needs upgrade, gray=already OK -->
           <div>
             <div class="flex justify-between text-xs mb-1">
               <span class="text-gray-500 font-medium">PDF upgrade</span>
               <span class="mono text-gray-600" x-text="upgradeProgressLabel(s)"></span>
             </div>
-            <div class="seg-bar" style="height:8px">
+            <div class="seg-bar" style="height:10px">
+              <!-- Green: upgraded/done -->
               <div class="seg-fill bg-green-400" :style="'width:'+upgradeSegPct(s,'done')+'%'" :title="fmt(s.upgraded)+' upgraded'"></div>
-              <div class="seg-fill bg-blue-400 processing-pulse" :style="'width:'+upgradeSegPct(s,'processing')+'%'" :title="fmt(s.processing)+' running'"></div>
-              <div class="seg-fill bg-amber-300" :style="'width:'+upgradeSegPct(s,'pending')+'%'" :title="fmt(s.pending)+' queued'"></div>
+              <!-- Blue pulse: actively processing -->
+              <div class="seg-fill bg-blue-400 processing-pulse" :style="'width:'+upgradeSegPct(s,'processing')+'%'" :title="fmt(s.processing)+' processing'"></div>
+              <!-- Light red: needs upgrading (pending + failed) -->
+              <div class="seg-fill bg-red-200" :style="'width:'+upgradeSegPct(s,'needs')+'%'" :title="fmt((s.pending||0)+(s.failed||0))+' need upgrade'"></div>
+              <!-- Gray: already good quality, no upgrade needed -->
+              <div class="seg-fill bg-gray-200" :style="'width:'+upgradeSegPct(s,'ok')+'%'" :title="fmt(s.already_ok||0)+' already readable'"></div>
             </div>
-            <div class="flex gap-3 text-xs text-gray-400 mt-0.5">
-              <span x-show="s.upgraded" class="text-green-600" x-text="fmt(s.upgraded)+' done'"></span>
-              <span x-show="s.processing" class="text-blue-500" x-text="fmt(s.processing)+' running'"></span>
-              <span x-show="s.pending" class="text-amber-600" x-text="fmt(s.pending)+' queued'"></span>
-              <span x-show="s.failed" class="text-red-500" x-text="fmt(s.failed)+' failed'"></span>
+            <div class="flex gap-3 text-xs mt-1 flex-wrap">
+              <span x-show="s.upgraded" class="text-green-600 font-medium" x-text="fmt(s.upgraded)+' done'"></span>
+              <span x-show="s.processing" class="text-blue-500 font-medium" x-text="fmt(s.processing)+' running'"></span>
+              <span x-show="(s.pending||0)+(s.failed||0)" class="text-red-400 font-medium" x-text="fmt((s.pending||0)+(s.failed||0))+' need upgrade'"></span>
+              <span x-show="s.already_ok" class="text-gray-400" x-text="fmt(s.already_ok)+' already OK'"></span>
               <span x-show="s.skipped" class="text-gray-400" x-text="fmt(s.skipped)+' skipped'"></span>
             </div>
           </div>
@@ -223,7 +228,8 @@ if ('serviceWorker' in navigator) {
                 <button @click="openDetail(doc)" class="shrink-0 focus:outline-none self-start mt-0.5" title="View details">
                   <img :src="thumbSrc(doc)" :alt="docTitle(doc)"
                        class="thumb hover:opacity-80 transition-opacity cursor-zoom-in"
-                       @error="$el.outerHTML='<div class=\'thumb-placeholder cursor-pointer\' @click=\'openDetail(doc)\'>📄</div>'">
+                       onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                  <div class="thumb-placeholder" style="display:none">📄</div>
                 </button>
 
                 <!-- Score block -->
@@ -565,17 +571,17 @@ function app() {
     },
 
     upgradeProgressLabel(s) {
-      const total = (s.upgraded||0) + (s.processing||0) + (s.pending||0);
-      if (!total) return '0 queued';
-      return `${fmt(s.upgraded||0)} / ${fmt(total)}`;
+      const total = s.total_pdfs || 0;
+      if (!total) return 'no PDFs';
+      return `${fmt(s.upgraded||0)} / ${fmt(total)} upgraded`;
     },
 
     upgradeSegPct(s, type) {
-      const total = (s.upgraded||0) + (s.processing||0) + (s.pending||0);
-      if (!total) return 0;
+      const total = s.total_pdfs || 1;
       if (type === 'done') return Math.round((s.upgraded||0) / total * 100);
       if (type === 'processing') return Math.round((s.processing||0) / total * 100);
-      if (type === 'pending') return Math.round((s.pending||0) / total * 100);
+      if (type === 'needs') return Math.round(((s.pending||0) + (s.failed||0)) / total * 100);
+      if (type === 'ok') return Math.round((s.already_ok||0) / total * 100);
       return 0;
     },
 

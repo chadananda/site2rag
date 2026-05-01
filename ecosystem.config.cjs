@@ -1,5 +1,6 @@
 const path = require('path');
 const SITE2RAG_ROOT = process.env.SITE2RAG_ROOT || path.resolve(__dirname, '..');
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 module.exports = {
   apps: [
     {
@@ -40,6 +41,8 @@ module.exports = {
         NODE_ENV: 'production',
         SITE2RAG_ROOT,
         REPORT_PORT: '7840',
+        CORS_ORIGIN: 'https://site2rag.lnker.com',
+        ANTHROPIC_API_KEY,
         UPGRADE_REPORT_PATH: path.join(SITE2RAG_ROOT, 'report')
       },
       autorestart: true,
@@ -57,6 +60,7 @@ module.exports = {
       env: {
         NODE_ENV: 'production',
         SITE2RAG_ROOT,
+        ANTHROPIC_API_KEY,
         LOCAL_LLM: process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:8000/v1',
         LOCAL_LLM_MODEL: process.env.LOCAL_LLM_MODEL || 'llava'
       },

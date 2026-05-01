@@ -94,7 +94,8 @@ const siteSummary = (domain, siteUrl) => {
         SUM(CASE WHEN u.status='pending' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN u.status='processing' THEN 1 ELSE 0 END) as processing,
         SUM(CASE WHEN u.status='failed' THEN 1 ELSE 0 END) as failed,
-        SUM(CASE WHEN q.skip=1 THEN 1 ELSE 0 END) as skipped
+        SUM(CASE WHEN q.skip=1 THEN 1 ELSE 0 END) as skipped,
+        SUM(CASE WHEN u.url IS NULL AND q.skip=0 AND q.composite_score >= 0.7 THEN 1 ELSE 0 END) as already_ok
       FROM pdf_quality q LEFT JOIN pdf_upgrade_queue u ON q.url=u.url`).get();
     const exp = db.prepare(`
       SELECT SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) as ok,
@@ -112,7 +113,7 @@ const siteSummary = (domain, siteUrl) => {
       pages_index: classify.index_pages || 0, pages_host: classify.host_pages || 0,
       scored: pdf.scored || 0, upgraded: pdf.upgraded || 0,
       pending: pdf.pending || 0, processing: pdf.processing || 0,
-      failed: pdf.failed || 0, skipped: pdf.skipped || 0,
+      failed: pdf.failed || 0, skipped: pdf.skipped || 0, already_ok: pdf.already_ok || 0,
       eta_seconds: (pdf.pending || 0) * avgSec,
       md_exported: exp.ok || 0, md_failed: exp.failed || 0,
       last_run: lastRun || null
