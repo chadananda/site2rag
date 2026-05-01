@@ -301,7 +301,7 @@ createServer(async (req, res) => {
     try { row = db.prepare("SELECT upgraded_pdf_path FROM pdf_upgrade_queue WHERE url=? AND status='done'").get(docUrl); }
     finally { db.close(); }
     if (!row?.upgraded_pdf_path || !existsSync(row.upgraded_pdf_path)) return err(res, 404, 'upgraded pdf not found');
-    const filename = row.upgraded_pdf_path.split('/').pop();
+    const filename = decodeURIComponent(docUrl.split('/').pop()) || 'document.pdf';
     res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control': 'public, max-age=3600', ...corsHeaders });
     return res.end(readFileSync(row.upgraded_pdf_path));
   }
