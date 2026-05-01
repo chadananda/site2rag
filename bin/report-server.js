@@ -1,10 +1,11 @@
-// site2rag API + report server. Routes: /api/sites, /api/docs, /api/thumbnail, /api/docs/skip; static public/.
+// site2rag API + report server. Routes: /api/sites, /api/docs, /api/thumbnail, /api/docs/skip, /api/docs/summarize; static public/.
 import { createServer } from 'http';
 import { existsSync, readFileSync, mkdirSync, renameSync } from 'fs';
 import { join, extname, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import Anthropic from '@anthropic-ai/sdk';
 import { loadConfig, getMirrorRoot } from '../src/config.js';
 import { openDb } from '../src/db.js';
 
@@ -124,7 +125,8 @@ const DOC_SELECT = `
          q.composite_score, q.pages, q.word_quality_estimate, q.readable_pages_pct,
          q.avg_chars_per_page, q.has_text_layer, q.skip,
          COALESCE(h.hosted_title, q.pdf_title) as title,
-         q.excerpt, h.host_url as source_url,
+         q.excerpt, q.ai_summary, q.ai_author, q.ai_summarized_at,
+         h.host_url as source_url,
          u.status, u.before_score, u.after_score, u.score_improvement,
          u.upgraded_pdf_path, u.error
   FROM pages p
@@ -142,10 +144,21 @@ const siteDocs = (domain, params) => {
     const status = params.get('status') || '';
     const scoreMax = parseFloat(params.get('score_max') || '1');
     const sort = params.get('sort') || 'score_asc';
+    const tab = params.get('tab') || 'queue'; // 'queue' = image PDFs needing upgrade, 'upgraded' = done
     const offset = (page - 1) * PER_PAGE;
 
     const wheres = ["p.gone=0", "p.mime_type='application/pdf'"];
     const vals = [];
+
+    // Tab filtering
+    if (tab === 'upgraded') {
+      wheres.push("u.status='done'");
+    } else {
+      // Queue tab: only image PDFs (no/poor text layer) not yet done
+      wheres.push("u.status IS NULL OR u.status != 'done'");
+      wheres.push("(q.has_text_layer=0 OR q.has_text_layer IS NULL OR q.readable_pages_pct < 0.4)");
+      wheres.push("(q.skip IS NULL OR q.skip=0)");
+    }
 
     if (q) { wheres.push("(p.url LIKE ? OR COALESCE(h.hosted_title,q.pdf_title) LIKE ? OR q.excerpt LIKE ?)"); vals.push(`%${q}%`, `%${q}%`, `%${q}%`); }
     if (status === 'unscored') wheres.push("q.composite_score IS NULL");
@@ -160,7 +173,9 @@ const siteDocs = (domain, params) => {
       title_asc: 'COALESCE(h.hosted_title, p.url) ASC',
       improved_desc: 'COALESCE(u.score_improvement, 0) DESC'
     };
-    const orderBy = orderMap[sort] || orderMap.score_asc;
+    const orderBy = tab === 'upgraded'
+      ? (orderMap[sort] || 'COALESCE(u.score_improvement, 0) DESC')
+      : (orderMap[sort] || orderMap.score_asc);
     const where = wheres.join(' AND ');
 
     const total = db.prepare(`SELECT COUNT(*) as n FROM pages p
@@ -261,6 +276,58 @@ createServer(async (req, res) => {
 
   if (path === '/api/runs') {
     return json(res, recentRuns(sites));
+  }
+
+  if (path === '/api/docs/summarize' && req.method === 'POST') {
+    const domain = url.searchParams.get('site');
+    const docUrl = url.searchParams.get('url');
+    if (!domain || !docUrl) return err(res, 400, 'site and url params required');
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, 'db unavailable');
+    let row;
+    try {
+      row = db.prepare(`SELECT q.url, q.pdf_title, q.excerpt, q.ai_summary, q.ai_author, q.ai_summarized_at,
+        h.hosted_title, h.host_url as source_url FROM pdf_quality q
+        LEFT JOIN hosts h ON q.url=h.hosted_url WHERE q.url=?`).get(docUrl);
+    } finally { db.close(); }
+    if (!row) return err(res, 404, 'doc not found in pdf_quality');
+    // Return cached if present
+    if (row.ai_summarized_at) return json(res, { summary: row.ai_summary, author: row.ai_author });
+    // Generate via Claude Haiku
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) return err(res, 503, 'ANTHROPIC_API_KEY not set');
+    try {
+      const title = row.hosted_title || row.pdf_title || docUrl.split('/').pop().replace(/\.pdf$/i,'').replace(/[_-]/g,' ');
+      const prompt = `Analyze this PDF document and provide a brief summary.
+
+Title: ${title}
+PDF URL: ${docUrl}${row.source_url ? `\nFound on page: ${row.source_url}` : ''}${row.excerpt ? `\nPDF text excerpt: ${row.excerpt.slice(0, 800)}` : ''}
+
+Reply with exactly two lines:
+1. A 1-2 sentence summary of what this document contains.
+2. Author: [name if identifiable from context, otherwise "Unknown"]`;
+      const client = new Anthropic({ apiKey });
+      const msg = await client.messages.create({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 200,
+        messages: [{ role: 'user', content: prompt }]
+      });
+      const text = msg.content[0]?.text || '';
+      const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
+      const summary = lines[0] || null;
+      const authorLine = lines.find(l => l.toLowerCase().startsWith('author:'));
+      const author = authorLine ? authorLine.replace(/^author:\s*/i, '').trim() : null;
+      // Store in DB
+      const db2 = safeOpenDb(domain);
+      if (db2) {
+        try { db2.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_summarized_at=? WHERE url=?').run(summary, author, new Date().toISOString(), docUrl); }
+        finally { db2.close(); }
+      }
+      return json(res, { summary, author });
+    } catch (e) {
+      console.error(`[summarize] ${docUrl}: ${e.message}`);
+      return err(res, 500, e.message);
+    }
   }
 
   return serveStatic(res, path);
