@@ -34,8 +34,15 @@ const summarizeTopPending = async (db, domain) => {
   let done = 0;
   for (const row of rows) {
     try {
-      const title = row.hosted_title || row.pdf_title || row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ');
-      const prompt = `PDF title: ${title}\nURL: ${row.url}${row.source_url ? `\nFound on: ${row.source_url}` : ''}${row.excerpt ? `\nExcerpt: ${row.excerpt.slice(0, 400)}` : ''}\n\nWrite exactly 2 lines:\n1. One sentence summary of this document.\n2. Author: [name or Unknown]`;
+      const title = row.hosted_title || row.pdf_title || null;
+      const slug = row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
+      const displayTitle = title || (slug.length > 3 ? slug : null);
+      if (!displayTitle && !row.excerpt && !row.source_url) { done++; continue; }
+      let prompt = 'You are cataloging a PDF document. Based only on the metadata provided, write:\n1. One sentence describing what this document likely contains.\n2. Author: [name if determinable, otherwise Unknown]\n\n';
+      if (displayTitle) prompt += `Title: ${displayTitle}\n`;
+      prompt += `URL: ${row.url}\n`;
+      if (row.source_url) prompt += `Found on: ${row.source_url}\n`;
+      if (row.excerpt) prompt += `Text excerpt: ${row.excerpt.slice(0, 500)}\n`;
       const msg = await client.messages.create({
         model: 'claude-haiku-4-5-20251001', max_tokens: 120,
         messages: [{ role: 'user', content: prompt }]

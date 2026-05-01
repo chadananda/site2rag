@@ -10,6 +10,20 @@ import { loadConfig, getMirrorRoot } from '../src/config.js';
 import { openDb } from '../src/db.js';
 
 const execFileAsync = promisify(execFile);
+
+/** Build a Haiku summarization prompt from available doc metadata. Returns null if no context. */
+const buildSummaryPrompt = (row) => {
+  const title = row.hosted_title || row.pdf_title || null;
+  const slug = (row.url || '').split('/').pop().replace(/\.pdf$/i,'').replace(/[_-]/g,' ').trim();
+  const displayTitle = title || (slug.length > 3 ? slug : null);
+  if (!displayTitle && !row.excerpt && !row.source_url) return null; // nothing to work with
+  let prompt = 'You are cataloging a PDF document. Based only on the metadata provided, write:\n1. One sentence describing what this document likely contains.\n2. Author: [name if determinable, otherwise Unknown]\n\n';
+  if (displayTitle) prompt += `Title: ${displayTitle}\n`;
+  prompt += `URL: ${row.url}\n`;
+  if (row.source_url) prompt += `Found on: ${row.source_url}\n`;
+  if (row.excerpt) prompt += `Text excerpt: ${row.excerpt.slice(0, 500)}\n`;
+  return prompt;
+};
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
 const STATIC_MIME = {
@@ -307,8 +321,8 @@ createServer(async (req, res) => {
     let done = 0;
     for (const row of rows) {
       try {
-        const title = row.hosted_title || row.pdf_title || row.url.split('/').pop().replace(/\.pdf$/i,'').replace(/[_-]/g,' ');
-        const prompt = `PDF title: ${title}\nURL: ${row.url}${row.source_url ? `\nFound on: ${row.source_url}` : ''}${row.excerpt ? `\nExcerpt: ${row.excerpt.slice(0,400)}` : ''}\n\nWrite exactly 2 lines:\n1. One sentence summary of this document.\n2. Author: [name or Unknown]`;
+        const prompt = buildSummaryPrompt(row);
+        if (!prompt) { done++; res.write(`data:${JSON.stringify({ done, total: rows.length })}\n\n`); continue; }
         const msg = await client.messages.create({
           model: 'claude-haiku-4-5-20251001', max_tokens: 120,
           messages: [{ role: 'user', content: prompt }]
@@ -347,19 +361,12 @@ createServer(async (req, res) => {
     if (!row) return err(res, 404, 'doc not found in pdf_quality');
     // Return cached if present
     if (row.ai_summarized_at) return json(res, { summary: row.ai_summary, author: row.ai_author });
+    const prompt = buildSummaryPrompt(row);
+    if (!prompt) return json(res, { summary: null, author: null }); // no context to summarize
     // Generate via Claude Haiku
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) return err(res, 503, 'ANTHROPIC_API_KEY not set');
     try {
-      const title = row.hosted_title || row.pdf_title || docUrl.split('/').pop().replace(/\.pdf$/i,'').replace(/[_-]/g,' ');
-      const prompt = `Analyze this PDF document and provide a brief summary.
-
-Title: ${title}
-PDF URL: ${docUrl}${row.source_url ? `\nFound on page: ${row.source_url}` : ''}${row.excerpt ? `\nPDF text excerpt: ${row.excerpt.slice(0, 800)}` : ''}
-
-Reply with exactly two lines:
-1. A 1-2 sentence summary of what this document contains.
-2. Author: [name if identifiable from context, otherwise "Unknown"]`;
       const client = new Anthropic({ apiKey });
       const msg = await client.messages.create({
         model: 'claude-haiku-4-5-20251001',
