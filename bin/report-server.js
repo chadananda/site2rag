@@ -16,13 +16,13 @@ const buildSummaryPrompt = (row) => {
   const title = row.hosted_title || row.pdf_title || null;
   const slug = (row.url || '').split('/').pop().replace(/\.pdf$/i,'').replace(/[_-]/g,' ').trim();
   const displayTitle = title || (slug.length > 3 ? slug : null);
-  if (!displayTitle && !row.excerpt && !row.source_url) return null; // nothing to work with
-  let prompt = 'You are cataloging a PDF document. Based only on the metadata provided, write:\n1. One sentence describing what this document likely contains.\n2. Author: [name if determinable, otherwise Unknown]\n\n';
-  if (displayTitle) prompt += `Title: ${displayTitle}\n`;
-  prompt += `URL: ${row.url}\n`;
-  if (row.source_url) prompt += `Found on: ${row.source_url}\n`;
-  if (row.excerpt) prompt += `Text excerpt: ${row.excerpt.slice(0, 500)}\n`;
-  return prompt;
+  if (!displayTitle && !row.excerpt && !row.source_url) return null;
+  const parts = [];
+  if (displayTitle) parts.push(`Title: ${displayTitle}`);
+  parts.push(`URL: ${row.url}`);
+  if (row.source_url) parts.push(`Source page: ${row.source_url}`);
+  if (row.excerpt) parts.push(`Excerpt: ${row.excerpt.slice(0, 500)}`);
+  return `Metadata for a PDF document:\n${parts.join('\n')}\n\nRespond with exactly two plain-text lines (no markdown, no numbering):\nLine 1: one sentence describing this document.\nLine 2: Author: [full name, or Unknown]`;
 };
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
