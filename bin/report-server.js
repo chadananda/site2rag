@@ -1,9 +1,9 @@
-// site2rag API + frontend server. Routes: GET /api/sites, /api/docs, /api/runs; static public/ for everything else.
+// site2rag API + frontend server. Routes: GET /api/sites, /api/docs, /api/docs/all, /api/thumbnail; static public/.
 import { createServer } from 'http';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
 import { join, extname, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { loadConfig, getMirrorRoot } from '../src/config.js';
+import { loadConfig, getMirrorRoot, metaDir } from '../src/config.js';
 import { openDb } from '../src/db.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -30,6 +30,14 @@ const serveStatic = (res, reqPath) => {
 const PORT = parseInt(process.env.REPORT_PORT || '7840', 10);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://site2rag.lnker.com';
 const PER_PAGE = 50;
+
+const mapDoc = (d, domain) => ({
+  ...d,
+  archive_url: d.status === 'done' && d.upgraded_pdf_path
+    ? `https://${domain}.lnker.com/_upgraded/${d.path_slug || d.url.replace(/[^a-z0-9]/gi,'_').slice(-60)}.pdf`
+    : null,
+  thumbnail_url: `https://api.lnker.com/api/thumbnail?url=${encodeURIComponent(d.url)}`
+});
 
 const json = (res, data, status = 200) => {
   res.writeHead(status, {
@@ -155,9 +163,10 @@ const siteDocs = (domain, params) => {
     const rows = db.prepare(`
       SELECT p.url, p.path_slug, p.last_seen_at,
              q.composite_score, q.pages, q.word_quality_estimate, q.readable_pages_pct,
+             COALESCE(h.hosted_title, q.pdf_title) as title,
+             q.excerpt, h.host_url as source_url,
              u.status, u.before_score, u.after_score, u.score_improvement,
-             u.upgraded_pdf_path, u.started_at, u.finished_at, u.error,
-             h.hosted_title as title
+             u.upgraded_pdf_path, u.started_at, u.finished_at, u.error
       FROM pages p
       LEFT JOIN pdf_quality q ON p.url=q.url
       LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
@@ -167,14 +176,30 @@ const siteDocs = (domain, params) => {
       LIMIT ${PER_PAGE} OFFSET ${offset}
     `).all(...vals);
 
-    const docs = rows.map(d => ({
-      ...d,
-      archive_url: d.status === 'done' && d.upgraded_pdf_path
-        ? `https://${domain}.lnker.com/_upgraded/${d.path_slug || d.url.replace(/[^a-z0-9]/gi,'_').slice(-60)}.pdf`
-        : null
-    }));
-
+    const docs = rows.map(d => mapDoc(d, domain));
     return { docs, total, page, pages: Math.ceil(total / PER_PAGE), per_page: PER_PAGE };
+  } finally { db.close(); }
+};
+
+/** All docs for a site (no pagination — for client-side filtering). */
+const siteDocsAll = (domain) => {
+  const db = safeOpenDb(domain);
+  if (!db) return null;
+  try {
+    const rows = db.prepare(`
+      SELECT p.url, p.path_slug, p.last_seen_at,
+             q.composite_score, q.pages, q.word_quality_estimate, q.readable_pages_pct,
+             COALESCE(h.hosted_title, q.pdf_title) as title,
+             q.excerpt, h.host_url as source_url,
+             u.status, u.before_score, u.after_score, u.score_improvement,
+             u.upgraded_pdf_path, u.error
+      FROM pages p
+      LEFT JOIN pdf_quality q ON p.url=q.url
+      LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
+      LEFT JOIN hosts h ON p.url=h.hosted_url
+      WHERE p.gone=0 AND p.mime_type='application/pdf'
+    `).all();
+    return { docs: rows.map(d => mapDoc(d, domain)) };
   } finally { db.close(); }
 };
 
@@ -190,6 +215,48 @@ const recentRuns = (sites) => {
     } finally { db.close(); }
   }
   return runs.sort((a, b) => (b.started_at || '').localeCompare(a.started_at || '')).slice(0, 20);
+};
+
+/** Serve a cached PDF thumbnail, generating it on first request. */
+const serveThumbnail = async (req, res, docUrl, sites) => {
+  // Find which site owns this URL
+  const domain = sites.find(s => docUrl.startsWith(`https://${s.domain}`) || docUrl.startsWith(`http://${s.domain}`))?.domain;
+  if (!domain) return err(res, 404, 'unknown domain');
+  const db = safeOpenDb(domain);
+  if (!db) return err(res, 404, 'db unavailable');
+  let localPath;
+  try { localPath = db.prepare('SELECT local_path, path_slug FROM pages WHERE url=?').get(docUrl); }
+  finally { db.close(); }
+  if (!localPath?.local_path || !existsSync(localPath.local_path)) return err(res, 404, 'pdf not found');
+
+  const slug = localPath.path_slug || docUrl.replace(/[^a-z0-9]/gi, '_').slice(-60);
+  const thumbDir = join(metaDir(domain), 'thumbnails');
+  const thumbPath = join(thumbDir, `${slug}.jpg`);
+
+  if (!existsSync(thumbPath)) {
+    try {
+      mkdirSync(thumbDir, { recursive: true });
+      const buf = readFileSync(localPath.local_path);
+      const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+      const pdf = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+      const page = await pdf.getPage(1);
+      const viewport = page.getViewport({ scale: 0.5 });
+      const { createCanvas } = await import('canvas');
+      const canvas = createCanvas(viewport.width, viewport.height);
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+      writeFileSync(thumbPath, canvas.toBuffer('image/jpeg', { quality: 0.7 }));
+    } catch {
+      // canvas not available or render failed — return 404
+      return err(res, 404, 'thumbnail unavailable');
+    }
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'image/jpeg',
+    'Cache-Control': 'public, max-age=86400',
+    'Access-Control-Allow-Origin': CORS_ORIGIN
+  });
+  res.end(readFileSync(thumbPath));
 };
 
 // Router
@@ -220,6 +287,20 @@ createServer((req, res) => {
     const result = siteDocs(domain, url.searchParams);
     if (!result) return err(res, 404, `No data for ${domain}`);
     return json(res, result);
+  }
+
+  if (path === '/api/docs/all') {
+    const domain = url.searchParams.get('site');
+    if (!domain) return err(res, 400, 'site param required');
+    const result = siteDocsAll(domain);
+    if (!result) return err(res, 404, `No data for ${domain}`);
+    return json(res, result);
+  }
+
+  if (path === '/api/thumbnail') {
+    const docUrl = url.searchParams.get('url');
+    if (!docUrl) return err(res, 400, 'url param required');
+    return serveThumbnail(req, res, docUrl, sites);
   }
 
   if (path === '/api/runs') {

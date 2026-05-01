@@ -105,8 +105,14 @@ CREATE TABLE IF NOT EXISTS pdf_quality (
   has_text_layer INT,
   word_quality_estimate REAL,
   composite_score REAL,
-  pages INT
+  pages INT,
+  pdf_title TEXT,
+  excerpt TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_pages_mime_gone ON pages(mime_type, gone);
+CREATE INDEX IF NOT EXISTS idx_pages_last_seen ON pages(last_seen_at);
+CREATE INDEX IF NOT EXISTS idx_hosts_hosted_url ON hosts(hosted_url);
+CREATE INDEX IF NOT EXISTS idx_pdf_quality_score ON pdf_quality(composite_score);
 CREATE TABLE IF NOT EXISTS pdf_upgrade_queue (
   url TEXT PRIMARY KEY,
   content_hash TEXT,

@@ -4,7 +4,7 @@
 // Caching: sets Cache-Control so Cloudflare edge can cache everything after first request.
 import { createServer } from 'http';
 import { readFileSync, existsSync, statSync } from 'fs';
-import { join, extname } from 'path';
+import { join, extname, basename } from 'path';
 import { getMirrorRoot } from '../src/config.js';
 
 const PORT = parseInt(process.env.LNKER_PORT || '7841', 10);
@@ -70,8 +70,14 @@ createServer((req, res) => {
   }
 
   const mirrorRoot = getMirrorRoot();
-  const domainRoot = join(mirrorRoot, domain);
-  if (!existsSync(domainRoot)) return serve(res, 404, `Domain ${domain} not mirrored`);
+  // Try domain as-is, then with common TLD suffixes (.com, .org, .net)
+  let domainRoot = join(mirrorRoot, domain);
+  if (!existsSync(domainRoot)) {
+    const tlds = ['.com', '.org', '.net', '.edu', '.io'];
+    const match = tlds.map(t => join(mirrorRoot, domain + t)).find(p => existsSync(p));
+    if (match) domainRoot = match;
+    else return serve(res, 404, `Domain ${domain} not mirrored`);
+  }
 
   let filePath = join(domainRoot, urlPath);
 
@@ -88,7 +94,15 @@ createServer((req, res) => {
 
   const ext = extname(filePath).toLowerCase();
   const mime = MIME[ext] || 'application/octet-stream';
-  serve(res, 200, readFileSync(filePath), mime, ext);
+  let body = readFileSync(filePath);
+  // Rewrite absolute internal links so navigation stays on this mirror domain
+  if (ext === '.html') {
+    const siteDomain = basename(domainRoot); // e.g. bahai-library.com
+    body = Buffer.from(
+      body.toString('utf8').replace(new RegExp(`https?://${siteDomain.replace('.', '\\.')}(/|")`, 'g'), '$1')
+    );
+  }
+  serve(res, 200, body, mime, ext);
 
 }).listen(PORT, '127.0.0.1', () => {
   console.log(`[lnker-server] listening on http://127.0.0.1:${PORT}`);

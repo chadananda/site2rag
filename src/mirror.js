@@ -114,8 +114,10 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     ...priorityQueue.filter(u => inScope(u, siteConfig, seedHost)).map(u => ({ url: u, depth: 0, fromSitemap: true })),
     { url: seedUrl, depth: 0, fromSitemap: false }
   ];
-  // Also enqueue existing DB pages not already in priority queue
-  const existingPages = db.prepare('SELECT url, depth FROM pages WHERE gone=0').all();
+  // Re-check existing pages only if stale (not seen within check_every_days)
+  const staleMs = (siteConfig.check_every_days ?? 3) * 86400000;
+  const staleCutoff = new Date(Date.now() - staleMs).toISOString();
+  const existingPages = db.prepare('SELECT url, depth FROM pages WHERE gone=0 AND last_seen_at < ?').all(staleCutoff);
   for (const p of existingPages) {
     if (!priorityQueue.includes(p.url) && inScope(p.url, siteConfig, seedHost)) {
       toVisit.push({ url: p.url, depth: p.depth || 0, fromSitemap: false });

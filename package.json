@@ -3,14 +3,17 @@
   "version": "1.0.0",
   "description": "Website mirror + RAG-ready MD export service",
   "type": "module",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint src/ bin/ tests/",
-    "postinstall": "node bin/setup.js"
+    "postinstall": "node bin/setup.js",
+    "build:css": "echo '@import \"tailwindcss\";' > public/tw-input.css && node_modules/.bin/tailwindcss -i public/tw-input.css -o public/tailwind.css --minify && rm public/tw-input.css"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.37.0",
@@ -29,6 +32,8 @@
     "undici": "^6.21.0"
   },
   "devDependencies": {
+    "@tailwindcss/cli": "^4.2.4",
+    "tailwindcss": "^4.2.4",
     "vitest": "^2.1.8"
   }
 }

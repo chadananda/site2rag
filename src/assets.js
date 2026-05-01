@@ -4,7 +4,7 @@ import { createHash } from 'crypto';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'fs';
 import { join, extname } from 'path';
 import * as cheerio from 'cheerio';
-import { assetsDir } from './config.js';
+import { assetsDir, mirrorDir } from './config.js';
 import { upsertAsset, addAssetRef } from './db.js';
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 // Document extensions treated as downloadable documents
@@ -22,6 +22,17 @@ const classifyAsset = (url, mime = '') => {
 };
 /** Compute asset storage path: _assets/<sha[0:2]>/<sha>.<ext> */
 const assetPath = (domain, hash, ext) => join(assetsDir(domain), hash.slice(0, 2), `${hash}${ext}`);
+/** Write asset at its original URL path in the mirror so lnker-server can serve it by path. */
+const writeMirrorPath = (domain, assetUrl, buf) => {
+  try {
+    const pathname = new URL(assetUrl).pathname;
+    const mirrorPath = join(mirrorDir(domain), pathname);
+    if (!existsSync(mirrorPath)) {
+      mkdirSync(join(mirrorPath, '..'), { recursive: true });
+      writeFileSync(mirrorPath, buf);
+    }
+  } catch {}
+};
 /**
  * Run assets stage for a site. Scans mirrored HTML, downloads assets, deduplicates.
  * @param {object} db - SQLite db for domain
@@ -65,7 +76,14 @@ export const runAssets = async (db, siteConfig) => {
       stats.total++;
       // Check if already downloaded (by original_url)
       const existing = db.prepare('SELECT * FROM assets WHERE original_url=?').get(assetUrl);
-      if (existing) { addAssetRef(db, existing.hash, page.url); continue; }
+      if (existing) {
+        // Ensure mirror path exists even if asset was downloaded before this feature was added
+        if (existing.path && existsSync(existing.path)) {
+          writeMirrorPath(domain, assetUrl, readFileSync(existing.path));
+        }
+        addAssetRef(db, existing.hash, page.url);
+        continue;
+      }
       let res;
       try {
         res = await fetch(assetUrl, { headers: { 'User-Agent': ua }, signal: AbortSignal.timeout(15000), redirect: 'follow' });
@@ -85,6 +103,7 @@ export const runAssets = async (db, siteConfig) => {
       const storagePath = assetPath(domain, hash, ext);
       mkdirSync(join(assetsDir(domain), hash.slice(0, 2)), { recursive: true });
       if (!existsSync(storagePath)) writeFileSync(storagePath, buf);
+      writeMirrorPath(domain, assetUrl, buf);
       upsertAsset(db, { hash, path: storagePath, original_url: assetUrl, mime_type: mime, bytes: buf.length });
       addAssetRef(db, hash, page.url);
       stats.new_assets++;
