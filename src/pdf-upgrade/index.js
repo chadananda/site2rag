@@ -1,6 +1,6 @@
 // PDF upgrade queue worker -- processes one document per tick from pdf_upgrade_queue.
 // Run via PM2 as a long-lived daemon; processes worst-scoring PDFs first.
-import { existsSync, copyFileSync, mkdirSync } from 'fs';
+import { existsSync, copyFileSync, mkdirSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
@@ -16,19 +16,61 @@ const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 
 const log = (msg) => console.log(`[pdf-upgrade] ${new Date().toISOString().slice(0,19)} ${msg}`);
 
+/**
+ * Scan all local HTML pages in the mirror and populate hosts table with PDF link anchor text.
+ * Runs once per DB (guarded by site_meta key). This gives the summarizer title context for
+ * every PDF that was linked from a spidered page.
+ */
+const backfillHostsFromMirror = async (db, domain) => {
+  const already = db.prepare("SELECT value FROM site_meta WHERE key='hosts_backfilled_at'").get();
+  if (already) return;
+
+  const { load } = await import('cheerio');
+  const htmlPages = db.prepare(
+    "SELECT url, local_path FROM pages WHERE mime_type LIKE 'text/html%' AND local_path IS NOT NULL AND gone=0"
+  ).all();
+
+  let inserted = 0;
+  const insert = db.prepare(
+    'INSERT OR IGNORE INTO hosts (host_url, hosted_url, hosted_title, detected_at) VALUES (?, ?, ?, ?)'
+  );
+  const now = new Date().toISOString();
+  const insertMany = db.transaction((rows) => { for (const r of rows) insert.run(...r); });
+
+  for (const { url: hostUrl, local_path } of htmlPages) {
+    if (!existsSync(local_path)) continue;
+    let html;
+    try { html = readFileSync(local_path, 'utf8'); } catch { continue; }
+    if (!html.includes('.pdf')) continue; // fast skip
+
+    const $ = load(html);
+    const batch = [];
+    $('a[href]').each((_, el) => {
+      const href = $(el).attr('href') || '';
+      if (!href.toLowerCase().includes('.pdf')) return;
+      let hostedUrl;
+      try { hostedUrl = new URL(href, hostUrl).toString().split('#')[0]; } catch { return; }
+      if (!hostedUrl.toLowerCase().endsWith('.pdf')) return;
+      const text = $(el).text().trim() || href.split('/').pop();
+      batch.push([hostUrl, hostedUrl, text, now]);
+    });
+    if (batch.length) { insertMany(batch); inserted += batch.length; }
+  }
+
+  db.prepare("INSERT OR REPLACE INTO site_meta (key, value) VALUES ('hosts_backfilled_at', ?)").run(now);
+  log(`Backfilled hosts: ${inserted} PDF links from ${htmlPages.length} HTML pages`);
+};
+
 /** Generate Haiku AI summaries for the top N pending queue items that don't have one yet. */
 const summarizeTopPending = async (db, domain) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return;
-  // Only fetch docs that have some summarizable metadata; pure numeric-slug docs with no context are skipped
   const rows = db.prepare(`
     SELECT q.url, pq.pdf_title, pq.excerpt, h.hosted_title, h.host_url as source_url
     FROM pdf_upgrade_queue q
     JOIN pdf_quality pq ON q.url = pq.url
     LEFT JOIN hosts h ON q.url = h.hosted_url
     WHERE q.status = 'pending' AND pq.ai_summarized_at IS NULL
-      AND (pq.pdf_title IS NOT NULL OR pq.excerpt IS NOT NULL OR h.hosted_title IS NOT NULL
-           OR (LENGTH(REPLACE(REPLACE(REPLACE(TRIM(REPLACE(REPLACE(LOWER(q.url),'/',' '),'.',' ')), 'pdf', ''), '-', ' '), '_', ' ')) > 3))
     ORDER BY q.priority DESC
     LIMIT ?`).all(SUMMARIZE_BATCH);
   if (!rows.length) return;
@@ -41,7 +83,6 @@ const summarizeTopPending = async (db, domain) => {
       const slug = row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
       const displayTitle = title || (slug.length > 3 && !/^\d+$/.test(slug.trim()) ? slug : null);
       if (!displayTitle && !row.excerpt && !row.source_url) {
-        // Mark as attempted so we don't retry endlessly
         db.prepare('UPDATE pdf_quality SET ai_summarized_at=? WHERE url=?').run(new Date().toISOString(), row.url);
         done++; continue;
       }
@@ -168,13 +209,16 @@ const tick = async () => {
     }
   }
 
+  // Backfill hosts from mirror HTML (once per DB, fast no-op after first run)
+  for (const { db, domain } of openDbs) {
+    await backfillHostsFromMirror(db, domain);
+  }
+
   if (bestRow && bestDb) {
-    // Summarize top pending items before starting the long OCR job
     await summarizeTopPending(bestDb, bestDomain);
     await processOne(bestDb, bestDomain, bestRow);
   } else {
     log('No pending items');
-    // Still summarize if there are unsummarized queue items
     for (const { db, domain } of openDbs) {
       await summarizeTopPending(db, domain);
     }
