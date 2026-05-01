@@ -8,7 +8,6 @@ import { openDb } from '../db.js';
 import { bossAvailable, reocrDocument } from './reocr.js';
 import { rebuildPdf } from './rebuild.js';
 import { scorePdf, saveQualityScore } from './score.js';
-import { buildReport } from './report.js';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes between docs
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
@@ -62,7 +61,7 @@ const processOne = async (db, domain, row) => {
     db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
       .run(new Date().toISOString(), outputPath, afterMetrics.composite_score, improvement, numPages, method, row.url);
 
-    log(`Done: ${row.url} score ${row.before_score?.toFixed(2)} → ${afterMetrics.composite_score.toFixed(2)} (+${improvement.toFixed(2)}) via ${method}`);
+    log(`Done: ${row.url} score ${(row.before_score||0).toFixed(2)} → ${afterMetrics.composite_score.toFixed(2)} (+${improvement.toFixed(2)}) via ${method}`);
   } catch (err) {
     log(`Failed: ${row.url}: ${err.message}`);
     db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
@@ -106,14 +105,6 @@ const tick = async () => {
 
   if (bestRow && bestDb) {
     await processOne(bestDb, bestDomain, bestRow);
-    // Rebuild report after each completed document
-    try {
-      const domains = sites.map(s => new URL(s.url).hostname);
-      await buildReport(domains);
-      log('Report rebuilt');
-    } catch (err) {
-      log(`Report rebuild failed: ${err.message}`);
-    }
   } else {
     log('No pending items');
   }

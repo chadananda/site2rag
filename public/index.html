@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>site2rag</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<style>
+  [x-cloak]{display:none!important}
+  body{font-family:Georgia,serif}
+  .mono{font-family:ui-monospace,monospace}
+  .score-pill{display:inline-block;padding:1px 6px;border-radius:4px;font-size:.75rem;font-family:ui-monospace,monospace;font-weight:600}
+  @media(prefers-color-scheme:dark){body{background:#111;color:#eee}}
+</style>
+</head>
+<body class="bg-white text-gray-900 min-h-screen" x-data="app()" x-cloak>
+
+<div class="max-w-5xl mx-auto px-4 py-6">
+
+  <!-- Header -->
+  <div class="border-b border-gray-300 pb-4 mb-6 flex items-baseline justify-between">
+    <div>
+      <h1 class="text-xl font-bold tracking-tight">site2rag</h1>
+      <p class="text-sm text-gray-500 mt-0.5">archival mirror &amp; PDF upgrade monitor</p>
+    </div>
+    <div class="text-xs text-gray-400 mono" x-text="apiStatus"></div>
+  </div>
+
+  <!-- Top-level section nav (expandable later) -->
+  <div class="flex gap-6 border-b border-gray-200 mb-6 text-sm font-medium">
+    <button @click="section='pdfs'"
+      :class="section==='pdfs' ? 'border-b-2 border-gray-900 text-gray-900 pb-2' : 'text-gray-400 pb-2 hover:text-gray-700'">
+      PDF Upgrades
+    </button>
+    <!-- future: Crawl Status, Exports, etc. -->
+  </div>
+
+  <!-- Loading -->
+  <template x-if="loading && !sites.length">
+    <div class="text-center py-20 text-gray-400 text-sm">Loading…</div>
+  </template>
+
+  <!-- API error -->
+  <template x-if="apiError">
+    <div class="bg-red-50 border border-red-200 rounded p-4 text-sm text-red-700 mb-6">
+      <strong>API unavailable:</strong> <span x-text="apiError"></span>
+      <div class="mt-1 text-xs text-red-400">tower-nas may be unreachable</div>
+    </div>
+  </template>
+
+  <!-- PDF Upgrades section -->
+  <template x-if="section==='pdfs' && sites.length">
+    <div>
+
+      <!-- Site tabs -->
+      <div class="flex gap-4 mb-6 flex-wrap text-sm">
+        <template x-for="s in sites" :key="s.domain">
+          <button @click="selectSite(s)"
+            :class="activeSite?.domain===s.domain
+              ? 'bg-gray-900 text-white px-3 py-1.5 rounded'
+              : 'bg-gray-100 text-gray-700 px-3 py-1.5 rounded hover:bg-gray-200'"
+            x-text="s.domain"></button>
+        </template>
+      </div>
+
+      <!-- Stats bar -->
+      <template x-if="activeSite">
+        <div class="grid grid-cols-4 sm:grid-cols-7 gap-2 mb-6 text-center text-xs">
+          <template x-for="[label, val, color] in siteStats()" :key="label">
+            <div class="border border-gray-200 rounded p-2">
+              <div class="text-lg font-bold mono" :class="color" x-text="val"></div>
+              <div class="text-gray-500 mt-0.5" x-text="label"></div>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- Filter bar -->
+      <template x-if="activeSite">
+        <div class="flex flex-wrap gap-3 mb-4 items-end text-sm">
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Search</label>
+            <input type="search" x-model.debounce.400ms="filters.q" @input="goPage(1)"
+              placeholder="title or URL…"
+              class="border border-gray-300 rounded px-3 py-1.5 text-sm w-52 focus:outline-none focus:ring-1 focus:ring-gray-400">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Status</label>
+            <select x-model="filters.status" @change="goPage(1)"
+              class="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400">
+              <option value="">All</option>
+              <option value="done">Done</option>
+              <option value="pending">Queued</option>
+              <option value="processing">Processing</option>
+              <option value="failed">Failed</option>
+              <option value="unscored">Not scored</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Max score</label>
+            <div class="flex items-center gap-1">
+              <input type="range" x-model="filters.score_max" min="0" max="1" step="0.05" @change="goPage(1)"
+                class="w-20 accent-gray-700">
+              <span class="text-xs mono text-gray-500" x-text="'≤'+Number(filters.score_max).toFixed(2)"></span>
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-500 mb-1">Sort</label>
+            <select x-model="filters.sort" @change="goPage(1)"
+              class="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400">
+              <option value="score_asc">Worst first</option>
+              <option value="score_desc">Best first</option>
+              <option value="pages_desc">Most pages</option>
+              <option value="title_asc">Title A–Z</option>
+              <option value="improved_desc">Most improved</option>
+            </select>
+          </div>
+          <div class="ml-auto text-xs text-gray-400 self-end pb-1.5 mono"
+               x-text="docsTotal ? docsTotal+' documents' : ''"></div>
+        </div>
+      </template>
+
+      <!-- Document table -->
+      <template x-if="activeSite && docs.length">
+        <div class="border border-gray-200 rounded overflow-hidden mb-4">
+          <table class="w-full text-sm">
+            <thead class="bg-gray-50 border-b border-gray-200 text-xs text-gray-500 uppercase tracking-wide">
+              <tr>
+                <th class="text-left px-4 py-2 font-medium">Document</th>
+                <th class="text-center px-3 py-2 font-medium w-14">Pages</th>
+                <th class="text-center px-3 py-2 font-medium w-16">Score</th>
+                <th class="text-center px-3 py-2 font-medium w-16">After</th>
+                <th class="text-center px-3 py-2 font-medium w-20">Status</th>
+                <th class="text-left px-3 py-2 font-medium">Download / Source</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-100">
+              <template x-for="doc in docs" :key="doc.url">
+                <tr class="hover:bg-gray-50">
+                  <td class="px-4 py-3">
+                    <div class="font-medium text-gray-900 leading-snug"
+                         style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+                         :title="doc.title || doc.url"
+                         x-text="doc.title || doc.url.split('/').pop().replace(/\.pdf$/i,'').replace(/[_-]/g,' ')">
+                    </div>
+                  </td>
+                  <td class="px-3 py-3 text-center text-gray-500 mono text-xs" x-text="doc.pages||'—'"></td>
+                  <td class="px-3 py-3 text-center">
+                    <template x-if="doc.composite_score!=null">
+                      <span class="score-pill" :class="scoreCls(doc.composite_score)"
+                            x-text="Math.round(doc.composite_score*100)+'%'"></span>
+                    </template>
+                    <template x-if="doc.composite_score==null">
+                      <span class="text-gray-300 text-xs">—</span>
+                    </template>
+                  </td>
+                  <td class="px-3 py-3 text-center">
+                    <template x-if="doc.after_score!=null">
+                      <span class="score-pill bg-green-100 text-green-800"
+                            x-text="Math.round(doc.after_score*100)+'%'"></span>
+                    </template>
+                    <template x-if="doc.after_score==null">
+                      <span class="text-gray-300 text-xs">—</span>
+                    </template>
+                  </td>
+                  <td class="px-3 py-3 text-center">
+                    <template x-if="doc.status==='done'">
+                      <span class="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-800">✓ done</span>
+                    </template>
+                    <template x-if="doc.status==='processing'">
+                      <span class="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">⟳ running</span>
+                    </template>
+                    <template x-if="doc.status==='pending'">
+                      <span class="text-xs px-2 py-0.5 rounded-full bg-yellow-100 text-yellow-700">◷ queued</span>
+                    </template>
+                    <template x-if="doc.status==='failed'">
+                      <span class="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700" :title="doc.error">✗ failed</span>
+                    </template>
+                    <template x-if="!doc.status && doc.composite_score!=null">
+                      <span class="text-xs text-gray-400">scored</span>
+                    </template>
+                    <template x-if="!doc.status && doc.composite_score==null">
+                      <span class="text-gray-300 text-xs">—</span>
+                    </template>
+                  </td>
+                  <td class="px-3 py-3">
+                    <div class="flex flex-col gap-1">
+                      <template x-if="doc.archive_url">
+                        <a :href="doc.archive_url" target="_blank"
+                           class="text-xs font-semibold text-green-700 hover:underline">
+                          ↓ Download upgraded PDF
+                        </a>
+                      </template>
+                      <a :href="doc.url" target="_blank"
+                         class="text-xs text-gray-400 hover:text-blue-600 hover:underline"
+                         style="max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block"
+                         :title="'Original: '+doc.url">
+                        <span class="text-gray-300">⇒ </span><span x-text="doc.url.replace(/^https?:\/\//,'')"></span>
+                      </a>
+                    </div>
+                  </td>
+                </tr>
+              </template>
+            </tbody>
+          </table>
+        </div>
+      </template>
+
+      <!-- Empty state -->
+      <template x-if="activeSite && !loading && !docs.length">
+        <div class="text-center py-16 text-gray-400 text-sm border border-gray-100 rounded">
+          No documents match the current filters.
+        </div>
+      </template>
+
+      <!-- Pagination -->
+      <template x-if="docsPages > 1">
+        <div class="flex items-center justify-between text-sm">
+          <button @click="goPage(docsPage-1)" :disabled="docsPage<=1"
+            class="px-4 py-2 border border-gray-300 rounded disabled:opacity-30 hover:bg-gray-50">
+            ← Previous
+          </button>
+          <span class="text-gray-500 mono text-xs"
+                x-text="'Page '+docsPage+' of '+docsPages"></span>
+          <button @click="goPage(docsPage+1)" :disabled="docsPage>=docsPages"
+            class="px-4 py-2 border border-gray-300 rounded disabled:opacity-30 hover:bg-gray-50">
+            Next →
+          </button>
+        </div>
+      </template>
+
+      <!-- Loading spinner -->
+      <template x-if="loading && sites.length">
+        <div class="text-center py-8 text-gray-400 text-sm">Loading…</div>
+      </template>
+
+    </div>
+  </template>
+
+</div>
+
+<script>
+// Auto-detect API base: use localhost when developing, production otherwise
+const API_BASE = ['localhost','127.0.0.1'].includes(location.hostname)
+  ? 'http://127.0.0.1:7840'
+  : 'https://api.lnker.com';
+
+function scoreCls(s) {
+  if (s == null) return 'bg-gray-100 text-gray-400';
+  if (s >= 0.8) return 'bg-green-100 text-green-800';
+  if (s >= 0.6) return 'bg-yellow-100 text-yellow-700';
+  if (s >= 0.4) return 'bg-orange-100 text-orange-700';
+  return 'bg-red-100 text-red-700';
+}
+
+function app() {
+  return {
+    section: 'pdfs',
+    sites: [],
+    activeSite: null,
+    docs: [],
+    docsTotal: 0,
+    docsPage: 1,
+    docsPages: 1,
+    filters: { q: '', status: '', score_max: 1, sort: 'score_asc' },
+    loading: false,
+    apiStatus: '',
+    apiError: '',
+    scoreCls,
+
+    async init() {
+      this.loading = true;
+      try {
+        const res = await fetch(`${API_BASE}/api/sites`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        this.sites = await res.json();
+        this.apiStatus = 'connected';
+        if (this.sites.length) this.selectSite(this.sites[0]);
+      } catch (e) {
+        this.apiError = e.message;
+        this.apiStatus = 'offline';
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    async selectSite(s) {
+      this.activeSite = s;
+      this.docsPage = 1;
+      await this.fetchDocs();
+    },
+
+    async goPage(n) {
+      this.docsPage = n;
+      await this.fetchDocs();
+    },
+
+    async fetchDocs() {
+      if (!this.activeSite) return;
+      this.loading = true;
+      const p = new URLSearchParams({
+        site: this.activeSite.domain,
+        page: this.docsPage,
+        q: this.filters.q,
+        status: this.filters.status,
+        score_max: this.filters.score_max,
+        sort: this.filters.sort
+      });
+      try {
+        const res = await fetch(`${API_BASE}/api/docs?${p}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        this.docs = data.docs;
+        this.docsTotal = data.total;
+        this.docsPage = data.page;
+        this.docsPages = data.pages;
+      } catch (e) {
+        this.apiError = e.message;
+      } finally {
+        this.loading = false;
+      }
+    },
+
+    siteStats() {
+      const s = this.activeSite;
+      if (!s) return [];
+      const eta = s.eta_seconds > 0
+        ? (s.eta_seconds < 3600 ? '~'+Math.ceil(s.eta_seconds/60)+'m'
+          : s.eta_seconds < 86400 ? '~'+Math.ceil(s.eta_seconds/3600)+'h'
+          : '~'+Math.ceil(s.eta_seconds/86400)+'d')
+        : '—';
+      return [
+        ['PDFs',      s.total_pdfs,  'text-gray-900'],
+        ['Scored',    s.scored,      'text-blue-600'],
+        ['Upgraded',  s.upgraded,    'text-green-600'],
+        ['Queued',    s.pending,     'text-yellow-600'],
+        ['Running',   s.processing,  'text-blue-400'],
+        ['Failed',    s.failed,      'text-red-500'],
+        ['ETA',       eta,           'text-gray-500'],
+      ];
+    }
+  };
+}
+</script>
+</body>
+</html>
