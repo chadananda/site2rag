@@ -67,8 +67,12 @@ if ('serviceWorker' in navigator) {
       <h1 class="text-base font-bold tracking-tight mono" x-text="'site2rag'+(appVersion?' v'+appVersion:'')">site2rag</h1>
       <span class="text-xs text-gray-400">archival mirror &amp; PDF upgrade monitor</span>
     </div>
-    <div class="flex items-center gap-2 text-xs text-gray-400 mono">
+    <div class="flex items-center gap-3 text-xs text-gray-400 mono">
       <span x-text="lastRefresh ? 'updated '+lastRefresh : ''"></span>
+      <button @click="showUpgradeInfo=true"
+              class="flex items-center gap-1 text-gray-400 hover:text-gray-600 transition-colors">
+        <span class="text-sm leading-none">ⓘ</span><span class="not-mono font-medium">about upgrades</span>
+      </button>
       <span class="px-2 py-0.5 rounded"
             :class="apiStatus==='connected'?'bg-green-100 text-green-700':'bg-red-100 text-red-600'"
             x-text="apiStatus"></span>
@@ -178,6 +182,38 @@ if ('serviceWorker' in navigator) {
         </button>
       </div>
 
+      <!-- About upgrade popup -->
+      <template x-if="showUpgradeInfo">
+        <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50"
+             @click.self="showUpgradeInfo=false" @keydown.escape.window="showUpgradeInfo=false">
+          <div class="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6">
+            <div class="flex items-start justify-between mb-4">
+              <h2 class="text-lg font-bold text-gray-900">What the PDF Upgrade Does</h2>
+              <button @click="showUpgradeInfo=false" class="text-gray-300 hover:text-gray-600 text-2xl leading-none ml-4">×</button>
+            </div>
+            <p class="text-sm text-gray-600 mb-4">Image-only PDFs (scanned documents) contain no machine-readable text — just pictures of pages. The upgrade pipeline runs a two-stage AI process to transform them into proper archival documents.</p>
+
+            <div class="bg-gray-50 rounded-lg p-3 mb-4 text-xs text-gray-600 space-y-1.5">
+              <div class="font-semibold text-gray-700 text-sm mb-2">Two-stage upgrade pipeline</div>
+              <div class="flex gap-2"><span class="font-medium text-gray-700 w-5 shrink-0">1.</span><div><strong>Vision AI transcription</strong> — Each page is rasterized at high resolution and sent to a local vision language model (LLaVA). The model reads the page as a human would, outputting structured Markdown that preserves headings, paragraphs, lists, and tables — far more context-aware than traditional character-recognition OCR.</div></div>
+              <div class="flex gap-2"><span class="font-medium text-gray-700 w-5 shrink-0">2.</span><div><strong>OCRmyPDF PDF/A rebuild</strong> — The transcribed text is embedded as an invisible layer using OCRmyPDF (ISO 19005-3 compliant), which also deskews pages, corrects rotation, and cleans scan artifacts. If OCRmyPDF is unavailable the pdf-lib fallback uses the vision AI text directly.</div></div>
+              <div class="flex gap-2"><span class="font-medium text-gray-700 w-5 shrink-0">3.</span><div><strong>Metadata enrichment</strong> — Claude Haiku analyzes the hosting page and document excerpt to infer title, author, and a one-sentence description. These are embedded as standard PDF document properties (/Title, /Author, /Subject, /Keywords) readable by any PDF viewer or cataloging tool.</div></div>
+            </div>
+
+            <div class="font-semibold text-gray-700 text-sm mb-2">What gets added to every upgraded PDF</div>
+            <ul class="space-y-2 text-sm">
+              <li class="flex gap-3"><span class="shrink-0">📄</span><div><strong class="text-gray-800">Searchable text layer</strong> — invisibly overlaid on each page; document looks identical but is fully searchable and copy-pasteable.</div></li>
+              <li class="flex gap-3"><span class="shrink-0">📋</span><div><strong class="text-gray-800">Embedded metadata</strong> — title, author, subject, keywords, and source URL baked into PDF document properties.</div></li>
+              <li class="flex gap-3"><span class="shrink-0">🗄</span><div><strong class="text-gray-800">PDF/A-3 archival standard</strong> (ISO 19005-3) — fonts embedded, no external dependencies, self-contained and renderer-independent for decades-long preservation.</div></li>
+              <li class="flex gap-3"><span class="shrink-0">♿</span><div><strong class="text-gray-800">Accessibility</strong> — screen readers, translation tools, and assistive technology can read the content.</div></li>
+              <li class="flex gap-3"><span class="shrink-0">🔍</span><div><strong class="text-gray-800">Full-text indexable</strong> — search engines, RAG pipelines, and institutional repositories can extract content without manual work.</div></li>
+              <li class="flex gap-3"><span class="shrink-0">🔗</span><div><strong class="text-gray-800">Provenance</strong> — original URL and processing date embedded as keywords; document origin permanently recorded.</div></li>
+            </ul>
+            <p class="text-xs text-gray-400 mt-4 border-t border-gray-100 pt-3">Upgraded PDFs are drop-in replacements — original filename, compatible with all standard PDF viewers. Site owners can replace files one by one or batch-rsync the entire upgraded set.</p>
+          </div>
+        </div>
+      </template>
+
       <!-- Filter bar -->
       <div class="bg-white border border-gray-200 rounded-lg px-4 py-3 mb-4 flex flex-wrap gap-3 items-end shadow-sm">
         <div>
@@ -245,12 +281,10 @@ if ('serviceWorker' in navigator) {
 
                 <!-- Thumbnail -->
                 <button @click="openDetail(doc)" class="shrink-0 focus:outline-none self-start mt-0.5" title="View details">
-                  <template x-if="doc.thumbnail_path">
-                    <img :src="thumbSrc(doc)" :alt="docTitle(doc)"
-                         class="thumb hover:opacity-80 transition-opacity cursor-zoom-in"
-                         onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-                  </template>
-                  <div class="thumb-placeholder" :style="doc.thumbnail_path ? 'display:none' : ''">📄</div>
+                  <img :src="thumbSrc(doc)" :alt="docTitle(doc)"
+                       class="thumb hover:opacity-80 transition-opacity cursor-zoom-in"
+                       onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                  <div class="thumb-placeholder" style="display:none">📄</div>
                 </button>
 
                 <!-- Score block -->
@@ -418,8 +452,8 @@ if ('serviceWorker' in navigator) {
     <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
       <div class="flex gap-5 p-6">
         <div class="shrink-0">
-          <img :src="thumbSrc(expandedDoc, 600)" :alt="docTitle(expandedDoc)"
-               class="rounded-lg w-40 cursor-pointer"
+          <img :src="thumbSrc(expandedDoc, 800)" :alt="docTitle(expandedDoc)"
+               class="rounded-lg w-80 cursor-pointer"
                style="box-shadow:0 2px 12px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06)"
                @click="window.open(expandedDoc.url,'_blank')"
                title="Click to open PDF"
@@ -577,11 +611,12 @@ function app() {
     loading: false, apiStatus: '', apiError: '', lastRefresh: '',
     expandedDoc: null,
     activeTab: 'failed',
+    showUpgradeInfo: false,
     appVersion: '', _buildId: null,
     _searchTimer: null,
     fmt, scorePillCls, scoreBlockCls, scoreLabel, effortEstimate, cannotUpgrade,
 
-    thumbSrc(doc, w = 300) {
+    thumbSrc(doc, w = 144) {
       return `${API_BASE}/api/thumbnail?url=${encodeURIComponent(doc.url)}&w=${w}`;
     },
 
@@ -730,8 +765,10 @@ function app() {
     goPage(n) { this.docsPage = n; this.loadDocs(); },
 
     docTitle(doc) {
-      if (doc.title) return doc.title;
-      return doc.url.split('/').pop().replace(/\.pdf$/i,'').replace(/[_-]/g,' ') || doc.url;
+      const decode = s => { try { return decodeURIComponent(s); } catch { return s; } };
+      if (doc.title) return decode(doc.title);
+      const slug = decode(doc.url.split('/').pop()).replace(/\.pdf$/i,'').replace(/[_-]/g,' ').trim();
+      return slug || doc.url;
     },
     runBadge(s) {
       if (!s.last_run) return 'no runs';

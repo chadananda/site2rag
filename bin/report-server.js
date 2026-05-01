@@ -262,6 +262,10 @@ const recentRuns = (sites) => {
   return runs.sort((a, b) => (b.started_at || '').localeCompare(a.started_at || '')).slice(0, 20);
 };
 
+// Prevent unhandled rejections from crashing the server
+process.on('uncaughtException', e => console.error('[server] uncaught:', e.message));
+process.on('unhandledRejection', e => console.error('[server] unhandled rejection:', e?.message ?? e));
+
 // Router
 createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
@@ -283,9 +287,11 @@ createServer(async (req, res) => {
   if (path === '/api/docs') {
     const domain = url.searchParams.get('site');
     if (!domain) return err(res, 400, 'site param required');
-    const result = siteDocs(domain, url.searchParams);
-    if (!result) return err(res, 404, `No data for ${domain}`);
-    return json(res, result);
+    try {
+      const result = siteDocs(domain, url.searchParams);
+      if (!result) return err(res, 404, `No data for ${domain}`);
+      return json(res, result);
+    } catch (e) { return err(res, 500, e.message); }
   }
 
   if (path === '/api/thumbnail') {
@@ -313,7 +319,7 @@ createServer(async (req, res) => {
     try {
       mkdirSync(thumbDir, { recursive: true });
       await generateThumb(row.local_path, thumbPath, w);
-      if (w === 150) {
+      if (w === 144) {
         const db2 = safeOpenDb(domain);
         if (db2) { try { db2.prepare('UPDATE pdf_quality SET thumbnail_path=? WHERE url=?').run(thumbPath, docUrl); } finally { db2.close(); } }
       }
