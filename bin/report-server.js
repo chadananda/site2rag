@@ -1,16 +1,12 @@
 // site2rag API + report server. Routes: /api/sites, /api/docs, /api/thumbnail, /api/docs/skip, /api/docs/summarize; static public/.
 import { createServer } from 'http';
-import { existsSync, readFileSync, mkdirSync, renameSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync } from 'fs';
 import { join, extname, dirname } from 'path';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import Anthropic from '@anthropic-ai/sdk';
 import { loadConfig, getMirrorRoot } from '../src/config.js';
 import { openDb } from '../src/db.js';
-
-const execFileAsync = promisify(execFile);
 
 /** Build a Haiku summarization prompt from available doc metadata. Returns null if no context. */
 const buildSummaryPrompt = (row) => {
@@ -75,15 +71,26 @@ const mapDoc = (d, domain) => ({
     : null,
 });
 
-/** Generate a JPEG thumbnail of PDF page 1 using pdftoppm. Returns true on success. */
-const generateThumb = async (pdfPath, outPath, dpi = 36) => {
-  const prefix = outPath.replace(/\.jpg$/, '');
-  await execFileAsync('pdftoppm', ['-f', '1', '-l', '1', '-r', String(dpi), '-jpeg', '-jpegopt', 'quality=80', pdfPath, prefix]);
-  // pdftoppm writes prefix-1.jpg or prefix-01.jpg depending on page count
-  for (const candidate of [`${prefix}-1.jpg`, `${prefix}-01.jpg`, `${prefix}-001.jpg`]) {
-    if (existsSync(candidate)) { renameSync(candidate, outPath); return true; }
-  }
-  return false;
+/** Generate a JPEG thumbnail of PDF page 1 using pdfjs-dist + canvas. Renders at 2x then downscales for sharpness. */
+const generateThumb = async (pdfPath, outPath, targetW = 300) => {
+  const { readFileSync: rf, writeFileSync: wf } = await import('fs');
+  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+  const { createCanvas } = await import('@napi-rs/canvas');
+  const pdfBuf = rf(pdfPath);
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(pdfBuf) }).promise;
+  const page = await pdf.getPage(1);
+  const vp1 = page.getViewport({ scale: 1 });
+  // Render at 2x target width for sharpness, then downscale
+  const scale = (targetW * 2) / vp1.width;
+  const viewport = page.getViewport({ scale });
+  const hiCanvas = createCanvas(Math.round(viewport.width), Math.round(viewport.height));
+  await page.render({ canvasContext: hiCanvas.getContext('2d'), viewport }).promise;
+  // Downscale to target (natural lanczos-like sharpening via canvas bilinear)
+  const outH = Math.round(vp1.height * targetW / vp1.width);
+  const out = createCanvas(targetW, outH);
+  out.getContext('2d').drawImage(hiCanvas, 0, 0, targetW, outH);
+  wf(outPath, out.toBuffer('image/jpeg', { quality: 88 }));
+  return true;
 };
 
 /** Summary stats for one site. */
@@ -264,7 +271,6 @@ createServer(async (req, res) => {
     if (!row?.local_path || !existsSync(row.local_path)) return err(res, 404, 'pdf not found');
 
     const w = Math.min(1200, Math.max(50, parseInt(url.searchParams.get('w') || '300', 10)));
-    const dpi = Math.max(6, Math.round(w / 8.5)); // letter-size: 8.5" wide
     const hash = createHash('sha256').update(docUrl).digest('hex').slice(0, 16);
     const thumbDir = join(getMirrorRoot(), domain, '.thumbs');
     const thumbPath = join(thumbDir, `x${hash}_${w}w.jpg`);
@@ -276,7 +282,7 @@ createServer(async (req, res) => {
 
     try {
       mkdirSync(thumbDir, { recursive: true });
-      const ok = await generateThumb(row.local_path, thumbPath, dpi);
+      const ok = await generateThumb(row.local_path, thumbPath, w);
       if (ok && existsSync(thumbPath)) {
         // Store default-size path in DB for fast API lookup
         if (w === 300) {
