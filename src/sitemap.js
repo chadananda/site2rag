@@ -94,7 +94,7 @@ export const runSitemap = async (db, siteConfig) => {
     if (entry.lastmod && entry.lastmod !== existing.lastmod) changed.push(entry.url);
   }
   const removedCount = markSitemapRemoved(db, seenUrls);
-  const removedUrls = db.prepare('SELECT url FROM sitemaps WHERE removed=1 AND removed_at >= datetime("now","-1 day")').all().map(r => r.url);
+  const removedUrls = db.prepare("SELECT url FROM sitemaps WHERE removed=1 AND removed_at >= datetime('now','-1 day')").all().map(r => r.url);
   setMeta(db, 'last_sitemap_diff_at', new Date().toISOString());
   return { added, changed, removed: removedUrls, total: filtered.length, cached: false };
 };
