@@ -12,6 +12,7 @@ import { runExportHtml } from './export-html.js';
 import { runExportDoc } from './export-doc.js';
 import { runArchive } from './archive.js';
 import { runRetain } from './retain.js';
+import { runScorePdfs } from './score-pdfs.js';
 import { getMeta, setMeta } from './db.js';
 const TICK_MS = 15 * 60 * 1000; // 15 minutes
 /** Ensure all top-level directories exist. */
@@ -88,6 +89,8 @@ const runSite = async (siteConfig) => {
     if (siteConfig.assets?.enabled !== false) {
       runStats.assets = await runAssets(db, siteConfig);
     }
+    // Score PDFs (time-budgeted, 5 min max per run)
+    runStats.scorePdfs = await runScorePdfs(db, siteConfig);
     // Classify
     if (siteConfig.classify?.enabled !== false) {
       runStats.classify = runClassify(db, siteConfig);

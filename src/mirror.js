@@ -207,21 +207,5 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   }
   // Mark pages not seen this run as gone
   stats.gone = markGoneUrls(db, runStartedAt);
-  // Backfill scores for any PDFs that were downloaded but never scored
-  const unscored = db.prepare(`
-    SELECT p.url, p.local_path, p.content_hash FROM pages p
-    LEFT JOIN pdf_quality q ON p.url=q.url
-    WHERE p.mime_type='application/pdf' AND p.gone=0 AND p.local_path IS NOT NULL AND q.url IS NULL
-  `).all();
-  for (const row of unscored) {
-    if (!existsSync(row.local_path)) continue;
-    try {
-      const metrics = await scorePdf(row.local_path);
-      saveQualityScore(db, row.url, row.content_hash, metrics);
-      maybeQueue(db, row.url, row.content_hash, metrics.composite_score);
-    } catch (scoreErr) {
-      console.warn(`[mirror] backfill score failed ${row.url}: ${scoreErr.message}`);
-    }
-  }
   return stats;
 };
