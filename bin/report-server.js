@@ -141,6 +141,7 @@ const DOC_SELECT = `
          q.avg_chars_per_page, q.has_text_layer, q.skip,
          COALESCE(h.hosted_title, q.pdf_title) as title,
          q.excerpt, q.ai_summary, q.ai_author, q.ai_summarized_at,
+         q.thumbnail_path,
          h.host_url as source_url,
          u.status, u.before_score, u.after_score, u.score_improvement,
          u.upgraded_pdf_path, u.error
@@ -267,6 +268,9 @@ createServer(async (req, res) => {
       mkdirSync(thumbDir, { recursive: true });
       const ok = await generateThumb(row.local_path, thumbPath);
       if (ok && existsSync(thumbPath)) {
+        // Cache path in DB so API responses include it without re-checking filesystem
+        const db2 = safeOpenDb(domain);
+        if (db2) { try { db2.prepare('UPDATE pdf_quality SET thumbnail_path=? WHERE url=?').run(thumbPath, docUrl); } finally { db2.close(); } }
         res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400', ...corsHeaders });
         return res.end(readFileSync(thumbPath));
       }

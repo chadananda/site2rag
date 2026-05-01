@@ -100,7 +100,6 @@ if ('serviceWorker' in navigator) {
           <div class="flex gap-4 text-xs mb-3 flex-wrap">
             <div><span class="font-bold mono text-gray-800" x-text="fmt(s.total_pages)"></span><span class="text-gray-400 ml-1">pages</span></div>
             <div><span class="font-bold mono text-gray-700" x-text="fmt(s.total_pdfs)"></span><span class="text-gray-400 ml-1">PDFs</span></div>
-            <div><span class="font-bold mono text-blue-600" x-text="fmt(s.scored)"></span><span class="text-gray-400 ml-1">scored</span></div>
             <div><span class="font-bold mono text-amber-600" x-text="fmt(s.pending)"></span><span class="text-gray-400 ml-1">queued</span></div>
             <template x-if="s.processing">
               <div><span class="font-bold mono text-blue-500 processing-pulse inline-block" x-text="fmt(s.processing)"></span><span class="text-gray-400 ml-1">running</span></div>
@@ -128,20 +127,20 @@ if ('serviceWorker' in navigator) {
               <span class="mono text-gray-600" x-text="upgradeProgressLabel(s)"></span>
             </div>
             <div class="seg-bar" style="height:10px">
+              <!-- Light blue: already readable, no upgrade needed -->
+              <div class="seg-fill bg-blue-200" :style="'width:'+upgradeSegPct(s,'ok')+'%'" :title="fmt(s.already_ok||0)+' already readable'"></div>
               <!-- Green: upgraded/done -->
               <div class="seg-fill bg-green-400" :style="'width:'+upgradeSegPct(s,'done')+'%'" :title="fmt(s.upgraded)+' upgraded'"></div>
               <!-- Blue pulse: actively processing -->
               <div class="seg-fill bg-blue-400 processing-pulse" :style="'width:'+upgradeSegPct(s,'processing')+'%'" :title="fmt(s.processing)+' processing'"></div>
-              <!-- Light red: needs upgrading (pending + failed) -->
-              <div class="seg-fill bg-red-200" :style="'width:'+upgradeSegPct(s,'needs')+'%'" :title="fmt((s.pending||0)+(s.failed||0))+' need upgrade'"></div>
-              <!-- Gray: already good quality, no upgrade needed -->
-              <div class="seg-fill bg-gray-200" :style="'width:'+upgradeSegPct(s,'ok')+'%'" :title="fmt(s.already_ok||0)+' already readable'"></div>
+              <!-- Muted red: needs upgrading (pending + failed) -->
+              <div class="seg-fill bg-red-300" :style="'width:'+upgradeSegPct(s,'needs')+'%'" :title="fmt((s.pending||0)+(s.failed||0))+' need upgrade'"></div>
             </div>
             <div class="flex gap-3 text-xs mt-1 flex-wrap">
-              <span x-show="s.upgraded" class="text-green-600 font-medium" x-text="fmt(s.upgraded)+' done'"></span>
+              <span x-show="s.already_ok" class="text-blue-400" x-text="fmt(s.already_ok)+' OK'"></span>
+              <span x-show="s.upgraded" class="text-green-600 font-medium" x-text="fmt(s.upgraded)+' upgraded'"></span>
               <span x-show="s.processing" class="text-blue-500 font-medium" x-text="fmt(s.processing)+' running'"></span>
               <span x-show="(s.pending||0)+(s.failed||0)" class="text-red-400 font-medium" x-text="fmt((s.pending||0)+(s.failed||0))+' need upgrade'"></span>
-              <span x-show="s.already_ok" class="text-gray-400" x-text="fmt(s.already_ok)+' already OK'"></span>
               <span x-show="s.skipped" class="text-gray-400" x-text="fmt(s.skipped)+' skipped'"></span>
             </div>
           </div>
@@ -226,10 +225,12 @@ if ('serviceWorker' in navigator) {
 
                 <!-- Thumbnail -->
                 <button @click="openDetail(doc)" class="shrink-0 focus:outline-none self-start mt-0.5" title="View details">
-                  <img :src="thumbSrc(doc)" :alt="docTitle(doc)"
-                       class="thumb hover:opacity-80 transition-opacity cursor-zoom-in"
-                       onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
-                  <div class="thumb-placeholder" style="display:none">📄</div>
+                  <template x-if="doc.thumbnail_path">
+                    <img :src="thumbSrc(doc)" :alt="docTitle(doc)"
+                         class="thumb hover:opacity-80 transition-opacity cursor-zoom-in"
+                         onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                  </template>
+                  <div class="thumb-placeholder" :style="doc.thumbnail_path ? 'display:none' : ''">📄</div>
                 </button>
 
                 <!-- Score block -->

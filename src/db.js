@@ -158,6 +158,7 @@ const migrate = (db) => {
   addCol('pdf_quality', 'ai_summary', 'TEXT');
   addCol('pdf_quality', 'ai_author', 'TEXT');
   addCol('pdf_quality', 'ai_summarized_at', 'TEXT');
+  addCol('pdf_quality', 'thumbnail_path', 'TEXT');
 };
 
 /** Open (or create) site.sqlite for a domain. Returns better-sqlite3 db instance. */

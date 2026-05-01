@@ -20,12 +20,15 @@ const log = (msg) => console.log(`[pdf-upgrade] ${new Date().toISOString().slice
 const summarizeTopPending = async (db, domain) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return;
+  // Only fetch docs that have some summarizable metadata; pure numeric-slug docs with no context are skipped
   const rows = db.prepare(`
     SELECT q.url, pq.pdf_title, pq.excerpt, h.hosted_title, h.host_url as source_url
     FROM pdf_upgrade_queue q
     JOIN pdf_quality pq ON q.url = pq.url
     LEFT JOIN hosts h ON q.url = h.hosted_url
     WHERE q.status = 'pending' AND pq.ai_summarized_at IS NULL
+      AND (pq.pdf_title IS NOT NULL OR pq.excerpt IS NOT NULL OR h.hosted_title IS NOT NULL
+           OR (LENGTH(REPLACE(REPLACE(REPLACE(TRIM(REPLACE(REPLACE(LOWER(q.url),'/',' '),'.',' ')), 'pdf', ''), '-', ' '), '_', ' ')) > 3))
     ORDER BY q.priority DESC
     LIMIT ?`).all(SUMMARIZE_BATCH);
   if (!rows.length) return;
@@ -36,15 +39,20 @@ const summarizeTopPending = async (db, domain) => {
     try {
       const title = row.hosted_title || row.pdf_title || null;
       const slug = row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
-      const displayTitle = title || (slug.length > 3 ? slug : null);
-      if (!displayTitle && !row.excerpt && !row.source_url) { done++; continue; }
-      let prompt = 'You are cataloging a PDF document. Based only on the metadata provided, write:\n1. One sentence describing what this document likely contains.\n2. Author: [name if determinable, otherwise Unknown]\n\n';
-      if (displayTitle) prompt += `Title: ${displayTitle}\n`;
-      prompt += `URL: ${row.url}\n`;
-      if (row.source_url) prompt += `Found on: ${row.source_url}\n`;
-      if (row.excerpt) prompt += `Text excerpt: ${row.excerpt.slice(0, 500)}\n`;
+      const displayTitle = title || (slug.length > 3 && !/^\d+$/.test(slug.trim()) ? slug : null);
+      if (!displayTitle && !row.excerpt && !row.source_url) {
+        // Mark as attempted so we don't retry endlessly
+        db.prepare('UPDATE pdf_quality SET ai_summarized_at=? WHERE url=?').run(new Date().toISOString(), row.url);
+        done++; continue;
+      }
+      const prompt = `Metadata for a PDF document:\n${[
+        displayTitle && `Title: ${displayTitle}`,
+        `URL: ${row.url}`,
+        row.source_url && `Source page: ${row.source_url}`,
+        row.excerpt && `Excerpt: ${row.excerpt.slice(0, 500)}`
+      ].filter(Boolean).join('\n')}\n\nRespond with exactly two plain-text lines (no markdown, no numbering):\nLine 1: one sentence describing this document.\nLine 2: Author: [full name, or Unknown]`;
       const msg = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001', max_tokens: 120,
+        model: 'claude-haiku-4-5-20251001', max_tokens: 150,
         messages: [{ role: 'user', content: prompt }]
       });
       const text = msg.content[0]?.text || '';
