@@ -144,7 +144,7 @@ const DOC_SELECT = `
          q.thumbnail_path,
          h.host_url as source_url,
          u.status, u.before_score, u.after_score, u.score_improvement,
-         u.upgraded_pdf_path, u.error
+         u.upgraded_pdf_path, u.pages_processed, u.method, u.finished_at, u.error
   FROM pages p
   LEFT JOIN pdf_quality q ON p.url=q.url
   LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
@@ -289,6 +289,21 @@ createServer(async (req, res) => {
       console.error(`[thumbnail] pdftoppm failed for ${docUrl}: ${e.message}`);
     }
     return err(res, 404, 'thumbnail unavailable');
+  }
+
+  if (path === '/api/docs/download') {
+    const domain = url.searchParams.get('site');
+    const docUrl = url.searchParams.get('url');
+    if (!domain || !docUrl) return err(res, 400, 'site and url params required');
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, 'db unavailable');
+    let row;
+    try { row = db.prepare("SELECT upgraded_pdf_path FROM pdf_upgrade_queue WHERE url=? AND status='done'").get(docUrl); }
+    finally { db.close(); }
+    if (!row?.upgraded_pdf_path || !existsSync(row.upgraded_pdf_path)) return err(res, 404, 'upgraded pdf not found');
+    const filename = row.upgraded_pdf_path.split('/').pop();
+    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${filename}"`, 'Cache-Control': 'public, max-age=3600', ...corsHeaders });
+    return res.end(readFileSync(row.upgraded_pdf_path));
   }
 
   if (path === '/api/docs/skip' && req.method === 'POST') {

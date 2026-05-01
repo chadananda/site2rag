@@ -301,13 +301,32 @@ if ('serviceWorker' in navigator) {
                     <p class="text-xs text-gray-500 leading-relaxed line-clamp-2 mb-1 italic" x-text="doc.excerpt"></p>
                   </template>
 
-                  <!-- Before/after scores (upgraded tab) -->
-                  <template x-if="activeTab==='upgraded' && doc.before_score!=null && doc.after_score!=null">
-                    <div class="flex items-center gap-2 mb-1">
-                      <span class="score-pill" :class="scorePillCls(doc.before_score)" x-text="Math.round(doc.before_score*100)+'%'"></span>
-                      <span class="text-gray-400 text-xs">→</span>
-                      <span class="score-pill bg-green-100 text-green-800" x-text="Math.round(doc.after_score*100)+'%'"></span>
-                      <span class="text-xs font-bold text-green-700 mono" x-text="doc.score_improvement ? '+'+Math.round(doc.score_improvement*100)+'pts' : ''"></span>
+                  <!-- Upgraded tab: full improvement panel -->
+                  <template x-if="activeTab==='upgraded' && doc.status==='done'">
+                    <div class="mt-1 mb-1 space-y-1.5">
+                      <!-- Before → After scores -->
+                      <template x-if="doc.before_score!=null && doc.after_score!=null">
+                        <div class="flex items-center gap-2 flex-wrap">
+                          <span class="text-xs text-gray-400">score</span>
+                          <span class="score-pill" :class="scorePillCls(doc.before_score)" x-text="Math.round(doc.before_score*100)+'%'"></span>
+                          <span class="text-gray-400 text-xs">→</span>
+                          <span class="score-pill bg-green-100 text-green-800 font-bold" x-text="Math.round(doc.after_score*100)+'%'"></span>
+                          <span class="text-xs font-bold text-green-600 mono" x-text="doc.score_improvement ? '(+'+Math.round(doc.score_improvement*100)+' pts)' : ''"></span>
+                          <template x-if="doc.pages_processed">
+                            <span class="text-xs text-gray-400 mono" x-text="'· '+fmt(doc.pages_processed)+' pages OCR\'d'"></span>
+                          </template>
+                          <template x-if="doc.method">
+                            <span class="text-xs text-gray-400 mono" x-text="'via '+doc.method"></span>
+                          </template>
+                        </div>
+                      </template>
+                      <!-- Archival improvements -->
+                      <div class="flex flex-wrap gap-1.5 text-xs">
+                        <span class="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium" title="ISO 32000 compliant text layer added">📄 Searchable text</span>
+                        <span class="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium" title="Content extractable independently of PDF viewer">🗄 Long-term preservation</span>
+                        <span class="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium" title="Screen readers and assistive tools can read the text layer">♿ Accessibility (PDF/UA basis)</span>
+                        <span class="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium" title="Text can be indexed, searched, and extracted by any tool">🔍 Full-text indexable</span>
+                      </div>
                     </div>
                   </template>
 
@@ -330,8 +349,9 @@ if ('serviceWorker' in navigator) {
                     <a x-show="doc.source_url" :href="doc.source_url" target="_blank" rel="noopener"
                        class="hover:text-blue-500 truncate max-w-xs"
                        x-text="'↗ '+(doc.source_url||'').replace(/^https?:\/\//,'').split('/')[0]"></a>
-                    <template x-if="activeTab==='upgraded' && doc.archive_url">
-                      <a :href="doc.archive_url" target="_blank" class="font-semibold text-green-700 hover:underline">↓ Download upgraded PDF</a>
+                    <template x-if="activeTab==='upgraded' && doc.upgraded_pdf_path">
+                      <a :href="`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
+                         class="font-semibold text-green-700 hover:underline ml-auto">↓ upgraded PDF</a>
                     </template>
                     <!-- Summarize button -->
                     <template x-if="!doc.ai_summary && !doc.ai_summarized_at">
