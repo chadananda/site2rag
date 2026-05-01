@@ -1,11 +1,8 @@
 // site2rag API + report server. Routes: /api/sites, /api/docs, /api/thumbnail, /api/docs/skip, /api/docs/summarize; static public/.
 import { createServer } from 'http';
-import { existsSync, readFileSync, mkdirSync, renameSync } from 'fs';
-import { join, extname, dirname } from 'path';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
-
-const execFileAsync = promisify(execFile);
+import { existsSync, readFileSync, mkdirSync } from 'fs';
+import { join, extname, dirname, resolve } from 'path';
+import { Worker } from 'worker_threads';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import Anthropic from '@anthropic-ai/sdk';
@@ -76,16 +73,55 @@ const mapDoc = (d, domain) => ({
     : null,
 });
 
-/** Generate a JPEG thumbnail of PDF page 1 using pdftoppm. Returns true on success. */
-const generateThumb = async (pdfPath, outPath, targetW = 300) => {
-  const dpi = Math.max(18, Math.round(targetW / 8.5));
-  const prefix = outPath.replace(/\.jpg$/, '');
-  await execFileAsync('pdftoppm', ['-f', '1', '-l', '1', '-r', String(dpi), '-jpeg', '-jpegopt', 'quality=85', pdfPath, prefix], { timeout: 30000 });
-  for (const candidate of [`${prefix}-1.jpg`, `${prefix}-01.jpg`, `${prefix}-001.jpg`]) {
-    if (existsSync(candidate)) { renameSync(candidate, outPath); return true; }
-  }
-  return false;
+/** Persistent worker pool for thumbnail generation (pdfjs+canvas in isolated threads). */
+const THUMB_WORKERS = 3;
+const WORKER_SCRIPT = resolve(import.meta.dirname, 'thumb-worker.js');
+let _jobId = 0;
+const _pending = new Map(); // jobId -> { resolve, reject }
+const _queue = [];          // { jobId, pdfPath, outPath, targetW }
+const _workers = [];        // { worker, busy }
+
+const _dispatch = (slot) => {
+  if (!_queue.length) { slot.busy = false; return; }
+  const job = _queue.shift();
+  slot.busy = true;
+  slot.worker.postMessage(job);
 };
+
+const _makeWorker = () => {
+  const slot = { worker: new Worker(WORKER_SCRIPT), busy: false };
+  slot.worker.on('message', ({ jobId, success, error }) => {
+    const p = _pending.get(jobId);
+    _pending.delete(jobId);
+    if (p) (success ? p.resolve : p.reject)(success ? undefined : new Error(error));
+    _dispatch(slot);
+  });
+  slot.worker.on('error', (e) => {
+    // Worker crashed — drain its pending job then respawn
+    console.error('[thumb-worker] crashed:', e.message);
+    slot.worker.terminate();
+    Object.assign(slot, { worker: new Worker(WORKER_SCRIPT), busy: false });
+    slot.worker.on('message', ({ jobId, success, error }) => {
+      const p = _pending.get(jobId); _pending.delete(jobId);
+      if (p) (success ? p.resolve : p.reject)(success ? undefined : new Error(error));
+      _dispatch(slot);
+    });
+    slot.worker.on('error', () => _dispatch(slot));
+    _dispatch(slot);
+  });
+  return slot;
+};
+for (let i = 0; i < THUMB_WORKERS; i++) _workers.push(_makeWorker());
+
+/** Queue a thumbnail generation job; resolves when the file is written. */
+const generateThumb = (pdfPath, outPath, targetW = 300) =>
+  new Promise((resolve, reject) => {
+    const jobId = ++_jobId;
+    _pending.set(jobId, { resolve, reject });
+    const free = _workers.find(w => !w.busy);
+    if (free) { free.busy = true; free.worker.postMessage({ jobId, pdfPath, outPath, targetW }); }
+    else _queue.push({ jobId, pdfPath, outPath, targetW });
+  });
 
 /** Summary stats for one site. */
 const siteSummary = (domain, siteUrl) => {
@@ -276,18 +312,15 @@ createServer(async (req, res) => {
 
     try {
       mkdirSync(thumbDir, { recursive: true });
-      const ok = await generateThumb(row.local_path, thumbPath, w);
-      if (ok && existsSync(thumbPath)) {
-        // Store default-size path in DB for fast API lookup
-        if (w === 300) {
-          const db2 = safeOpenDb(domain);
-          if (db2) { try { db2.prepare('UPDATE pdf_quality SET thumbnail_path=? WHERE url=?').run(thumbPath, docUrl); } finally { db2.close(); } }
-        }
-        res.writeHead(200, { 'Content-Type': 'image/jpeg', ...cacheHeaders(604800) });
-        return res.end(readFileSync(thumbPath));
+      await generateThumb(row.local_path, thumbPath, w);
+      if (w === 150) {
+        const db2 = safeOpenDb(domain);
+        if (db2) { try { db2.prepare('UPDATE pdf_quality SET thumbnail_path=? WHERE url=?').run(thumbPath, docUrl); } finally { db2.close(); } }
       }
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', ...cacheHeaders(604800) });
+      return res.end(readFileSync(thumbPath));
     } catch (e) {
-      console.error(`[thumbnail] pdftoppm failed for ${docUrl}: ${e.message}`);
+      console.error(`[thumbnail] failed for ${docUrl}: ${e.message}`);
     }
     return err(res, 404, 'thumbnail unavailable');
   }
