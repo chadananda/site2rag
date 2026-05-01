@@ -159,6 +159,18 @@ const migrate = (db) => {
   addCol('pdf_quality', 'ai_author', 'TEXT');
   addCol('pdf_quality', 'ai_summarized_at', 'TEXT');
   addCol('pdf_quality', 'thumbnail_path', 'TEXT');
+  // Fix readable_pages_pct stored as 0-100 instead of 0-1; recompute composite_score
+  db.exec(`
+    UPDATE pdf_quality
+    SET readable_pages_pct = readable_pages_pct / 100.0,
+        composite_score = ROUND(
+          0.4 * COALESCE(word_quality_estimate, 0)
+          + 0.3 * (readable_pages_pct / 100.0)
+          + 0.2 * MIN(COALESCE(avg_chars_per_page, 0) / 500.0, 1.0)
+          + 0.1 * COALESCE(has_text_layer, 0),
+          2)
+    WHERE readable_pages_pct > 1
+  `);
 };
 
 /** Open (or create) site.sqlite for a domain. Returns better-sqlite3 db instance. */
