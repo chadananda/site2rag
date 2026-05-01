@@ -1,6 +1,16 @@
 const path = require('path');
+const fs = require('fs');
 const SITE2RAG_ROOT = process.env.SITE2RAG_ROOT || path.resolve(__dirname, '..');
-const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+// Load .env from SITE2RAG_ROOT so PM2 picks up secrets without shell sourcing
+const envVars = {};
+const envFile = path.join(SITE2RAG_ROOT, '.env');
+if (fs.existsSync(envFile)) {
+  fs.readFileSync(envFile, 'utf8').split('\n').forEach(line => {
+    const m = line.match(/^([A-Z_]+)=(.*)$/);
+    if (m) envVars[m[1]] = m[2].trim();
+  });
+}
+const ANTHROPIC_API_KEY = envVars.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '';
 module.exports = {
   apps: [
     {
