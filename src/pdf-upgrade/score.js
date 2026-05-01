@@ -25,25 +25,29 @@ const wordQuality = (text) => {
  * @param {string} pdfPath - Path to PDF file
  * @returns {object} { avg_chars_per_page, readable_pages_pct, has_text_layer, word_quality_estimate, composite_score, pages }
  */
+const SAMPLE_PAGES = 5; // parse only first N pages for speed
+
 export const scorePdf = async (pdfPath) => {
   const empty = { avg_chars_per_page: 0, readable_pages_pct: 0, has_text_layer: 0, word_quality_estimate: 0, composite_score: 0, pages: 0 };
   try {
     const buf = readFileSync(pdfPath);
+    // First pass: get total page count cheaply (max:1 still returns numpages)
+    let meta;
+    try { meta = await pdfParse(buf, { max: 1 }); } catch { return empty; }
+    const pages = meta.numpages || 1;
+    // Second pass: sample up to SAMPLE_PAGES pages for quality heuristics
+    const sampleMax = Math.min(pages, SAMPLE_PAGES);
     let data;
-    try { data = await pdfParse(buf, { max: 0 }); } catch { return empty; }
-    const pages = data.numpages || 1;
-    const totalChars = (data.text || '').length;
-    const avgChars = totalChars / pages;
+    try { data = await pdfParse(buf, { max: sampleMax }); } catch { return empty; }
+    const sampleText = data.text || '';
+    const pageTexts = sampleText.split('\f');
+    const readableInSample = pageTexts.filter(p => p.replace(/\s/g, '').length >= 50).length;
+    // Extrapolate readable% from sample
+    const readablePct = sampleMax > 0 ? readableInSample / sampleMax : 0;
+    const avgChars = sampleText.length / sampleMax;
     const hasText = avgChars > 5 ? 1 : 0;
-    // Split by form-feed to get per-page text
-    const pageTexts = (data.text || '').split('\f');
-    const readablePages = pageTexts.filter(p => p.replace(/\s/g, '').length >= 50).length;
-    const readablePct = pages > 0 ? readablePages / pages : 0;
-    // Word quality on a sample of the full text
-    const sampleText = (data.text || '').slice(0, 5000);
-    const wq = wordQuality(sampleText);
-    // Composite: weighted sum
-    const charsScore = Math.min(avgChars / 500, 1); // saturates at 500 chars/page
+    const wq = wordQuality(sampleText.slice(0, 5000));
+    const charsScore = Math.min(avgChars / 500, 1);
     const composite = 0.4 * wq + 0.3 * readablePct + 0.2 * charsScore + 0.1 * hasText;
     return { avg_chars_per_page: Math.round(avgChars), readable_pages_pct: Math.round(readablePct * 100) / 100, has_text_layer: hasText, word_quality_estimate: Math.round(wq * 100) / 100, composite_score: Math.round(composite * 100) / 100, pages };
   } catch { return empty; }

@@ -2,7 +2,7 @@
 import { existsSync } from 'fs';
 import { scorePdf, saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
 
-const BUDGET_MS = 5 * 60 * 1000; // 5 minutes per run max
+const BUDGET_MS = 10 * 60 * 1000; // 10 minutes per run max (scoring is fast now)
 const THRESHOLD = 0.7;
 
 /**
