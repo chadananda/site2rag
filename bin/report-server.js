@@ -185,7 +185,7 @@ const DOC_SELECT = `
   FROM pages p
   LEFT JOIN pdf_quality q ON p.url=q.url
   LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
-  LEFT JOIN hosts h ON p.url=h.hosted_url`;
+  LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title FROM hosts GROUP BY hosted_url) h ON p.url=h.hosted_url`;
 
 /** Server-side filtered + paginated doc list. */
 const siteDocs = (domain, params) => {
@@ -241,7 +241,8 @@ const siteDocs = (domain, params) => {
 
     const total = db.prepare(`SELECT COUNT(*) as n FROM pages p
       LEFT JOIN pdf_quality q ON p.url=q.url LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
-      LEFT JOIN hosts h ON p.url=h.hosted_url WHERE ${where}`).get(...vals).n;
+      LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title FROM hosts GROUP BY hosted_url) h ON p.url=h.hosted_url
+      WHERE ${where}`).get(...vals).n;
 
     const rows = db.prepare(`${DOC_SELECT} WHERE ${where} ORDER BY ${orderBy} LIMIT ${PER_PAGE} OFFSET ${offset}`).all(...vals);
     return { docs: rows.map(d => mapDoc(d, domain)), total, page, pages: Math.ceil(total / PER_PAGE), per_page: PER_PAGE };
@@ -378,7 +379,7 @@ createServer(async (req, res) => {
       rows = db.prepare(`
         SELECT q.url, q.pdf_title, q.excerpt, h.hosted_title, h.host_url as source_url
         FROM pdf_quality q
-        LEFT JOIN hosts h ON q.url=h.hosted_url
+        LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title FROM hosts GROUP BY hosted_url) h ON q.url=h.hosted_url
         WHERE q.ai_summarized_at IS NULL
           AND (q.has_text_layer=0 OR q.has_text_layer IS NULL OR q.readable_pages_pct < 0.4)
         ORDER BY COALESCE(q.composite_score, 1) ASC
@@ -426,7 +427,8 @@ createServer(async (req, res) => {
     try {
       row = db.prepare(`SELECT q.url, q.pdf_title, q.excerpt, q.ai_summary, q.ai_author, q.ai_summarized_at,
         h.hosted_title, h.host_url as source_url FROM pdf_quality q
-        LEFT JOIN hosts h ON q.url=h.hosted_url WHERE q.url=?`).get(docUrl);
+        LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title FROM hosts GROUP BY hosted_url) h ON q.url=h.hosted_url
+        WHERE q.url=?`).get(docUrl);
     } finally { db.close(); }
     if (!row) return err(res, 404, 'doc not found in pdf_quality');
     // Return cached if present
