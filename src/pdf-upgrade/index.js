@@ -3,7 +3,7 @@
 import { existsSync, copyFileSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
-import { loadConfig, getMirrorRoot, metaDir } from '../config.js';
+import { loadConfig, getMirrorRoot, mirrorDir, metaDir } from '../config.js';
 import { openDb } from '../db.js';
 import { bossAvailable, reocrDocument } from './reocr.js';
 import { rebuildPdf } from './rebuild.js';
@@ -46,10 +46,10 @@ const processOne = async (db, domain, row) => {
       throw new Error(`reocr failed: ${err.message}`);
     }
 
-    // Rebuild PDF with text layer
-    const upgradedDir = join(metaDir(domain), 'upgraded');
-    mkdirSync(upgradedDir, { recursive: true });
+    // Rebuild PDF with text layer -- store under _upgraded/ in mirror so lnker-server can serve it
     const slug = page.path_slug || page.url.replace(/[^a-z0-9]/gi, '_').slice(-60);
+    const upgradedDir = join(mirrorDir(domain), '_upgraded');
+    mkdirSync(upgradedDir, { recursive: true });
     const outputPath = join(upgradedDir, `${slug}.pdf`);
     const { success, method, error } = await rebuildPdf(page.local_path, outputPath, ocrResults);
 

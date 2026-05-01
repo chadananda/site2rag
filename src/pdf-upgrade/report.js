@@ -11,8 +11,8 @@ const gatherSiteData = (domain) => {
   let db;
   try { db = openDb(domain); } catch { return null; }
   try {
-    const docs = db.prepare(`
-      SELECT p.url, p.local_path, p.content_hash, p.last_seen_at,
+    const rows = db.prepare(`
+      SELECT p.url, p.path_slug, p.local_path, p.content_hash, p.last_seen_at,
              q.composite_score, q.avg_chars_per_page, q.readable_pages_pct,
              q.has_text_layer, q.word_quality_estimate, q.pages, q.scored_at,
              u.status, u.priority, u.queued_at, u.started_at, u.finished_at,
@@ -28,6 +28,15 @@ const gatherSiteData = (domain) => {
       WHERE p.gone = 0 AND p.mime_type = 'application/pdf'
       ORDER BY COALESCE(q.composite_score, 1) ASC
     `).all();
+    // Add archive_url: the lnker.com URL where the upgraded PDF can be downloaded
+    const docs = rows.map(d => {
+      let archive_url = null;
+      if (d.status === 'done' && d.upgraded_pdf_path) {
+        const slug = d.path_slug || (d.url.replace(/[^a-z0-9]/gi, '_').slice(-60));
+        archive_url = `https://${domain}.lnker.com/_upgraded/${slug}.pdf`;
+      }
+      return { ...d, archive_url };
+    });
     const totalDocs = docs.length;
     const scored = docs.filter(d => d.composite_score !== null).length;
     const upgraded = docs.filter(d => d.status === 'done').length;
@@ -202,7 +211,7 @@ const buildHtml = (sites, builtAt) => {
               <th class="text-center px-3 py-3 font-medium text-gray-600 w-24">Score</th>
               <th class="text-center px-3 py-3 font-medium text-gray-600 w-24">After</th>
               <th class="text-center px-3 py-3 font-medium text-gray-600 w-24">Status</th>
-              <th class="text-center px-3 py-3 font-medium text-gray-600 w-24">Actions</th>
+              <th class="text-left px-3 py-3 font-medium text-gray-600">Links</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-100">
@@ -210,10 +219,9 @@ const buildHtml = (sites, builtAt) => {
               <tr class="hover:bg-gray-50 transition-colors">
                 <td class="px-4 py-3 text-gray-400 text-xs" x-text="di + 1"></td>
                 <td class="px-4 py-3">
-                  <div class="truncate-cell font-medium text-gray-800"
-                       x-text="doc.title || doc.url.split('/').pop().replace(/\\.pdf$/i,'').replace(/_/g,' ')"
+                  <div class="font-medium text-gray-800 truncate-cell"
+                       x-text="doc.title || doc.url.split('/').pop().replace(/\\.pdf$/i,'').replace(/[_-]/g,' ')"
                        :title="doc.url"></div>
-                  <div class="text-xs text-gray-400 truncate-cell" x-text="doc.url"></div>
                   <!-- Bad OCR sample (expandable) -->
                   <template x-if="doc.bad_sample && doc.composite_score !== null && doc.composite_score < 0.5">
                     <div class="mt-1">
@@ -267,14 +275,23 @@ const buildHtml = (sites, builtAt) => {
                     <span class="text-gray-300 text-xs">—</span>
                   </template>
                 </td>
-                <td class="px-3 py-3 text-center">
-                  <div class="flex items-center justify-center gap-2">
-                    <a :href="doc.url" target="_blank" title="Original"
-                       class="text-xs text-blue-500 hover:text-blue-700">orig</a>
-                    <template x-if="doc.upgraded_pdf_path">
-                      <a :href="'/upgraded/' + doc.url.split('/').pop()" target="_blank" title="Download upgraded PDF"
-                         class="text-xs text-green-600 hover:text-green-800 font-semibold">↓ PDF</a>
+                <!-- Links: archive download + original source -->
+                <td class="px-3 py-3">
+                  <div class="flex flex-col gap-1 min-w-0">
+                    <!-- Archive download (only when done) -->
+                    <template x-if="doc.archive_url">
+                      <a :href="doc.archive_url" target="_blank"
+                         class="inline-flex items-center gap-1 text-xs font-semibold text-green-700 hover:text-green-900 hover:underline"
+                         title="Download upgraded PDF from archive">
+                        ↓ Download upgraded PDF
+                      </a>
                     </template>
+                    <!-- Original source URL — what to replace -->
+                    <a :href="doc.url" target="_blank"
+                       class="text-xs text-gray-400 hover:text-blue-600 hover:underline truncate-cell"
+                       :title="'Original source: ' + doc.url">
+                      <span class="text-gray-300 mr-1">⇒ replace:</span><span x-text="doc.url.replace(/^https?:\/\//, '')"></span>
+                    </a>
                   </div>
                 </td>
               </tr>
