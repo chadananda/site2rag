@@ -159,11 +159,11 @@
                 <template x-for="doc in topDocs" :key="doc.url">
                   <div class="bg-white border border-gray-200 rounded-lg p-3 flex gap-3 shadow-sm hover:shadow-md transition-shadow">
                     <!-- Thumbnail -->
-                    <a :href="doc.url" target="_blank" class="shrink-0">
-                      <img :src="doc.thumbnail_url" :alt="docTitle(doc)"
-                           class="thumb"
-                           onerror="this.parentNode.innerHTML='<div class=\'thumb thumb-placeholder\'>📄</div>'">
-                    </a>
+                    <button @click="openDetail(doc)" class="shrink-0 focus:outline-none">
+                      <img :src="thumbUrl(doc)" :alt="docTitle(doc)"
+                           class="thumb hover:opacity-80 transition-opacity cursor-zoom-in"
+                           onerror="this.parentNode.innerHTML='<div class=\'thumb thumb-placeholder cursor-pointer\'>📄</div>'">
+                    </button>
                     <!-- Content -->
                     <div class="flex-1 min-w-0">
                       <div class="flex items-start justify-between gap-2 mb-1">
@@ -204,11 +204,11 @@
               <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 mb-4">
                 <template x-for="doc in restDocs" :key="doc.url">
                   <div class="bg-white border border-gray-200 rounded-lg p-2 flex gap-2 shadow-sm hover:shadow-md transition-shadow">
-                    <a :href="doc.url" target="_blank" class="shrink-0">
-                      <img :src="doc.thumbnail_url" :alt="docTitle(doc)"
-                           class="thumb-sm"
-                           onerror="this.parentNode.innerHTML='<div class=\'thumb-sm thumb-placeholder\'>📄</div>'">
-                    </a>
+                    <button @click="openDetail(doc)" class="shrink-0 focus:outline-none">
+                      <img :src="thumbUrl(doc)" :alt="docTitle(doc)"
+                           class="thumb-sm hover:opacity-80 transition-opacity cursor-zoom-in"
+                           onerror="this.parentNode.innerHTML='<div class=\'thumb-sm thumb-placeholder cursor-pointer\'>📄</div>'">
+                    </button>
                     <div class="flex-1 min-w-0">
                       <a :href="doc.url" target="_blank"
                          class="text-xs font-medium text-gray-900 hover:text-blue-600 leading-tight line-clamp-3 block mb-1"
@@ -254,6 +254,56 @@
 
 </div>
 
+<!-- PDF detail modal -->
+<template x-if="expandedDoc">
+  <div class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
+       @click.self="closeDetail()" @keydown.escape.window="closeDetail()">
+    <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+      <div class="flex gap-4 p-5">
+        <!-- Large preview -->
+        <div class="shrink-0">
+          <img :src="thumbUrl(expandedDoc, true)" :alt="docTitle(expandedDoc)"
+               class="rounded border border-gray-100 w-48"
+               onerror="this.style.display='none'">
+        </div>
+        <!-- Info -->
+        <div class="flex-1 min-w-0">
+          <div class="flex items-start justify-between gap-2 mb-2">
+            <h2 class="font-bold text-base leading-tight text-gray-900" x-text="docTitle(expandedDoc)"></h2>
+            <button @click="closeDetail()" class="text-gray-400 hover:text-gray-600 text-xl leading-none shrink-0">×</button>
+          </div>
+          <p x-show="expandedDoc.excerpt" class="text-sm text-gray-600 leading-relaxed mb-3" x-text="expandedDoc.excerpt"></p>
+          <div class="flex flex-wrap gap-2 mb-3">
+            <span x-show="expandedDoc.composite_score!=null" class="score-pill" :class="scoreCls(expandedDoc.composite_score)"
+                  x-text="'Quality: '+Math.round(expandedDoc.composite_score*100)+'%'"></span>
+            <span x-show="expandedDoc.after_score!=null" class="score-pill bg-green-100 text-green-800"
+                  x-text="'After upgrade: '+Math.round(expandedDoc.after_score*100)+'%'"></span>
+            <span x-show="expandedDoc.status" class="text-xs px-1.5 py-0.5 rounded-full"
+                  :class="statusCls(expandedDoc.status)" x-text="statusLabel(expandedDoc.status)"></span>
+          </div>
+          <div class="text-xs text-gray-400 space-y-1.5">
+            <div x-show="expandedDoc.pages" class="mono" x-text="expandedDoc.pages+' pages'"></div>
+            <div class="truncate">
+              <a :href="expandedDoc.url" target="_blank" class="text-blue-600 hover:underline break-all" x-text="expandedDoc.url"></a>
+            </div>
+            <div x-show="expandedDoc.source_url">
+              <span class="text-gray-400">Found on: </span>
+              <a :href="expandedDoc.source_url" target="_blank" class="text-blue-500 hover:underline truncate"
+                 x-text="(expandedDoc.source_url||'').replace(/^https?:\/\//,'')"></a>
+            </div>
+          </div>
+          <div class="flex gap-2 mt-4">
+            <a :href="expandedDoc.url" target="_blank"
+               class="px-3 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium">Open PDF</a>
+            <a x-show="expandedDoc.archive_url" :href="expandedDoc.archive_url" target="_blank"
+               class="px-3 py-1.5 text-xs rounded bg-green-100 hover:bg-green-200 text-green-800 font-medium">Download upgraded</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
 <script>
 const API_BASE = ['localhost','127.0.0.1'].includes(location.hostname)
   ? 'http://127.0.0.1:7840'
@@ -261,6 +311,12 @@ const API_BASE = ['localhost','127.0.0.1'].includes(location.hostname)
 
 const PER_PAGE = 50;
 const TOP_N = 10;
+
+// Imagekit thumbnail URL builder — uses original PDF URL as fetch source
+function ikThumb(docUrl, width, ikEndpoint) {
+  if (!ikEndpoint || !docUrl) return '';
+  return `${ikEndpoint}/tr:w-${width},pg-1,f-jpg/${docUrl}`;
+}
 
 function scoreCls(s) {
   if (s == null) return 'bg-gray-100 text-gray-400';
@@ -299,14 +355,21 @@ function timeAgo(iso) {
 function app() {
   return {
     sites: [], activeSite: null,
-    allDocs: [],    // full unfiltered list from API
-    docs: [],       // current page
-    topDocs: [],    // first TOP_N of current page
-    restDocs: [],   // rest of current page
+    ikEndpoint: '', thumbWidth: 180, previewWidth: 600,
+    allDocs: [],
+    topDocs: [], restDocs: [],
     docsTotal: 0, docsPage: 1, docsPages: 1,
     filters: { q: '', status: '', score_max: 1, sort: 'score_asc' },
     loading: false, apiStatus: '', apiError: '', lastRefresh: '',
+    expandedDoc: null,
     scoreCls, statusCls, statusLabel,
+
+    thumbUrl(doc, large = false) {
+      return ikThumb(doc.url, large ? this.previewWidth : this.thumbWidth, this.ikEndpoint);
+    },
+
+    openDetail(doc) { this.expandedDoc = doc; },
+    closeDetail() { this.expandedDoc = null; },
 
     async init() {
       await this.loadSites();
@@ -318,7 +381,16 @@ function app() {
       try {
         const res = await fetch(`${API_BASE}/api/sites`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        this.sites = await res.json();
+        const data = await res.json();
+        // Support both old (array) and new (object with sites key) response shapes
+        if (Array.isArray(data)) {
+          this.sites = data;
+        } else {
+          this.sites = data.sites || [];
+          this.ikEndpoint = data.imagekit_endpoint || '';
+          this.thumbWidth = data.thumb_width || 180;
+          this.previewWidth = data.preview_width || 600;
+        }
         this.apiStatus = 'connected'; this.apiError = '';
         if (!this.activeSite && this.sites.length) await this.selectSite(this.sites[0]);
         else if (this.activeSite) {
@@ -331,7 +403,11 @@ function app() {
     async refresh() {
       const res = await fetch(`${API_BASE}/api/sites`).catch(() => null);
       if (!res?.ok) return;
-      this.sites = await res.json();
+      const data = await res.json();
+      this.sites = Array.isArray(data) ? data : (data.sites || []);
+      if (!Array.isArray(data)) {
+        if (data.imagekit_endpoint) this.ikEndpoint = data.imagekit_endpoint;
+      }
       if (this.activeSite) {
         const u = this.sites.find(s => s.domain === this.activeSite.domain);
         if (u) this.activeSite = u;
