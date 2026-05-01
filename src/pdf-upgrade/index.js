@@ -175,25 +175,33 @@ const processOne = async (db, domain, row) => {
   }
 };
 
-/** Main tick -- check boss, pick next item, process, rebuild report. */
+/** Main tick -- backfill hosts, summarize, then OCR-process if boss is available. */
 const tick = async () => {
   const { sites } = loadConfig();
   if (!sites.length) return;
 
+  const openDbs = [];
+  for (const site of sites) {
+    const domain = new URL(site.url).hostname;
+    openDbs.push({ db: openDb(domain), domain });
+  }
+
+  // Backfill + summarize run regardless of boss availability
+  for (const { db, domain } of openDbs) {
+    await backfillHostsFromMirror(db, domain);
+    await summarizeTopPending(db, domain);
+  }
+
+  // OCR processing requires boss
   const available = await bossAvailable();
   if (!available) {
-    log('Boss unavailable, skipping tick');
+    log('Boss unavailable, skipping OCR processing');
+    for (const { db } of openDbs) { try { db.close(); } catch {} }
     return;
   }
 
-  // Process one domain at a time -- find highest-priority pending item across all sites
   let bestRow = null, bestDomain = null, bestDb = null;
-  const openDbs = [];
-
-  for (const site of sites) {
-    const domain = new URL(site.url).hostname;
-    const db = openDb(domain);
-    openDbs.push({ db, domain });
+  for (const { db, domain } of openDbs) {
     const row = db.prepare(`
       SELECT q.*, pq.composite_score as before_score
       FROM pdf_upgrade_queue q
@@ -203,28 +211,16 @@ const tick = async () => {
       LIMIT 1
     `).get();
     if (row && (!bestRow || row.priority > bestRow.priority)) {
-      bestRow = row;
-      bestDomain = domain;
-      bestDb = db;
+      bestRow = row; bestDomain = domain; bestDb = db;
     }
-  }
-
-  // Backfill hosts from mirror HTML (once per DB, fast no-op after first run)
-  for (const { db, domain } of openDbs) {
-    await backfillHostsFromMirror(db, domain);
   }
 
   if (bestRow && bestDb) {
-    await summarizeTopPending(bestDb, bestDomain);
     await processOne(bestDb, bestDomain, bestRow);
   } else {
     log('No pending items');
-    for (const { db, domain } of openDbs) {
-      await summarizeTopPending(db, domain);
-    }
   }
 
-  // Close all dbs
   for (const { db } of openDbs) { try { db.close(); } catch {} }
 };
 
