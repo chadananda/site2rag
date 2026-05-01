@@ -154,6 +154,7 @@ const migrate = (db) => {
   };
   addCol('pdf_quality', 'pdf_title', 'TEXT');
   addCol('pdf_quality', 'excerpt', 'TEXT');
+  addCol('pdf_quality', 'skip', 'INT DEFAULT 0');
 };
 
 /** Open (or create) site.sqlite for a domain. Returns better-sqlite3 db instance. */

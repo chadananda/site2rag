@@ -1,11 +1,14 @@
-// site2rag API + frontend server. Routes: GET /api/sites, /api/docs, /api/docs/all; static public/.
+// site2rag API + report server. Routes: /api/sites, /api/docs, /api/thumbnail, /api/docs/skip; static public/.
 import { createServer } from 'http';
-import { existsSync, readFileSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, renameSync } from 'fs';
 import { join, extname, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { loadConfig, getMirrorRoot } from '../src/config.js';
 import { openDb } from '../src/db.js';
 
+const execFileAsync = promisify(execFile);
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
 const STATIC_MIME = {
@@ -16,7 +19,6 @@ const STATIC_MIME = {
 const serveStatic = (res, reqPath) => {
   const filePath = join(PUBLIC_DIR, reqPath === '/' ? 'index.html' : reqPath);
   if (!existsSync(filePath)) {
-    // SPA fallback: serve index.html for unknown paths
     const index = join(PUBLIC_DIR, 'index.html');
     if (!existsSync(index)) { res.writeHead(404); return res.end('Not found'); }
     res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
@@ -31,31 +33,42 @@ const PORT = parseInt(process.env.REPORT_PORT || '7840', 10);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://site2rag.lnker.com';
 const PER_PAGE = 50;
 
+const corsHeaders = {
+  'Access-Control-Allow-Origin': CORS_ORIGIN,
+  'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Cache-Control': 'no-cache'
+};
+
+const json = (res, data, status = 200) => {
+  res.writeHead(status, { 'Content-Type': 'application/json', ...corsHeaders });
+  res.end(JSON.stringify(data));
+};
+const err = (res, status, msg) => json(res, { error: msg }, status);
+
+const safeOpenDb = (domain) => {
+  const dbPath = join(getMirrorRoot(), domain, '_meta', 'site.sqlite');
+  if (!existsSync(dbPath)) return null;
+  try { return openDb(domain); } catch { return null; }
+};
+
 const mapDoc = (d, domain) => ({
   ...d,
   archive_url: d.status === 'done' && d.upgraded_pdf_path
     ? `https://${domain}.lnker.com/_upgraded/${d.path_slug || d.url.replace(/[^a-z0-9]/gi,'_').slice(-60)}.pdf`
     : null,
+  thumbnail_url: `/api/thumbnail?url=${encodeURIComponent(d.url)}`,
 });
 
-const json = (res, data, status = 200) => {
-  res.writeHead(status, {
-    'Content-Type': 'application/json',
-    'Access-Control-Allow-Origin': CORS_ORIGIN,
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
-    'Access-Control-Allow-Headers': 'Content-Type',
-    'Cache-Control': 'no-cache'
-  });
-  res.end(JSON.stringify(data));
-};
-
-const err = (res, status, msg) => json(res, { error: msg }, status);
-
-/** Open a site DB safely; return null if missing. */
-const safeOpenDb = (domain) => {
-  const dbPath = join(getMirrorRoot(), domain, '_meta', 'site.sqlite');
-  if (!existsSync(dbPath)) return null;
-  try { return openDb(domain); } catch { return null; }
+/** Generate a JPEG thumbnail of PDF page 1 using pdftoppm. Returns true on success. */
+const generateThumb = async (pdfPath, outPath) => {
+  const prefix = outPath.replace(/\.jpg$/, '');
+  await execFileAsync('pdftoppm', ['-f', '1', '-l', '1', '-r', '72', '-jpeg', '-jpegopt', 'quality=75', pdfPath, prefix]);
+  // pdftoppm writes prefix-1.jpg or prefix-01.jpg depending on page count
+  for (const candidate of [`${prefix}-1.jpg`, `${prefix}-01.jpg`, `${prefix}-001.jpg`]) {
+    if (existsSync(candidate)) { renameSync(candidate, outPath); return true; }
+  }
+  return false;
 };
 
 /** Summary stats for one site. */
@@ -64,36 +77,28 @@ const siteSummary = (domain, siteUrl) => {
   if (!db) return { domain, url: siteUrl, available: false };
   try {
     const totals = db.prepare(`
-      SELECT
-        COUNT(*) as total_pages,
+      SELECT COUNT(*) as total_pages,
         SUM(CASE WHEN mime_type='application/pdf' AND gone=0 THEN 1 ELSE 0 END) as total_pdfs,
         SUM(CASE WHEN mime_type LIKE 'text/html%' AND gone=0 THEN 1 ELSE 0 END) as total_html
-      FROM pages
-    `).get();
+      FROM pages`).get();
     const classify = db.prepare(`
-      SELECT
-        SUM(CASE WHEN page_role='content' THEN 1 ELSE 0 END) as content,
+      SELECT SUM(CASE WHEN page_role='content' THEN 1 ELSE 0 END) as content,
         SUM(CASE WHEN page_role='index' THEN 1 ELSE 0 END) as index_pages,
         SUM(CASE WHEN page_role='host_page' THEN 1 ELSE 0 END) as host_pages,
         SUM(CASE WHEN page_role IS NOT NULL THEN 1 ELSE 0 END) as classified
-      FROM pages WHERE gone=0 AND mime_type LIKE 'text/html%'
-    `).get();
+      FROM pages WHERE gone=0 AND mime_type LIKE 'text/html%'`).get();
     const pdf = db.prepare(`
-      SELECT
-        COUNT(*) as scored,
+      SELECT COUNT(*) as scored,
         SUM(CASE WHEN u.status='done' THEN 1 ELSE 0 END) as upgraded,
         SUM(CASE WHEN u.status='pending' THEN 1 ELSE 0 END) as pending,
         SUM(CASE WHEN u.status='processing' THEN 1 ELSE 0 END) as processing,
-        SUM(CASE WHEN u.status='failed' THEN 1 ELSE 0 END) as failed
-      FROM pdf_quality q
-      LEFT JOIN pdf_upgrade_queue u ON q.url = u.url
-    `).get();
+        SUM(CASE WHEN u.status='failed' THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN q.skip=1 THEN 1 ELSE 0 END) as skipped
+      FROM pdf_quality q LEFT JOIN pdf_upgrade_queue u ON q.url=u.url`).get();
     const exp = db.prepare(`
-      SELECT
-        SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) as ok,
+      SELECT SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) as ok,
         SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed
-      FROM exports
-    `).get();
+      FROM exports`).get();
     const lastRun = db.prepare(`SELECT started_at, finished_at, status FROM runs ORDER BY id DESC LIMIT 1`).get();
     const doneDocs = db.prepare(`SELECT started_at, finished_at FROM pdf_upgrade_queue WHERE status='done' AND finished_at IS NOT NULL`).all();
     const avgSec = doneDocs.length
@@ -101,27 +106,33 @@ const siteSummary = (domain, siteUrl) => {
       : 300;
     return {
       domain, url: siteUrl, available: true,
-      total_pages: totals.total_pages || 0,
-      total_html: totals.total_html || 0,
-      total_pdfs: totals.total_pdfs || 0,
-      pages_classified: classify.classified || 0,
-      pages_content: classify.content || 0,
-      pages_index: classify.index_pages || 0,
-      pages_host: classify.host_pages || 0,
-      scored: pdf.scored || 0,
-      upgraded: pdf.upgraded || 0,
-      pending: pdf.pending || 0,
-      processing: pdf.processing || 0,
-      failed: pdf.failed || 0,
+      total_pages: totals.total_pages || 0, total_html: totals.total_html || 0, total_pdfs: totals.total_pdfs || 0,
+      pages_classified: classify.classified || 0, pages_content: classify.content || 0,
+      pages_index: classify.index_pages || 0, pages_host: classify.host_pages || 0,
+      scored: pdf.scored || 0, upgraded: pdf.upgraded || 0,
+      pending: pdf.pending || 0, processing: pdf.processing || 0,
+      failed: pdf.failed || 0, skipped: pdf.skipped || 0,
       eta_seconds: (pdf.pending || 0) * avgSec,
-      md_exported: exp.ok || 0,
-      md_failed: exp.failed || 0,
+      md_exported: exp.ok || 0, md_failed: exp.failed || 0,
       last_run: lastRun || null
     };
   } finally { db.close(); }
 };
 
-/** Paginated, filtered doc list for one site. */
+const DOC_SELECT = `
+  SELECT p.url, p.path_slug, p.last_seen_at,
+         q.composite_score, q.pages, q.word_quality_estimate, q.readable_pages_pct,
+         q.avg_chars_per_page, q.has_text_layer, q.skip,
+         COALESCE(h.hosted_title, q.pdf_title) as title,
+         q.excerpt, h.host_url as source_url,
+         u.status, u.before_score, u.after_score, u.score_improvement,
+         u.upgraded_pdf_path, u.error
+  FROM pages p
+  LEFT JOIN pdf_quality q ON p.url=q.url
+  LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
+  LEFT JOIN hosts h ON p.url=h.hosted_url`;
+
+/** Server-side filtered + paginated doc list. */
 const siteDocs = (domain, params) => {
   const db = safeOpenDb(domain);
   if (!db) return null;
@@ -136,8 +147,9 @@ const siteDocs = (domain, params) => {
     const wheres = ["p.gone=0", "p.mime_type='application/pdf'"];
     const vals = [];
 
-    if (q) { wheres.push("(p.url LIKE ? OR h.hosted_title LIKE ?)"); vals.push(`%${q}%`, `%${q}%`); }
+    if (q) { wheres.push("(p.url LIKE ? OR COALESCE(h.hosted_title,q.pdf_title) LIKE ? OR q.excerpt LIKE ?)"); vals.push(`%${q}%`, `%${q}%`, `%${q}%`); }
     if (status === 'unscored') wheres.push("q.composite_score IS NULL");
+    else if (status === 'skipped') wheres.push("q.skip=1");
     else if (status) { wheres.push("u.status=?"); vals.push(status); }
     if (scoreMax < 1) { wheres.push("(q.composite_score IS NULL OR q.composite_score <= ?)"); vals.push(scoreMax); }
 
@@ -151,54 +163,12 @@ const siteDocs = (domain, params) => {
     const orderBy = orderMap[sort] || orderMap.score_asc;
     const where = wheres.join(' AND ');
 
-    const total = db.prepare(`
-      SELECT COUNT(*) as n FROM pages p
-      LEFT JOIN pdf_quality q ON p.url=q.url
-      LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
-      LEFT JOIN hosts h ON p.url=h.hosted_url
-      WHERE ${where}
-    `).get(...vals).n;
+    const total = db.prepare(`SELECT COUNT(*) as n FROM pages p
+      LEFT JOIN pdf_quality q ON p.url=q.url LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
+      LEFT JOIN hosts h ON p.url=h.hosted_url WHERE ${where}`).get(...vals).n;
 
-    const rows = db.prepare(`
-      SELECT p.url, p.path_slug, p.last_seen_at,
-             q.composite_score, q.pages, q.word_quality_estimate, q.readable_pages_pct,
-             COALESCE(h.hosted_title, q.pdf_title) as title,
-             q.excerpt, h.host_url as source_url,
-             u.status, u.before_score, u.after_score, u.score_improvement,
-             u.upgraded_pdf_path, u.started_at, u.finished_at, u.error
-      FROM pages p
-      LEFT JOIN pdf_quality q ON p.url=q.url
-      LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
-      LEFT JOIN hosts h ON p.url=h.hosted_url
-      WHERE ${where}
-      ORDER BY ${orderBy}
-      LIMIT ${PER_PAGE} OFFSET ${offset}
-    `).all(...vals);
-
-    const docs = rows.map(d => mapDoc(d, domain));
-    return { docs, total, page, pages: Math.ceil(total / PER_PAGE), per_page: PER_PAGE };
-  } finally { db.close(); }
-};
-
-/** All docs for a site (no pagination — for client-side filtering). */
-const siteDocsAll = (domain) => {
-  const db = safeOpenDb(domain);
-  if (!db) return null;
-  try {
-    const rows = db.prepare(`
-      SELECT p.url, p.path_slug, p.last_seen_at,
-             q.composite_score, q.pages, q.word_quality_estimate, q.readable_pages_pct,
-             COALESCE(h.hosted_title, q.pdf_title) as title,
-             q.excerpt, h.host_url as source_url,
-             u.status, u.before_score, u.after_score, u.score_improvement,
-             u.upgraded_pdf_path, u.error
-      FROM pages p
-      LEFT JOIN pdf_quality q ON p.url=q.url
-      LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
-      LEFT JOIN hosts h ON p.url=h.hosted_url
-      WHERE p.gone=0 AND p.mime_type='application/pdf'
-    `).all();
-    return { docs: rows.map(d => mapDoc(d, domain)) };
+    const rows = db.prepare(`${DOC_SELECT} WHERE ${where} ORDER BY ${orderBy} LIMIT ${PER_PAGE} OFFSET ${offset}`).all(...vals);
+    return { docs: rows.map(d => mapDoc(d, domain)), total, page, pages: Math.ceil(total / PER_PAGE), per_page: PER_PAGE };
   } finally { db.close(); }
 };
 
@@ -217,13 +187,9 @@ const recentRuns = (sites) => {
 };
 
 // Router
-createServer((req, res) => {
+createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, {
-      'Access-Control-Allow-Origin': CORS_ORIGIN,
-      'Access-Control-Allow-Methods': 'GET, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type'
-    });
+    res.writeHead(204, corsHeaders);
     return res.end();
   }
 
@@ -236,8 +202,15 @@ createServer((req, res) => {
 
   if (path === '/api/sites') {
     const thumbCfg = cfg.defaults?.thumbnails || {};
-    const summaries = sites.map(s => siteSummary(s.domain, s.url));
-    return json(res, { sites: summaries, imagekit_endpoint: thumbCfg.imagekit_endpoint || '', thumb_width: thumbCfg.thumb_width || 180, preview_width: thumbCfg.preview_width || 600 });
+    // Only expose Imagekit endpoint when R2 is configured (so uploads work)
+    const r2Ready = !!(process.env.S3_ACCESS_KEY && process.env.S3_SECRET_KEY);
+    const ikEndpoint = r2Ready ? (thumbCfg.imagekit_endpoint || '') : '';
+    return json(res, {
+      sites: sites.map(s => siteSummary(s.domain, s.url)),
+      imagekit_endpoint: ikEndpoint,
+      thumb_width: thumbCfg.thumb_width || 180,
+      preview_width: thumbCfg.preview_width || 600
+    });
   }
 
   if (path === '/api/docs') {
@@ -248,12 +221,51 @@ createServer((req, res) => {
     return json(res, result);
   }
 
-  if (path === '/api/docs/all') {
+  if (path === '/api/thumbnail') {
+    const docUrl = url.searchParams.get('url');
+    if (!docUrl) return err(res, 400, 'url param required');
+    const domain = sites.find(s => docUrl.startsWith(`https://${s.domain}`) || docUrl.startsWith(`http://${s.domain}`))?.domain;
+    if (!domain) return err(res, 404, 'unknown domain');
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, 'db unavailable');
+    let row;
+    try { row = db.prepare('SELECT local_path, path_slug FROM pages WHERE url=?').get(docUrl); }
+    finally { db.close(); }
+    if (!row?.local_path || !existsSync(row.local_path)) return err(res, 404, 'pdf not found');
+
+    const slug = row.path_slug || docUrl.replace(/[^a-z0-9]/gi, '_').slice(-80);
+    const thumbDir = join(getMirrorRoot(), domain, '_meta', 'thumbnails');
+    const thumbPath = join(thumbDir, `${slug}.jpg`);
+
+    if (existsSync(thumbPath)) {
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400', ...corsHeaders });
+      return res.end(readFileSync(thumbPath));
+    }
+
+    try {
+      mkdirSync(thumbDir, { recursive: true });
+      const ok = await generateThumb(row.local_path, thumbPath);
+      if (ok && existsSync(thumbPath)) {
+        res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400', ...corsHeaders });
+        return res.end(readFileSync(thumbPath));
+      }
+    } catch (e) {
+      console.error(`[thumbnail] pdftoppm failed for ${docUrl}: ${e.message}`);
+    }
+    return err(res, 404, 'thumbnail unavailable');
+  }
+
+  if (path === '/api/docs/skip' && req.method === 'POST') {
     const domain = url.searchParams.get('site');
-    if (!domain) return err(res, 400, 'site param required');
-    const result = siteDocsAll(domain);
-    if (!result) return err(res, 404, `No data for ${domain}`);
-    return json(res, result);
+    const docUrl = url.searchParams.get('url');
+    const skip = url.searchParams.get('skip') !== '0';
+    if (!domain || !docUrl) return err(res, 400, 'site and url params required');
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, 'db unavailable');
+    try {
+      db.prepare('UPDATE pdf_quality SET skip=? WHERE url=?').run(skip ? 1 : 0, docUrl);
+      return json(res, { ok: true, skip });
+    } finally { db.close(); }
   }
 
   if (path === '/api/runs') {

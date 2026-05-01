@@ -11,17 +11,20 @@
   [x-cloak]{display:none!important}
   body{font-family:ui-sans-serif,system-ui,sans-serif}
   .mono{font-family:ui-monospace,monospace}
-  .score-pill{display:inline-block;padding:1px 6px;border-radius:4px;font-size:.7rem;font-family:ui-monospace,monospace;font-weight:700;letter-spacing:.02em}
+  .score-pill{display:inline-block;padding:2px 8px;border-radius:4px;font-size:.72rem;font-family:ui-monospace,monospace;font-weight:700;letter-spacing:.02em}
+  .label-pill{display:inline-block;padding:2px 7px;border-radius:4px;font-size:.7rem;font-weight:600}
   .thumb{width:72px;height:96px;object-fit:cover;object-position:top;background:#f3f4f6;flex-shrink:0;border-radius:2px}
   .thumb-sm{width:48px;height:64px;object-fit:cover;object-position:top;background:#f3f4f6;flex-shrink:0;border-radius:2px}
-  .thumb-placeholder{display:flex;align-items:center;justify-content:center;color:#d1d5db;font-size:1.2rem}
+  .thumb-placeholder{display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:1.4rem}
+  .prog-bar{height:4px;background:#e5e7eb;border-radius:2px;overflow:hidden}
+  .prog-fill{height:100%;border-radius:2px;transition:width .3s}
 </style>
 </head>
 <body class="bg-gray-100 text-gray-900 min-h-screen" x-data="app()" x-cloak>
 
 <div class="max-w-7xl mx-auto px-4 py-4">
 
-  <!-- Compact header -->
+  <!-- Header -->
   <div class="flex items-center justify-between mb-4">
     <div class="flex items-center gap-3">
       <h1 class="text-base font-bold tracking-tight mono">site2rag</h1>
@@ -35,33 +38,27 @@
     </div>
   </div>
 
-  <!-- API error -->
   <template x-if="apiError">
     <div class="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700 mb-4">
-      <strong>API unavailable:</strong> <span x-text="apiError"></span>
+      <strong>API error:</strong> <span x-text="apiError"></span>
     </div>
   </template>
 
-  <!-- Site summary cards (compact) -->
+  <!-- Site cards -->
   <template x-if="sites.length">
     <div class="flex gap-3 mb-4 flex-wrap">
       <template x-for="s in sites" :key="s.domain">
         <button @click="selectSite(s)"
-          :class="activeSite?.domain===s.domain
-            ? 'ring-2 ring-gray-800 bg-white'
-            : 'bg-white hover:ring-1 hover:ring-gray-300'"
-          class="text-left rounded-lg border border-gray-200 shadow-sm px-4 py-3 min-w-64 flex gap-4 items-start transition-all">
+          :class="activeSite?.domain===s.domain ? 'ring-2 ring-gray-800 bg-white' : 'bg-white hover:ring-1 hover:ring-gray-300'"
+          class="text-left rounded-lg border border-gray-200 shadow-sm px-4 py-3 min-w-72 flex gap-4 items-start transition-all">
 
-          <!-- Domain + run status -->
           <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 mb-1.5">
+            <div class="flex items-center gap-2 mb-1">
               <span class="font-semibold mono text-sm" x-text="s.domain"></span>
-              <span class="text-xs px-1.5 py-0.5 rounded-full font-medium"
-                    :class="runBadgeCls(s)" x-text="runBadge(s)"></span>
+              <span class="text-xs px-1.5 py-0.5 rounded-full font-medium" :class="runBadgeCls(s)" x-text="runBadge(s)"></span>
             </div>
             <div class="text-xs text-gray-400 mono mb-2" x-text="lastRunAgo(s)"></div>
-            <!-- Stats row -->
-            <div class="flex gap-3 text-xs">
+            <div class="flex gap-3 text-xs mb-2">
               <div><span class="font-bold mono text-gray-800" x-text="s.total_pages||0"></span><span class="text-gray-400 ml-0.5">pages</span></div>
               <div><span class="font-bold mono text-gray-800" x-text="s.total_pdfs||0"></span><span class="text-gray-400 ml-0.5">PDFs</span></div>
               <div><span class="font-bold mono text-blue-600" x-text="s.scored||0"></span><span class="text-gray-400 ml-0.5">scored</span></div>
@@ -70,25 +67,35 @@
             </div>
           </div>
 
-          <!-- Mini progress bars -->
-          <div class="flex flex-col gap-1.5 text-xs w-24 pt-1">
+          <!-- Progress bars -->
+          <div class="flex flex-col gap-1.5 text-xs w-28 pt-1 shrink-0">
             <div>
-              <div class="flex justify-between text-gray-400 mb-0.5"><span>crawled</span><span class="mono" x-text="s.total_pages||0"></span></div>
-              <div class="h-1 bg-gray-100 rounded-full overflow-hidden">
-                <div class="h-full bg-gray-400 rounded-full" :style="'width:100%'"></div>
+              <div class="flex justify-between text-gray-400 mb-0.5">
+                <span>spidering</span>
+                <span class="mono" x-text="siteProgress(s,'pages')"></span>
               </div>
+              <div class="prog-bar"><div class="prog-fill bg-gray-400" :style="'width:'+siteProgressPct(s,'pages')+'%'"></div></div>
             </div>
             <div>
-              <div class="flex justify-between text-gray-400 mb-0.5"><span>scored</span><span class="mono" x-text="(s.scored||0)+'/'+(s.total_pdfs||0)"></span></div>
-              <div class="h-1 bg-gray-100 rounded-full overflow-hidden">
-                <div class="h-full bg-blue-400 rounded-full" :style="'width:'+((s.total_pdfs ? s.scored/s.total_pdfs : 0)*100)+'%'"></div>
+              <div class="flex justify-between text-gray-400 mb-0.5">
+                <span>scored</span>
+                <span class="mono" x-text="siteProgress(s,'scored')"></span>
               </div>
+              <div class="prog-bar"><div class="prog-fill bg-blue-400" :style="'width:'+siteProgressPct(s,'scored')+'%'"></div></div>
             </div>
             <div>
-              <div class="flex justify-between text-gray-400 mb-0.5"><span>exported</span><span class="mono" x-text="(s.md_exported||0)+'/'+(s.total_html||0)"></span></div>
-              <div class="h-1 bg-gray-100 rounded-full overflow-hidden">
-                <div class="h-full bg-green-400 rounded-full" :style="'width:'+((s.total_html ? s.md_exported/s.total_html : 0)*100)+'%'"></div>
+              <div class="flex justify-between text-gray-400 mb-0.5">
+                <span>upgraded</span>
+                <span class="mono" x-text="siteProgress(s,'upgraded')"></span>
               </div>
+              <div class="prog-bar"><div class="prog-fill bg-green-400" :style="'width:'+siteProgressPct(s,'upgraded')+'%'"></div></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-gray-400 mb-0.5">
+                <span>exported</span>
+                <span class="mono" x-text="siteProgress(s,'exported')"></span>
+              </div>
+              <div class="prog-bar"><div class="prog-fill bg-purple-400" :style="'width:'+siteProgressPct(s,'exported')+'%'"></div></div>
             </div>
           </div>
         </button>
@@ -99,18 +106,17 @@
   <!-- PDF browser -->
   <template x-if="activeSite">
     <div>
-
       <!-- Filter bar -->
       <div class="bg-white border border-gray-200 rounded-lg px-4 py-3 mb-4 flex flex-wrap gap-3 items-end shadow-sm">
         <div>
           <label class="block text-xs text-gray-400 mb-1">Search</label>
-          <input type="search" x-model="filters.q" @input="applyFilters()"
+          <input type="search" x-model="filters.q" @input="debouncedSearch()"
             placeholder="title, URL or text…"
             class="border border-gray-200 rounded px-3 py-1.5 text-sm w-52 focus:outline-none focus:ring-1 focus:ring-gray-400">
         </div>
         <div>
           <label class="block text-xs text-gray-400 mb-1">Status</label>
-          <select x-model="filters.status" @change="applyFilters()"
+          <select x-model="filters.status" @change="loadDocs()"
             class="border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400">
             <option value="">All</option>
             <option value="done">Upgraded</option>
@@ -118,19 +124,20 @@
             <option value="processing">Processing</option>
             <option value="failed">Failed</option>
             <option value="unscored">Unscored</option>
+            <option value="skipped">Skipped</option>
           </select>
         </div>
         <div>
           <label class="block text-xs text-gray-400 mb-1">Max score</label>
           <div class="flex items-center gap-1.5">
-            <input type="range" x-model="filters.score_max" min="0" max="1" step="0.05" @input="applyFilters()"
+            <input type="range" x-model="filters.score_max" min="0" max="1" step="0.05" @change="loadDocs()"
               class="w-20 accent-gray-700">
             <span class="text-xs mono text-gray-500 w-8" x-text="'≤'+Number(filters.score_max).toFixed(2)"></span>
           </div>
         </div>
         <div>
           <label class="block text-xs text-gray-400 mb-1">Sort</label>
-          <select x-model="filters.sort" @change="applyFilters()"
+          <select x-model="filters.sort" @change="loadDocs()"
             class="border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400">
             <option value="score_asc">Worst first</option>
             <option value="score_desc">Best first</option>
@@ -139,17 +146,16 @@
             <option value="improved_desc">Most improved</option>
           </select>
         </div>
-        <div class="ml-auto text-xs text-gray-400 mono self-end pb-1" x-text="docsTotal+' PDFs'+(loading?' (loading…)':'')"></div>
+        <div class="ml-auto text-xs text-gray-400 mono self-end pb-1"
+             x-text="docsTotal+' PDFs'+(loading?' (searching…)':'')"></div>
       </div>
 
-      <!-- Loading -->
-      <template x-if="loading">
-        <div class="text-center py-12 text-gray-400 text-sm">Loading all PDFs…</div>
+      <template x-if="loading && !docs.length">
+        <div class="text-center py-12 text-gray-400 text-sm">Loading…</div>
       </template>
 
-      <template x-if="!loading">
+      <template x-if="!loading || docs.length">
         <div>
-
           <!-- Top 10: thumbnail rows -->
           <template x-if="topDocs.length">
             <div class="mb-4">
@@ -157,12 +163,13 @@
                    x-text="filters.sort==='score_asc'?'Worst quality — need upgrade':'Top results'"></div>
               <div class="space-y-2">
                 <template x-for="doc in topDocs" :key="doc.url">
-                  <div class="bg-white border border-gray-200 rounded-lg p-3 flex gap-3 shadow-sm hover:shadow-md transition-shadow">
+                  <div class="bg-white border border-gray-200 rounded-lg p-3 flex gap-3 shadow-sm hover:shadow-md transition-shadow"
+                       :class="doc.skip ? 'opacity-50' : ''">
                     <!-- Thumbnail -->
-                    <button @click="openDetail(doc)" class="shrink-0 focus:outline-none">
-                      <img :src="thumbUrl(doc)" :alt="docTitle(doc)"
+                    <button @click="openDetail(doc)" class="shrink-0 focus:outline-none" title="Click to preview">
+                      <img :src="thumbSrc(doc)" :alt="docTitle(doc)"
                            class="thumb hover:opacity-80 transition-opacity cursor-zoom-in"
-                           onerror="this.parentNode.innerHTML='<div class=\'thumb thumb-placeholder cursor-pointer\'>📄</div>'">
+                           onerror="this.outerHTML='<div class=\'thumb thumb-placeholder cursor-pointer\'>📄</div>'">
                     </button>
                     <!-- Content -->
                     <div class="flex-1 min-w-0">
@@ -170,24 +177,39 @@
                         <a :href="doc.url" target="_blank"
                            class="font-semibold text-sm text-gray-900 hover:text-blue-600 leading-tight line-clamp-2"
                            x-text="docTitle(doc)"></a>
-                        <div class="flex items-center gap-1.5 shrink-0">
-                          <span x-show="doc.composite_score!=null" class="score-pill" :class="scoreCls(doc.composite_score)"
-                                x-text="Math.round(doc.composite_score*100)+'%'"></span>
-                          <span x-show="doc.after_score!=null" class="score-pill bg-green-100 text-green-800"
-                                x-text="'→'+Math.round(doc.after_score*100)+'%'"></span>
-                          <span x-show="doc.status" class="text-xs px-1.5 py-0.5 rounded-full"
-                                :class="statusCls(doc.status)" x-text="statusLabel(doc.status)"></span>
+                        <div class="flex items-center gap-1.5 shrink-0 flex-wrap justify-end">
+                          <!-- Score badge -->
+                          <template x-if="doc.composite_score!=null">
+                            <span class="score-pill" :class="scoreCls(doc.composite_score)"
+                                  x-text="Math.round(doc.composite_score*100)+'%'"></span>
+                          </template>
+                          <!-- Quality label -->
+                          <span class="label-pill" :class="scoreLabel(doc).cls" x-text="scoreLabel(doc).label"></span>
+                          <!-- Upgrade badge -->
+                          <template x-if="doc.after_score!=null">
+                            <span class="score-pill bg-green-100 text-green-800"
+                                  x-text="'→'+Math.round(doc.after_score*100)+'%'"></span>
+                          </template>
+                          <template x-if="doc.status">
+                            <span class="text-xs px-1.5 py-0.5 rounded-full"
+                                  :class="statusCls(doc.status)" x-text="statusLabel(doc.status)"></span>
+                          </template>
                         </div>
                       </div>
                       <p x-show="doc.excerpt" class="text-xs text-gray-500 leading-relaxed line-clamp-2 mb-1.5"
                          x-text="doc.excerpt"></p>
-                      <div class="flex items-center gap-3 text-xs text-gray-400">
+                      <div class="flex items-center gap-3 text-xs text-gray-400 flex-wrap">
                         <span x-show="doc.pages" class="mono" x-text="doc.pages+' pp'"></span>
+                        <span x-show="effortEstimate(doc)" class="text-amber-600 font-medium" x-text="effortEstimate(doc)"></span>
                         <a x-show="doc.source_url" :href="doc.source_url" target="_blank"
                            class="hover:text-blue-500 truncate max-w-xs"
                            x-text="doc.source_url ? '↗ '+doc.source_url.replace(/^https?:\/\//,'') : ''"></a>
                         <a x-show="doc.archive_url" :href="doc.archive_url" target="_blank"
-                           class="font-semibold text-green-700 hover:underline ml-auto">↓ Download upgraded</a>
+                           class="font-semibold text-green-700 hover:underline">↓ Upgraded PDF</a>
+                        <button @click="toggleSkip(doc)"
+                                class="ml-auto px-2 py-0.5 rounded text-xs border transition-colors"
+                                :class="doc.skip ? 'border-amber-300 text-amber-700 bg-amber-50 hover:bg-white' : 'border-gray-200 text-gray-400 hover:text-amber-600 hover:border-amber-300'"
+                                x-text="doc.skip ? '⊘ Skipped' : 'Skip'"></button>
                       </div>
                     </div>
                   </div>
@@ -196,32 +218,32 @@
             </div>
           </template>
 
-          <!-- Rest: small thumbnail cards grid -->
+          <!-- Rest: small card grid -->
           <template x-if="restDocs.length">
             <div>
-              <div class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 px-1"
-                   x-show="topDocs.length">More PDFs</div>
+              <div class="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2 px-1" x-show="topDocs.length">More PDFs</div>
               <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 mb-4">
                 <template x-for="doc in restDocs" :key="doc.url">
-                  <div class="bg-white border border-gray-200 rounded-lg p-2 flex gap-2 shadow-sm hover:shadow-md transition-shadow">
+                  <div class="bg-white border border-gray-200 rounded-lg p-2 flex gap-2 shadow-sm hover:shadow-md transition-shadow"
+                       :class="doc.skip ? 'opacity-50' : ''">
                     <button @click="openDetail(doc)" class="shrink-0 focus:outline-none">
-                      <img :src="thumbUrl(doc)" :alt="docTitle(doc)"
+                      <img :src="thumbSrc(doc)" :alt="docTitle(doc)"
                            class="thumb-sm hover:opacity-80 transition-opacity cursor-zoom-in"
-                           onerror="this.parentNode.innerHTML='<div class=\'thumb-sm thumb-placeholder cursor-pointer\'>📄</div>'">
+                           onerror="this.outerHTML='<div class=\'thumb-sm thumb-placeholder cursor-pointer\'>📄</div>'">
                     </button>
                     <div class="flex-1 min-w-0">
                       <a :href="doc.url" target="_blank"
                          class="text-xs font-medium text-gray-900 hover:text-blue-600 leading-tight line-clamp-3 block mb-1"
                          x-text="docTitle(doc)"></a>
-                      <div class="flex items-center gap-1 flex-wrap">
+                      <div class="flex items-center gap-1 flex-wrap mb-0.5">
                         <span x-show="doc.composite_score!=null" class="score-pill" :class="scoreCls(doc.composite_score)"
                               x-text="Math.round(doc.composite_score*100)+'%'"></span>
-                        <span x-show="doc.status==='done'" class="score-pill bg-green-100 text-green-800"
-                              x-text="'→'+Math.round((doc.after_score||0)*100)+'%'"></span>
-                        <span x-show="doc.status==='pending'" class="text-xs text-yellow-600">queued</span>
-                        <span x-show="doc.status==='failed'" class="text-xs text-red-500">failed</span>
+                        <span class="label-pill" :class="scoreLabel(doc).cls" x-text="scoreLabel(doc).label"></span>
                       </div>
-                      <div x-show="doc.pages" class="text-xs text-gray-400 mono mt-0.5" x-text="doc.pages+' pp'"></div>
+                      <div x-show="doc.pages" class="text-xs text-gray-400 mono" x-text="doc.pages+' pp'"></div>
+                      <button @click="toggleSkip(doc)"
+                              class="text-xs mt-1 text-gray-300 hover:text-amber-500 transition-colors"
+                              x-text="doc.skip ? '⊘ skip' : '○ skip'"></button>
                     </div>
                   </div>
                 </template>
@@ -230,7 +252,7 @@
           </template>
 
           <!-- Empty -->
-          <template x-if="!topDocs.length && !restDocs.length && !loading">
+          <template x-if="!loading && !topDocs.length && !restDocs.length">
             <div class="text-center py-12 text-gray-400 text-sm bg-white border border-gray-100 rounded-lg">
               No PDFs match the current filters.
             </div>
@@ -246,12 +268,10 @@
                 class="px-4 py-2 border border-gray-300 rounded bg-white disabled:opacity-30 hover:bg-gray-50">Next →</button>
             </div>
           </template>
-
         </div>
       </template>
     </div>
   </template>
-
 </div>
 
 <!-- PDF detail modal -->
@@ -260,13 +280,13 @@
        @click.self="closeDetail()" @keydown.escape.window="closeDetail()">
     <div class="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
       <div class="flex gap-4 p-5">
-        <!-- Large preview -->
         <div class="shrink-0">
-          <img :src="thumbUrl(expandedDoc, true)" :alt="docTitle(expandedDoc)"
-               class="rounded border border-gray-100 w-48"
+          <img :src="thumbSrc(expandedDoc, true)" :alt="docTitle(expandedDoc)"
+               class="rounded border border-gray-100 w-48 cursor-pointer"
+               @click="window.open(expandedDoc.url,'_blank')"
+               title="Click to open PDF"
                onerror="this.style.display='none'">
         </div>
-        <!-- Info -->
         <div class="flex-1 min-w-0">
           <div class="flex items-start justify-between gap-2 mb-2">
             <h2 class="font-bold text-base leading-tight text-gray-900" x-text="docTitle(expandedDoc)"></h2>
@@ -274,29 +294,38 @@
           </div>
           <p x-show="expandedDoc.excerpt" class="text-sm text-gray-600 leading-relaxed mb-3" x-text="expandedDoc.excerpt"></p>
           <div class="flex flex-wrap gap-2 mb-3">
-            <span x-show="expandedDoc.composite_score!=null" class="score-pill" :class="scoreCls(expandedDoc.composite_score)"
-                  x-text="'Quality: '+Math.round(expandedDoc.composite_score*100)+'%'"></span>
-            <span x-show="expandedDoc.after_score!=null" class="score-pill bg-green-100 text-green-800"
-                  x-text="'After upgrade: '+Math.round(expandedDoc.after_score*100)+'%'"></span>
-            <span x-show="expandedDoc.status" class="text-xs px-1.5 py-0.5 rounded-full"
-                  :class="statusCls(expandedDoc.status)" x-text="statusLabel(expandedDoc.status)"></span>
+            <template x-if="expandedDoc.composite_score!=null">
+              <span class="score-pill" :class="scoreCls(expandedDoc.composite_score)"
+                    x-text="Math.round(expandedDoc.composite_score*100)+'%'"></span>
+            </template>
+            <span class="label-pill" :class="scoreLabel(expandedDoc).cls" x-text="scoreLabel(expandedDoc).label"></span>
+            <template x-if="expandedDoc.after_score!=null">
+              <span class="score-pill bg-green-100 text-green-800"
+                    x-text="'After: '+Math.round(expandedDoc.after_score*100)+'%'"></span>
+            </template>
+            <template x-if="expandedDoc.status">
+              <span class="text-xs px-1.5 py-0.5 rounded-full" :class="statusCls(expandedDoc.status)"
+                    x-text="statusLabel(expandedDoc.status)"></span>
+            </template>
           </div>
-          <div class="text-xs text-gray-400 space-y-1.5">
-            <div x-show="expandedDoc.pages" class="mono" x-text="expandedDoc.pages+' pages'"></div>
-            <div class="truncate">
-              <a :href="expandedDoc.url" target="_blank" class="text-blue-600 hover:underline break-all" x-text="expandedDoc.url"></a>
-            </div>
+          <div class="text-xs text-gray-400 space-y-1 mb-4">
+            <div x-show="expandedDoc.pages" x-text="expandedDoc.pages+' pages · '+effortEstimate(expandedDoc)+' to process'"></div>
+            <div x-show="expandedDoc.readable_pages_pct!=null" x-text="Math.round((expandedDoc.readable_pages_pct||0)*100)+'% readable pages'"></div>
+            <div class="truncate"><a :href="expandedDoc.url" target="_blank" class="text-blue-600 hover:underline break-all" x-text="expandedDoc.url"></a></div>
             <div x-show="expandedDoc.source_url">
-              <span class="text-gray-400">Found on: </span>
-              <a :href="expandedDoc.source_url" target="_blank" class="text-blue-500 hover:underline truncate"
-                 x-text="(expandedDoc.source_url||'').replace(/^https?:\/\//,'')"></a>
+              Found on: <a :href="expandedDoc.source_url" target="_blank" class="text-blue-500 hover:underline"
+                          x-text="(expandedDoc.source_url||'').replace(/^https?:\/\//,'')"></a>
             </div>
           </div>
-          <div class="flex gap-2 mt-4">
+          <div class="flex gap-2 flex-wrap">
             <a :href="expandedDoc.url" target="_blank"
-               class="px-3 py-1.5 text-xs rounded bg-gray-100 hover:bg-gray-200 text-gray-700 font-medium">Open PDF</a>
+               class="px-3 py-1.5 text-xs rounded bg-blue-600 hover:bg-blue-700 text-white font-medium">Open PDF ↗</a>
             <a x-show="expandedDoc.archive_url" :href="expandedDoc.archive_url" target="_blank"
                class="px-3 py-1.5 text-xs rounded bg-green-100 hover:bg-green-200 text-green-800 font-medium">Download upgraded</a>
+            <button @click="toggleSkip(expandedDoc); closeDetail()"
+                    class="px-3 py-1.5 text-xs rounded border font-medium"
+                    :class="expandedDoc.skip ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-gray-200 text-gray-500 hover:text-amber-600'"
+                    x-text="expandedDoc.skip ? '⊘ Un-skip' : 'Skip (not worth processing)'"></button>
           </div>
         </div>
       </div>
@@ -312,18 +341,38 @@ const API_BASE = ['localhost','127.0.0.1'].includes(location.hostname)
 const PER_PAGE = 50;
 const TOP_N = 10;
 
-// Imagekit thumbnail URL builder — uses original PDF URL as fetch source
-function ikThumb(docUrl, width, ikEndpoint) {
-  if (!ikEndpoint || !docUrl) return '';
-  return `${ikEndpoint}/tr:w-${width},pg-1,f-jpg/${docUrl}`;
-}
-
 function scoreCls(s) {
   if (s == null) return 'bg-gray-100 text-gray-400';
-  if (s >= 0.8) return 'bg-green-100 text-green-800';
-  if (s >= 0.6) return 'bg-yellow-100 text-yellow-700';
-  if (s >= 0.4) return 'bg-orange-100 text-orange-700';
+  if (s >= 0.85) return 'bg-green-100 text-green-800';
+  if (s >= 0.65) return 'bg-blue-100 text-blue-700';
+  if (s >= 0.45) return 'bg-yellow-100 text-yellow-700';
+  if (s >= 0.25) return 'bg-orange-100 text-orange-700';
   return 'bg-red-100 text-red-700';
+}
+
+function scoreLabel(doc) {
+  const s = doc.composite_score;
+  const r = doc.readable_pages_pct;
+  const w = doc.word_quality_estimate;
+  if (s == null) return { label: 'Not scored', cls: 'bg-gray-100 text-gray-500' };
+  if (doc.skip) return { label: 'Skipped', cls: 'bg-amber-100 text-amber-700' };
+  if (r != null && r < 0.05) return { label: 'No Text Layer', cls: 'bg-red-100 text-red-700' };
+  if (r != null && r < 0.2 && (w == null || w < 0.5)) return { label: 'Garbage OCR', cls: 'bg-red-100 text-red-700' };
+  if (r != null && r < 0.3) return { label: 'Mostly Scanned', cls: 'bg-orange-100 text-orange-700' };
+  if (w != null && w < 0.5) return { label: 'Poor OCR', cls: 'bg-orange-100 text-orange-700' };
+  if (s < 0.45) return { label: 'Needs OCR', cls: 'bg-yellow-100 text-yellow-700' };
+  if (s < 0.65) return { label: 'Partially Readable', cls: 'bg-yellow-100 text-yellow-700' };
+  if (s < 0.85) return { label: 'Mostly Readable', cls: 'bg-blue-100 text-blue-700' };
+  return { label: 'Good Quality', cls: 'bg-green-100 text-green-800' };
+}
+
+function effortEstimate(doc) {
+  if (!doc.pages || doc.readable_pages_pct == null) return null;
+  const pagesNeeded = Math.round(doc.pages * (1 - (doc.readable_pages_pct || 0)));
+  if (pagesNeeded <= 0) return null;
+  const mins = Math.max(1, Math.round(pagesNeeded * 0.5));
+  if (mins < 60) return `~${mins} min to process`;
+  return `~${Math.round(mins/60)}h to process`;
 }
 
 function statusCls(s) {
@@ -333,7 +382,6 @@ function statusCls(s) {
   if (s === 'failed') return 'bg-red-100 text-red-600';
   return '';
 }
-
 function statusLabel(s) {
   if (s === 'done') return '✓ done';
   if (s === 'processing') return '⟳ running';
@@ -341,7 +389,6 @@ function statusLabel(s) {
   if (s === 'failed') return '✗ failed';
   return s;
 }
-
 function timeAgo(iso) {
   if (!iso) return '';
   const mins = Math.round((Date.now() - new Date(iso)) / 60000);
@@ -356,20 +403,56 @@ function app() {
   return {
     sites: [], activeSite: null,
     ikEndpoint: '', thumbWidth: 180, previewWidth: 600,
-    allDocs: [],
-    topDocs: [], restDocs: [],
+    docs: [], topDocs: [], restDocs: [],
     docsTotal: 0, docsPage: 1, docsPages: 1,
     filters: { q: '', status: '', score_max: 1, sort: 'score_asc' },
     loading: false, apiStatus: '', apiError: '', lastRefresh: '',
     expandedDoc: null,
-    scoreCls, statusCls, statusLabel,
+    _searchTimer: null,
+    scoreCls, statusCls, statusLabel, scoreLabel, effortEstimate,
 
-    thumbUrl(doc, large = false) {
-      return ikThumb(doc.url, large ? this.previewWidth : this.thumbWidth, this.ikEndpoint);
+    thumbSrc(doc, large = false) {
+      if (this.ikEndpoint) {
+        const w = large ? this.previewWidth : this.thumbWidth;
+        return `${this.ikEndpoint}/site2rag/${this.activeSite?.domain}/tr:w-${w},f-jpg/${doc.path_slug}.jpg`;
+      }
+      return `${API_BASE}/api/thumbnail?url=${encodeURIComponent(doc.url)}`;
     },
 
     openDetail(doc) { this.expandedDoc = doc; },
     closeDetail() { this.expandedDoc = null; },
+
+    async toggleSkip(doc) {
+      const skip = !doc.skip;
+      doc.skip = skip ? 1 : 0; // optimistic update
+      if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
+      await fetch(`${API_BASE}/api/docs/skip?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}&skip=${skip ? 1 : 0}`, { method: 'POST' }).catch(() => {
+        doc.skip = skip ? 0 : 1; // revert on failure
+      });
+    },
+
+    siteProgress(s, type) {
+      if (type === 'pages') return `${s.total_pages||0}`;
+      if (type === 'scored') return `${s.scored||0}/${s.total_pdfs||0}`;
+      if (type === 'upgraded') return `${s.upgraded||0}/${s.pending||0+s.upgraded||0}`;
+      if (type === 'exported') return `${s.md_exported||0}/${s.total_html||0}`;
+      return '';
+    },
+    siteProgressPct(s, type) {
+      if (type === 'pages') {
+        // Spidering: estimate progress based on run status
+        if (s.last_run?.status === 'running') return 60; // in progress
+        if (s.total_pages > 0) return 100;
+        return 0;
+      }
+      if (type === 'scored') return s.total_pdfs ? Math.round((s.scored||0)/s.total_pdfs*100) : 0;
+      if (type === 'upgraded') {
+        const total = (s.pending||0) + (s.upgraded||0);
+        return total ? Math.round((s.upgraded||0)/total*100) : 0;
+      }
+      if (type === 'exported') return s.total_html ? Math.round((s.md_exported||0)/s.total_html*100) : 0;
+      return 0;
+    },
 
     async init() {
       await this.loadSites();
@@ -377,37 +460,28 @@ function app() {
     },
 
     async loadSites() {
-      this.loading = true;
       try {
         const res = await fetch(`${API_BASE}/api/sites`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        // Support both old (array) and new (object with sites key) response shapes
-        if (Array.isArray(data)) {
-          this.sites = data;
-        } else {
-          this.sites = data.sites || [];
-          this.ikEndpoint = data.imagekit_endpoint || '';
-          this.thumbWidth = data.thumb_width || 180;
-          this.previewWidth = data.preview_width || 600;
-        }
+        this.sites = data.sites || (Array.isArray(data) ? data : []);
+        this.ikEndpoint = data.imagekit_endpoint || '';
+        this.thumbWidth = data.thumb_width || 180;
+        this.previewWidth = data.preview_width || 600;
         this.apiStatus = 'connected'; this.apiError = '';
         if (!this.activeSite && this.sites.length) await this.selectSite(this.sites[0]);
         else if (this.activeSite) {
           const u = this.sites.find(s => s.domain === this.activeSite.domain);
           if (u) this.activeSite = u;
         }
-      } catch (e) { this.apiError = e.message; this.apiStatus = 'offline'; this.loading = false; }
+      } catch (e) { this.apiError = e.message; this.apiStatus = 'offline'; }
     },
 
     async refresh() {
       const res = await fetch(`${API_BASE}/api/sites`).catch(() => null);
       if (!res?.ok) return;
       const data = await res.json();
-      this.sites = Array.isArray(data) ? data : (data.sites || []);
-      if (!Array.isArray(data)) {
-        if (data.imagekit_endpoint) this.ikEndpoint = data.imagekit_endpoint;
-      }
+      this.sites = data.sites || (Array.isArray(data) ? data : []);
       if (this.activeSite) {
         const u = this.sites.find(s => s.domain === this.activeSite.domain);
         if (u) this.activeSite = u;
@@ -417,55 +491,48 @@ function app() {
 
     async selectSite(s) {
       this.activeSite = s;
-      this.allDocs = [];
       this.docsPage = 1;
+      this.filters = { q: '', status: '', score_max: 1, sort: 'score_asc' };
+      await this.loadDocs();
+    },
+
+    async loadDocs() {
+      if (!this.activeSite) return;
       this.loading = true;
       try {
-        const res = await fetch(`${API_BASE}/api/docs/all?site=${s.domain}`);
+        const p = new URLSearchParams({
+          site: this.activeSite.domain,
+          page: String(this.docsPage),
+          sort: this.filters.sort,
+        });
+        if (this.filters.q) p.set('q', this.filters.q);
+        if (this.filters.status) p.set('status', this.filters.status);
+        if (this.filters.score_max < 1) p.set('score_max', String(this.filters.score_max));
+        const res = await fetch(`${API_BASE}/api/docs?${p}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        this.allDocs = data.docs;
+        this.docs = data.docs;
+        this.docsTotal = data.total;
+        this.docsPages = data.pages;
+        this.topDocs = this.docs.slice(0, TOP_N);
+        this.restDocs = this.docs.slice(TOP_N);
         this.lastRefresh = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        this.apiError = '';
       } catch (e) { this.apiError = e.message; }
       finally { this.loading = false; }
-      this.applyFilters();
     },
 
-    applyFilters() {
-      let docs = [...this.allDocs];
-      const q = this.filters.q.toLowerCase();
-      if (q) docs = docs.filter(d =>
-        (d.title||'').toLowerCase().includes(q) ||
-        d.url.toLowerCase().includes(q) ||
-        (d.excerpt||'').toLowerCase().includes(q)
-      );
-      if (this.filters.status === 'unscored') docs = docs.filter(d => d.composite_score == null);
-      else if (this.filters.status) docs = docs.filter(d => d.status === this.filters.status);
-      if (this.filters.score_max < 1) docs = docs.filter(d => d.composite_score == null || d.composite_score <= parseFloat(this.filters.score_max));
-      const sort = this.filters.sort;
-      docs.sort((a, b) => {
-        if (sort === 'score_asc') return (a.composite_score??1) - (b.composite_score??1);
-        if (sort === 'score_desc') return (b.composite_score??0) - (a.composite_score??0);
-        if (sort === 'pages_desc') return (b.pages??0) - (a.pages??0);
-        if (sort === 'title_asc') return this.docTitle(a).localeCompare(this.docTitle(b));
-        if (sort === 'improved_desc') return (b.score_improvement??0) - (a.score_improvement??0);
-        return 0;
-      });
-      this.docsTotal = docs.length;
-      this.docsPages = Math.max(1, Math.ceil(docs.length / PER_PAGE));
-      this.docsPage = Math.min(this.docsPage, this.docsPages);
-      const page = docs.slice((this.docsPage-1)*PER_PAGE, this.docsPage*PER_PAGE);
-      this.topDocs = page.slice(0, TOP_N);
-      this.restDocs = page.slice(TOP_N);
+    debouncedSearch() {
+      clearTimeout(this._searchTimer);
+      this._searchTimer = setTimeout(() => { this.docsPage = 1; this.loadDocs(); }, 300);
     },
 
-    goPage(n) { this.docsPage = n; this.applyFilters(); },
+    goPage(n) { this.docsPage = n; this.loadDocs(); },
 
     docTitle(doc) {
       if (doc.title) return doc.title;
       return doc.url.split('/').pop().replace(/\.pdf$/i,'').replace(/[_-]/g,' ') || doc.url;
     },
-
     runBadge(s) {
       if (!s.last_run) return 'no runs';
       if (s.last_run.status === 'running') return '⟳ running';
@@ -480,7 +547,9 @@ function app() {
     },
     lastRunAgo(s) {
       if (!s.last_run) return 'never run';
-      return 'last run ' + timeAgo(s.last_run.started_at);
+      const ago = timeAgo(s.last_run.started_at);
+      if (s.last_run.status === 'running') return `started ${ago}`;
+      return `last run ${ago}`;
     }
   };
 }
