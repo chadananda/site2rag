@@ -101,11 +101,11 @@ const processOne = async (db, domain, row) => {
       throw new Error(`reocr failed: ${err.message}`);
     }
 
-    // Rebuild PDF with text layer -- store under _upgraded/ in mirror so lnker-server can serve it
-    const slug = page.path_slug || page.url.replace(/[^a-z0-9]/gi, '_').slice(-60);
-    const upgradedDir = join(mirrorDir(domain), '_upgraded');
+    // Rebuild PDF with text layer -- store under .upgraded/ with url-hash naming
+    const hash = sha256(page.url).slice(0, 16);
+    const upgradedDir = join(mirrorDir(domain), '.upgraded');
     mkdirSync(upgradedDir, { recursive: true });
-    const outputPath = join(upgradedDir, `${slug}.pdf`);
+    const outputPath = join(upgradedDir, `x${hash}.pdf`);
     const { success, method, error } = await rebuildPdf(page.local_path, outputPath, ocrResults);
 
     if (!success) throw new Error(error);
