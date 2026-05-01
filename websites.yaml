@@ -11,6 +11,14 @@ defaults:
   pdf_upgrade:
     enabled: true
     score_threshold: 0.7
+  thumbnails:
+    enabled: true
+    r2_endpoint_env: R2_ENDPOINT
+    r2_access_key_env: R2_ACCESS_KEY
+    r2_secret_key_env: R2_SECRET_KEY
+    r2_bucket: cdn-assets
+    r2_prefix: site2rag
+    cdn_base_url: https://cdn.lnker.com
   sitemap:
     enabled: true
     diff_every_hours: 24

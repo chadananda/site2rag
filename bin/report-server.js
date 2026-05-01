@@ -3,6 +3,7 @@ import { createServer } from 'http';
 import { existsSync, readFileSync, mkdirSync, writeFileSync } from 'fs';
 import { join, extname, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { S3Client, PutObjectCommand, HeadObjectCommand } from '@aws-sdk/client-s3';
 import { loadConfig, getMirrorRoot, metaDir } from '../src/config.js';
 import { openDb } from '../src/db.js';
 
@@ -217,46 +218,78 @@ const recentRuns = (sites) => {
   return runs.sort((a, b) => (b.started_at || '').localeCompare(a.started_at || '')).slice(0, 20);
 };
 
-/** Serve a cached PDF thumbnail, generating it on first request. */
-const serveThumbnail = async (req, res, docUrl, sites) => {
-  // Find which site owns this URL
+/** Generate a JPEG thumbnail buffer from a PDF file (page 1). Returns null if canvas unavailable. */
+const renderThumbnail = async (pdfPath) => {
+  try {
+    const buf = readFileSync(pdfPath);
+    const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
+    const pdf = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
+    const page = await pdf.getPage(1);
+    const viewport = page.getViewport({ scale: 0.6 });
+    const { createCanvas } = await import('canvas');
+    const canvas = createCanvas(viewport.width, viewport.height);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+    return canvas.toBuffer('image/jpeg', { quality: 0.75 });
+  } catch { return null; }
+};
+
+/** Upload thumbnail to R2 and return its CDN URL. Returns null on failure. */
+const uploadThumbnail = async (thumbCfg, key, jpegBuf) => {
+  const endpoint = process.env[thumbCfg.r2_endpoint_env || 'R2_ENDPOINT'];
+  const accessKeyId = process.env[thumbCfg.r2_access_key_env || 'R2_ACCESS_KEY'];
+  const secretAccessKey = process.env[thumbCfg.r2_secret_key_env || 'R2_SECRET_KEY'];
+  if (!endpoint || !accessKeyId || !secretAccessKey) return null;
+  const s3 = new S3Client({ endpoint, region: 'auto', credentials: { accessKeyId, secretAccessKey }, forcePathStyle: false });
+  try {
+    await s3.send(new PutObjectCommand({ Bucket: thumbCfg.r2_bucket, Key: key, Body: jpegBuf, ContentType: 'image/jpeg', CacheControl: 'public, max-age=31536000' }));
+    return `${(thumbCfg.cdn_base_url || '').replace(/\/$/, '')}/${key}`;
+  } catch (e) { console.error(`[thumbnail] R2 upload failed: ${e.message}`); return null; }
+};
+
+/** Handle /api/thumbnail — generate, upload to R2, redirect to CDN URL. */
+const serveThumbnail = async (req, res, docUrl, sites, cfg) => {
   const domain = sites.find(s => docUrl.startsWith(`https://${s.domain}`) || docUrl.startsWith(`http://${s.domain}`))?.domain;
   if (!domain) return err(res, 404, 'unknown domain');
   const db = safeOpenDb(domain);
   if (!db) return err(res, 404, 'db unavailable');
-  let localPath;
-  try { localPath = db.prepare('SELECT local_path, path_slug FROM pages WHERE url=?').get(docUrl); }
+  let row;
+  try { row = db.prepare('SELECT local_path, path_slug FROM pages WHERE url=?').get(docUrl); }
   finally { db.close(); }
-  if (!localPath?.local_path || !existsSync(localPath.local_path)) return err(res, 404, 'pdf not found');
+  if (!row?.local_path || !existsSync(row.local_path)) return err(res, 404, 'pdf not found');
 
-  const slug = localPath.path_slug || docUrl.replace(/[^a-z0-9]/gi, '_').slice(-60);
-  const thumbDir = join(metaDir(domain), 'thumbnails');
-  const thumbPath = join(thumbDir, `${slug}.jpg`);
+  const slug = row.path_slug || docUrl.replace(/[^a-z0-9]/gi, '_').slice(-60);
+  const thumbCfg = cfg.defaults?.thumbnails || {};
+  const r2Key = `${thumbCfg.r2_prefix || 'site2rag'}/${domain}/${slug}.jpg`;
+  const cdnUrl = `${(thumbCfg.cdn_base_url || '').replace(/\/$/, '')}/${r2Key}`;
 
-  if (!existsSync(thumbPath)) {
-    try {
-      mkdirSync(thumbDir, { recursive: true });
-      const buf = readFileSync(localPath.local_path);
-      const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-      const pdf = await pdfjs.getDocument({ data: new Uint8Array(buf) }).promise;
-      const page = await pdf.getPage(1);
-      const viewport = page.getViewport({ scale: 0.5 });
-      const { createCanvas } = await import('canvas');
-      const canvas = createCanvas(viewport.width, viewport.height);
-      await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
-      writeFileSync(thumbPath, canvas.toBuffer('image/jpeg', { quality: 0.7 }));
-    } catch {
-      // canvas not available or render failed — return 404
-      return err(res, 404, 'thumbnail unavailable');
+  // Check R2 first (if CDN configured), redirect immediately if exists
+  if (thumbCfg.cdn_base_url) {
+    const endpoint = process.env[thumbCfg.r2_endpoint_env || 'R2_ENDPOINT'];
+    const accessKeyId = process.env[thumbCfg.r2_access_key_env || 'R2_ACCESS_KEY'];
+    const secretAccessKey = process.env[thumbCfg.r2_secret_key_env || 'R2_SECRET_KEY'];
+    if (endpoint && accessKeyId) {
+      const s3 = new S3Client({ endpoint, region: 'auto', credentials: { accessKeyId, secretAccessKey: secretAccessKey || '' }, forcePathStyle: false });
+      try {
+        await s3.send(new HeadObjectCommand({ Bucket: thumbCfg.r2_bucket, Key: r2Key }));
+        res.writeHead(302, { 'Location': cdnUrl, 'Cache-Control': 'public, max-age=3600', 'Access-Control-Allow-Origin': CORS_ORIGIN });
+        return res.end();
+      } catch {}
     }
   }
 
-  res.writeHead(200, {
-    'Content-Type': 'image/jpeg',
-    'Cache-Control': 'public, max-age=86400',
-    'Access-Control-Allow-Origin': CORS_ORIGIN
-  });
-  res.end(readFileSync(thumbPath));
+  // Generate and upload
+  const jpegBuf = await renderThumbnail(row.local_path);
+  if (!jpegBuf) return err(res, 404, 'thumbnail unavailable (canvas not installed)');
+
+  const uploaded = await uploadThumbnail(thumbCfg, r2Key, jpegBuf);
+  if (uploaded) {
+    res.writeHead(302, { 'Location': uploaded, 'Cache-Control': 'public, max-age=3600', 'Access-Control-Allow-Origin': CORS_ORIGIN });
+    return res.end();
+  }
+
+  // Fallback: serve directly if R2 not configured
+  res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=86400', 'Access-Control-Allow-Origin': CORS_ORIGIN });
+  res.end(jpegBuf);
 };
 
 // Router
@@ -300,7 +333,7 @@ createServer((req, res) => {
   if (path === '/api/thumbnail') {
     const docUrl = url.searchParams.get('url');
     if (!docUrl) return err(res, 400, 'url param required');
-    return serveThumbnail(req, res, docUrl, sites);
+    return serveThumbnail(req, res, docUrl, sites, cfg);
   }
 
   if (path === '/api/runs') {
