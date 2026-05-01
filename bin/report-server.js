@@ -1,7 +1,11 @@
 // site2rag API + report server. Routes: /api/sites, /api/docs, /api/thumbnail, /api/docs/skip, /api/docs/summarize; static public/.
 import { createServer } from 'http';
-import { existsSync, readFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, renameSync } from 'fs';
 import { join, extname, dirname } from 'path';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+
+const execFileAsync = promisify(execFile);
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import Anthropic from '@anthropic-ai/sdk';
@@ -72,26 +76,15 @@ const mapDoc = (d, domain) => ({
     : null,
 });
 
-/** Generate a JPEG thumbnail of PDF page 1 using pdfjs-dist + canvas. Renders at 2x then downscales for sharpness. */
+/** Generate a JPEG thumbnail of PDF page 1 using pdftoppm. Returns true on success. */
 const generateThumb = async (pdfPath, outPath, targetW = 300) => {
-  const { readFileSync: rf, writeFileSync: wf } = await import('fs');
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const { createCanvas } = await import('@napi-rs/canvas');
-  const pdfBuf = rf(pdfPath);
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(pdfBuf) }).promise;
-  const page = await pdf.getPage(1);
-  const vp1 = page.getViewport({ scale: 1 });
-  // Render at 2x target width for sharpness, then downscale
-  const scale = (targetW * 2) / vp1.width;
-  const viewport = page.getViewport({ scale });
-  const hiCanvas = createCanvas(Math.round(viewport.width), Math.round(viewport.height));
-  await page.render({ canvasContext: hiCanvas.getContext('2d'), viewport }).promise;
-  // Downscale to target (natural lanczos-like sharpening via canvas bilinear)
-  const outH = Math.round(vp1.height * targetW / vp1.width);
-  const out = createCanvas(targetW, outH);
-  out.getContext('2d').drawImage(hiCanvas, 0, 0, targetW, outH);
-  wf(outPath, out.toBuffer('image/jpeg', { quality: 88 }));
-  return true;
+  const dpi = Math.max(18, Math.round(targetW / 8.5));
+  const prefix = outPath.replace(/\.jpg$/, '');
+  await execFileAsync('pdftoppm', ['-f', '1', '-l', '1', '-r', String(dpi), '-jpeg', '-jpegopt', 'quality=85', pdfPath, prefix], { timeout: 30000 });
+  for (const candidate of [`${prefix}-1.jpg`, `${prefix}-01.jpg`, `${prefix}-001.jpg`]) {
+    if (existsSync(candidate)) { renameSync(candidate, outPath); return true; }
+  }
+  return false;
 };
 
 /** Summary stats for one site. */
