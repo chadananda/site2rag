@@ -101,11 +101,10 @@ const processOne = async (db, domain, row) => {
       throw new Error(`reocr failed: ${err.message}`);
     }
 
-    // Rebuild PDF with text layer -- store under .upgraded/ with url-hash naming
-    const hash = sha256(page.url).slice(0, 16);
-    const upgradedDir = join(mirrorDir(domain), '.upgraded');
-    mkdirSync(upgradedDir, { recursive: true });
-    const outputPath = join(upgradedDir, `x${hash}.pdf`);
+    // Mirror the original URL path under .upgraded/ — no conflicts, rsync-friendly for site owners
+    const urlPath = new URL(page.url).pathname; // e.g. /pdf/b/document.pdf
+    const outputPath = join(mirrorDir(domain), '.upgraded', urlPath);
+    mkdirSync(dirname(outputPath), { recursive: true });
     const { success, method, error } = await rebuildPdf(page.local_path, outputPath, ocrResults);
 
     if (!success) throw new Error(error);
