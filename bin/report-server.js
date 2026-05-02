@@ -7,7 +7,7 @@ import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import { cpus } from 'os';
 import Anthropic from '@anthropic-ai/sdk';
-import { loadConfig, getMirrorRoot } from '../src/config.js';
+import { loadConfig, getMirrorRoot, mdDir } from '../src/config.js';
 import { openDb } from '../src/db.js';
 
 // Language key → display name
@@ -234,6 +234,20 @@ const siteSummary = (domain, siteUrl) => {
       : 300;
     const mirrorProgressRaw = db.prepare(`SELECT value FROM site_meta WHERE key='mirror_progress'`).get()?.value;
     const mirror_progress = mirrorProgressRaw ? JSON.parse(mirrorProgressRaw) : null;
+    // Token cost: compute from token counts × per-model rate since cost_usd is stored as 0
+    const MODEL_COST = {
+      'claude-haiku-4-5-20251001': [0.80, 4.00],
+      'claude-haiku-3-5-20241022': [0.80, 4.00],
+      'claude-sonnet-4-5': [3.00, 15.00],
+      'claude-sonnet-4-5-20251001': [3.00, 15.00],
+      'claude-opus-4-7': [15.00, 75.00],
+      'mistral-ocr-latest': [1.00, 1.00],
+    };
+    const tokenRows = db.prepare('SELECT model, SUM(tokens_in) as tin, SUM(tokens_out) as tout FROM llm_calls GROUP BY model').all();
+    const total_cost_usd = tokenRows.reduce((sum, r) => {
+      const [inRate, outRate] = MODEL_COST[r.model] || [3.00, 15.00];
+      return sum + (r.tin || 0) / 1e6 * inRate + (r.tout || 0) / 1e6 * outRate;
+    }, 0);
     return {
       domain, url: siteUrl, available: true,
       total_pages: totals.total_pages || 0, total_html: totals.total_html || 0, total_pdfs: totals.total_pdfs || 0,
@@ -246,6 +260,8 @@ const siteSummary = (domain, siteUrl) => {
       image_pdfs: pdf.image_pdfs || 0, image_pdfs_summarized: pdf.image_pdfs_summarized || 0,
       eta_seconds: (pdf.pending || 0) * avgSec,
       md_exported: exp.ok || 0, md_failed: exp.failed || 0,
+      md_dir: mdDir(domain),
+      total_cost_usd,
       last_run: lastRun || null,
       recent_fails: recentFails,
       mirror_progress
