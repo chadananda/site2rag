@@ -7,7 +7,7 @@ import { createHash } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { loadConfig, getMirrorRoot, mirrorDir, metaDir } from '../config.js';
 import { openDb } from '../db.js';
-import { bossAvailable, reocrDocument } from './reocr.js';
+import { ocrAvailableBackend, reocrDocument } from './reocr.js';
 import { identifyDocument } from './identify.js';
 import { rebuildPdf } from './rebuild.js';
 import { scorePdf, saveQualityScore } from './score.js';
@@ -322,7 +322,7 @@ const processOne = async (db, domain, row, allDomains = []) => {
     try {
       ocrResults = await reocrDocument(page.local_path, domain, contentHash, numPages, (n, total) => {
         if (n % 5 === 0 || n === total) log(`  page ${n}/${total}`);
-      });
+      }, ocrBackend);
     } catch (err) {
       throw new Error(`reocr failed: ${err.message}`);
     }
@@ -369,13 +369,14 @@ const tick = async () => {
     await detectLanguageForImagePdfs(db, domain);
   }
 
-  // OCR processing requires boss
-  const available = await bossAvailable();
-  if (!available) {
-    log('Boss unavailable, skipping OCR processing');
+  // OCR processing requires boss or Claude vision API
+  const ocrBackend = await ocrAvailableBackend();
+  if (!ocrBackend) {
+    log('No OCR backend available (boss unreachable, no ANTHROPIC_API_KEY), skipping');
     for (const { db } of openDbs) { try { db.close(); } catch {} }
     return;
   }
+  if (ocrBackend === 'claude') log('Boss unavailable, using Claude vision API for OCR');
 
   let bestRow = null, bestDomain = null, bestDb = null;
   for (const { db, domain } of openDbs) {

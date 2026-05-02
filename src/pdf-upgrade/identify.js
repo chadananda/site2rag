@@ -10,7 +10,7 @@ import { join } from 'path';
 import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
-import { identifyPage, bossAvailable } from './reocr.js';
+import { identifyPage, ocrAvailableBackend } from './reocr.js';
 
 const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
@@ -199,16 +199,16 @@ export const identifyDocument = async (pdfPath, metadata, db, docUrl, apiKey) =>
     }
   }
 
-  // Stage 3: Boss vision LLM — only escalate if both above yielded nothing
+  // Stage 3: Vision LLM (boss or Claude fallback) — only escalate if both above yielded nothing
   if (!result && langKey === 'unknown') {
     try {
-      const avail = await bossAvailable();
-      if (avail) {
-        const { language, topic } = await identifyPage(pdfPath);
+      const backend = await ocrAvailableBackend();
+      if (backend) {
+        const { language, topic } = await identifyPage(pdfPath, backend);
         if (language || topic) {
           const normalized = normalizeLanguageKey(language);
           langKey = normalized !== 'unknown' ? normalized : langKey;
-          result = { language: language || null, title: null, author: null, summary: topic || null, langKey, stage: 'boss' };
+          result = { language: language || null, title: null, author: null, summary: topic || null, langKey, stage: backend };
         }
       }
     } catch {}
