@@ -114,6 +114,39 @@ describe('pdf_quality schema migration (Bug 1)', () => {
   });
 });
 
+describe('summarize-pdfs schema guard (Bug 3)', () => {
+  afterEach(() => {
+    rmSync(testRoot, { recursive: true, force: true });
+  });
+
+  it('runSummarizePdfs crashes without guard when ai_summarized_at is missing', async () => {
+    // Simulate old tower-nas DB missing migration columns
+    const dir = join(testRoot, 'summarize-domain', '_meta');
+    mkdirSync(dir, { recursive: true });
+    const dbPath = join(dir, 'site.sqlite');
+    createOldSchemaDb(dbPath);
+    const db = new Database(dbPath);
+    // Direct prepare of the query that summarize-pdfs uses — should throw on old schema
+    expect(() => db.prepare(`
+      SELECT q.url FROM pdf_quality q WHERE q.ai_summarized_at IS NULL
+    `)).toThrow(/no such column/i);
+    db.close();
+  });
+
+  it('runSummarizePdfs returns empty stats when schema is old (no crash)', async () => {
+    const dir = join(testRoot, 'summarize-domain2', '_meta');
+    mkdirSync(dir, { recursive: true });
+    const dbPath = join(dir, 'site.sqlite');
+    createOldSchemaDb(dbPath);
+    // Use openDb so migrations run, but test the guard exists even without that
+    const { runSummarizePdfs } = await import('../src/summarize-pdfs.js');
+    const db = new Database(dbPath); // open without migrations to simulate old state
+    const stats = await runSummarizePdfs(db, { domain: 'summarize-domain2' });
+    expect(stats).toMatchObject({ summarized: 0, skipped: 0 });
+    db.close();
+  });
+});
+
 describe('siteDocs error handling (Bug 2)', () => {
   afterEach(() => {
     rmSync(testRoot, { recursive: true, force: true });

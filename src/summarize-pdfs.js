@@ -35,16 +35,22 @@ export const runSummarizePdfs = async (db, siteConfig) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return { summarized: 0, skipped: 0 };
 
-  const rows = db.prepare(`
-    SELECT q.url, q.pdf_title, q.excerpt,
-           h.hosted_title, h.host_url as source_url
-    FROM pdf_quality q
-    LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title
-               FROM hosts GROUP BY hosted_url) h ON q.url=h.hosted_url
-    WHERE q.ai_summarized_at IS NULL
-      AND (q.has_text_layer=0 OR q.has_text_layer IS NULL OR q.readable_pages_pct < 0.4)
-    ORDER BY COALESCE(q.composite_score, 1) ASC
-    LIMIT 2000`).all();
+  let rows;
+  try {
+    rows = db.prepare(`
+      SELECT q.url, q.pdf_title, q.excerpt,
+             h.hosted_title, h.host_url as source_url
+      FROM pdf_quality q
+      LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title
+                 FROM hosts GROUP BY hosted_url) h ON q.url=h.hosted_url
+      WHERE q.ai_summarized_at IS NULL
+        AND (q.has_text_layer=0 OR q.has_text_layer IS NULL OR q.readable_pages_pct < 0.4)
+      ORDER BY COALESCE(q.composite_score, 1) ASC
+      LIMIT 2000`).all();
+  } catch (e) {
+    console.warn(`[summarize] query failed (schema migration pending?): ${e.message}`);
+    return { summarized: 0, skipped: 0 };
+  }
 
   if (!rows.length) return { summarized: 0, skipped: 0 };
 

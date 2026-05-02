@@ -7,7 +7,8 @@ import { dirname, join } from 'path';
 import { saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
 
 const WORKER_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'score-worker.js');
-const CONCURRENCY = Math.max(1, cpus().length - 2);
+const CONCURRENCY = Math.max(1, Math.min(4, cpus().length - 2)); // cap at 4 to avoid OOM
+const BUDGET_MS = 5 * 60 * 1000; // 5 min max per run
 
 const scoreOne = (pdfPath) => new Promise((resolve) => {
   // execArgv: [] prevents --input-type or other flags from being inherited by workers
@@ -36,10 +37,13 @@ export const runScorePdfs = async (db, siteConfig) => {
   `).all().filter(r => existsSync(r.local_path));
 
   if (!unscored.length) return stats;
-  console.log(`[score-pdfs] ${unscored.length} unscored PDFs, concurrency=${CONCURRENCY}`);
+  // Cap batch to avoid spending the whole pipeline on scoring alone
+  const batch = unscored.slice(0, 500);
+  console.log(`[score-pdfs] ${unscored.length} unscored PDFs, processing ${batch.length}, concurrency=${CONCURRENCY}`);
+  const started = Date.now();
 
   // Pool: keep CONCURRENCY workers running at all times
-  const queue = [...unscored];
+  const queue = [...batch];
   let active = 0;
   const results = [];
 
@@ -52,6 +56,7 @@ export const runScorePdfs = async (db, siteConfig) => {
         scoreOne(row.local_path).then(result => {
           results.push({ row, result });
           active--;
+          if (Date.now() - started > BUDGET_MS) queue.length = 0; // stop queuing new work
           next();
         });
       }
