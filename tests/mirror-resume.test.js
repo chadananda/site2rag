@@ -107,3 +107,44 @@ describe('mirror resume: pre-populates visited from DB', () => {
     db.close();
   });
 });
+
+describe('mirror markGoneUrls: only on complete runs', () => {
+  it('does NOT mark pages gone when run times out (partial crawl)', async () => {
+    const db = openDb(DOMAIN);
+    const existingUrl = `${SEED}/existing-page`;
+    const oldDate = new Date(Date.now() - 5 * 86400000).toISOString(); // 5 days ago
+    db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone, last_seen_at, first_seen_at) VALUES (?,?,?,?,?,?,?)')
+      .run(existingUrl, 'existing', null, 'text/html', 0, oldDate, oldDate);
+
+    fetch.mockImplementation(async () => mockResponse(htmlPage([])));
+
+    // timeout_seconds: 0 → loop condition is false immediately → toVisit not empty → partial run
+    await runMirror(db, { domain: DOMAIN, url: SEED, timeout_seconds: 0 });
+
+    // existingUrl was not seen — but run was incomplete, so must NOT be marked gone
+    const row = db.prepare('SELECT gone FROM pages WHERE url=?').get(existingUrl);
+    expect(row?.gone).toBe(0);
+    db.close();
+  });
+
+  it('DOES mark pages gone when crawl completes fully', async () => {
+    const db = openDb(DOMAIN);
+    const ghostUrl = `${SEED}/ghost-page`;
+    const oldDate = new Date(Date.now() - 5 * 86400000).toISOString();
+    db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone, last_seen_at, first_seen_at) VALUES (?,?,?,?,?,?,?)')
+      .run(ghostUrl, 'ghost', null, 'text/html', 0, oldDate, oldDate);
+
+    // Seed returns no links — crawl finishes immediately (only seed URL checked)
+    fetch.mockImplementation(async (url) => {
+      if (url === SEED || url === `${SEED}/`) return mockResponse(htmlPage([]));
+      return { ok: false, status: 404, headers: { get: () => null } };
+    });
+
+    await runMirror(db, { domain: DOMAIN, url: SEED, timeout_seconds: 30 });
+
+    // ghostUrl was not seen in this complete run → should be marked gone
+    const row = db.prepare('SELECT gone FROM pages WHERE url=?').get(ghostUrl);
+    expect(row?.gone).toBe(1);
+    db.close();
+  });
+});

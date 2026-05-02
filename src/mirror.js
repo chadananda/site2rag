@@ -264,10 +264,12 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       }
     }
   }
-  // Mark pages not seen this run as gone
-  stats.gone = markGoneUrls(db, runStartedAt);
-  // Clear resume checkpoint and progress — run completed normally
-  db.prepare('DELETE FROM site_meta WHERE key=?').run(RESUME_KEY);
-  db.prepare('DELETE FROM site_meta WHERE key=?').run('mirror_progress');
+  const ranToCompletion = toVisit.length === 0;
+  // Only mark gone if crawl completed fully — partial runs (timeout/crash) must not destroy live pages
+  if (ranToCompletion) {
+    stats.gone = markGoneUrls(db, runStartedAt);
+    db.prepare('DELETE FROM site_meta WHERE key=?').run(RESUME_KEY);
+    db.prepare('DELETE FROM site_meta WHERE key=?').run('mirror_progress');
+  }
   return stats;
 };
