@@ -269,25 +269,43 @@ The Markdown export is designed to be ingested directly by the SifterSearch pipe
 
 ## Operations
 
-### Deploy UI (Cloudflare Pages)
+All common tasks have npm scripts. Run `npm run <script>` from the project root.
 
-```bash
-npm run deploy:ui
-```
+### Deploy
 
-Bumps patch version, stamps build time into the service worker, builds CSS, deploys `public/` to Cloudflare Pages project `site2rag-report`, commits version.json. **Always use this script** — never run wrangler directly.
+| script | what it does |
+|--------|-------------|
+| `deploy:ui` | Build CSS, bump version, deploy `public/` to Cloudflare Pages, commit version.json. **Always use this — never run wrangler directly.** |
+| `deploy:backend` | `git pull` on tower-nas + `pm2 reload site2rag pdf-report-server` |
+| `deploy:all` | Both of the above |
 
-Live at: `https://site2rag.lnker.com`
+UI live at `https://site2rag.lnker.com` (CF Pages).  
+API live at `https://api.lnker.com` → Cloudflare tunnel → tower-nas:7840.
 
-### Deploy backend (tower-nas)
+### Restart individual processes
 
-```bash
-npm run deploy:backend
-```
+| script | restarts |
+|--------|---------|
+| `restart:spider` | `site2rag` (crawler) |
+| `restart:api` | `pdf-report-server` |
+| `restart:worker` | `pdf-upgrade-worker` |
+| `restart:all` | all PM2 processes |
 
-SSH to tower-nas, pulls latest code, reloads `site2rag` (spider) and `pdf-report-server` (API). The updater process polls git hourly but does **not** reload PM2 — you must reload manually after pushing.
+### Logs (streaming)
 
-API live at: `https://api.lnker.com` → Cloudflare tunnel → tower-nas:7840
+| script | log |
+|--------|-----|
+| `logs:spider` | spider stdout |
+| `logs:spider:err` | spider stderr |
+| `logs:api` | API server stdout |
+| `logs:api:err` | API server stderr |
+
+### Server access
+
+| script | does |
+|--------|------|
+| `status` | `pm2 status` on tower-nas |
+| `ssh` | open SSH session to tower-nas |
 
 ### PM2 processes on tower-nas (`/tank/site2rag/app`)
 
@@ -297,12 +315,12 @@ API live at: `https://api.lnker.com` → Cloudflare tunnel → tower-nas:7840
 | `pdf-report-server` | `bin/report-server.js` | API + static UI on :7840 |
 | `lnker-server` | `bin/lnker-server.js` | Asset server on :7841 |
 | `pdf-upgrade-worker` | `bin/pdf-upgrade-worker.js` | LLM OCR upgrade worker |
-| `site2rag-updater` | `bin/updater.js` | git pull watchdog (hourly) |
+| `site2rag-updater` | `bin/updater.js` | git pull watchdog — does NOT reload PM2 |
 
 ### Local development
 
 ```bash
 npm install
-npm test                          # run Vitest suite
-SITE2RAG_ROOT=/path/to/data npm start   # run pipeline once
+npm test                               # run 85-test Vitest suite
+SITE2RAG_ROOT=/path/to/data npm start  # run pipeline once
 ```

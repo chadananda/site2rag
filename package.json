@@ -15,7 +15,18 @@
     "postinstall": "node bin/setup.js",
     "build:css": "echo '@import \"tailwindcss\";' > public/tw-input.css && node_modules/.bin/tailwindcss -i public/tw-input.css -o public/tailwind.css --minify && rm public/tw-input.css",
     "deploy:ui": "node scripts/deploy-ui.js",
-    "deploy:backend": "ssh tower-nas 'cd /tank/site2rag/app && git pull && pm2 reload site2rag && pm2 reload pdf-report-server'"
+    "deploy:backend": "ssh tower-nas 'cd /tank/site2rag/app && git pull && pm2 reload site2rag && pm2 reload pdf-report-server'",
+    "deploy:all": "npm run deploy:ui && npm run deploy:backend",
+    "restart:spider": "ssh tower-nas 'pm2 reload site2rag'",
+    "restart:api": "ssh tower-nas 'pm2 reload pdf-report-server'",
+    "restart:worker": "ssh tower-nas 'pm2 reload pdf-upgrade-worker'",
+    "restart:all": "ssh tower-nas 'pm2 reload all'",
+    "logs:spider": "ssh tower-nas 'tail -100f /tank/site2rag/logs/site2rag.out.log'",
+    "logs:spider:err": "ssh tower-nas 'tail -100f /tank/site2rag/logs/site2rag.err.log'",
+    "logs:api": "ssh tower-nas 'tail -100f /tank/site2rag/logs/report-server.out.log'",
+    "logs:api:err": "ssh tower-nas 'tail -100f /tank/site2rag/logs/report-server.err.log'",
+    "status": "ssh tower-nas 'pm2 status'",
+    "ssh": "ssh tower-nas"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.37.0",
