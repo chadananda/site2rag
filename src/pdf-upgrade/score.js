@@ -1,6 +1,54 @@
 // PDF quality scoring -- heuristics only, no AI. Composite score 0.0 (unreadable) to 1.0 (clean).
 import pdfParse from 'pdf-parse';
 import { readFileSync } from 'fs';
+
+/**
+ * Detect primary language from Unicode composition. Returns a language key.
+ * Used for cost estimation and queue prioritization (English is cheapest to OCR).
+ */
+export const detectLanguage = (text) => {
+  if (!text || text.length < 15) return 'unknown';
+  const len = text.length;
+  if ((text.match(/[\u0600-\u06FF]/g) || []).length / len > 0.07)
+    return (text.match(/[\u067E\u0686\u0698\u06AF]/g) || []).length > 0 ? 'persian' : 'arabic';
+  if ((text.match(/[\u0590-\u05FF]/g) || []).length / len > 0.07) return 'hebrew';
+  if ((text.match(/[\u3040-\u30FF]/g) || []).length / len > 0.05) return 'japanese';
+  if ((text.match(/[\u4E00-\u9FFF]/g) || []).length / len > 0.07) return 'chinese';
+  if ((text.match(/[\u0400-\u04FF]/g) || []).length / len > 0.07) return 'russian';
+  if ((text.match(/[a-zA-Z]/g) || []).length / len > 0.3) return 'english';
+  return 'unknown';
+};
+
+/**
+ * Language cost multiplier for OCR processing. English is 1.0 (baseline).
+ * Non-Latin scripts require more model tokens and processing time.
+ */
+export const LANG_COST = {
+  english: 1.0,
+  russian: 1.15,
+  unknown: 1.2,
+  arabic:  1.35,
+  persian: 1.35,
+  hebrew:  1.35,
+  japanese: 1.5,
+  chinese:  1.5,
+};
+
+/**
+ * Priority multiplier for queue ordering. English docs are processed first.
+ * Unknown language is heavily deprioritized — we can't estimate cost and
+ * cheap OCR scanning must happen before full upgrade.
+ */
+export const LANG_PRIORITY = {
+  english:  1.00,
+  russian:  0.85,
+  arabic:   0.70,
+  persian:  0.70,
+  hebrew:   0.70,
+  japanese: 0.55,
+  chinese:  0.55,
+  unknown:  0.30,  // deprioritized until language is identified via cheap scan
+};
 // Common English function words for word quality estimation
 const COMMON_WORDS = new Set(['the','of','and','to','a','in','is','it','you','that','he','was','for','on','are','as','with','his','they','at','be','this','from','or','had','by','not','but','have','an','were','we','their','one','all','would','there','what','so','up','out','if','about','who','get','which','go','me','when','make','can','like','time','no','just','him','know','take','into','year','your','good','some','could','them','see','other','than','then','now','look','only','come','its','over','think','also','back','after','use','two','how','our','first','well','way','even','new','want','because','any','these','give','day','most','us']);
 /** Estimate word quality from a text sample. Returns 0-1. */
@@ -36,7 +84,7 @@ const extractExcerpt = (text, maxChars = 280) => {
 };
 
 export const scorePdf = async (pdfPath) => {
-  const empty = { avg_chars_per_page: 0, readable_pages_pct: 0, has_text_layer: 0, word_quality_estimate: 0, composite_score: 0, pages: 0, pdf_title: '', excerpt: '' };
+  const empty = { avg_chars_per_page: 0, readable_pages_pct: 0, has_text_layer: 0, word_quality_estimate: 0, composite_score: 0, pages: 0, pdf_title: '', excerpt: '', language: 'unknown' };
   try {
     const buf = readFileSync(pdfPath);
     // First pass: get page count + PDF metadata title
@@ -58,7 +106,10 @@ export const scorePdf = async (pdfPath) => {
     const charsScore = Math.min(avgChars / 500, 1);
     const composite = 0.4 * wq + 0.3 * readablePct + 0.2 * charsScore + 0.1 * hasText;
     const excerpt = extractExcerpt(sampleText);
-    return { avg_chars_per_page: Math.round(avgChars), readable_pages_pct: Math.round(readablePct * 100) / 100, has_text_layer: hasText, word_quality_estimate: Math.round(wq * 100) / 100, composite_score: Math.round(composite * 100) / 100, pages, pdf_title, excerpt };
+    // Detect language from extracted text + PDF title
+    const langSample = [pdf_title, sampleText.slice(0, 2000)].join(' ');
+    const language = detectLanguage(langSample);
+    return { avg_chars_per_page: Math.round(avgChars), readable_pages_pct: Math.round(readablePct * 100) / 100, has_text_layer: hasText, word_quality_estimate: Math.round(wq * 100) / 100, composite_score: Math.round(composite * 100) / 100, pages, pdf_title, excerpt, language };
   } catch { return empty; }
 };
 /** Extract a short sample of OCR text for display (shows quality problems). */
@@ -74,17 +125,20 @@ export const extractBadSample = (pdfPath, maxChars = 300) => {
 };
 /** Save quality score to DB for a document URL. */
 export const saveQualityScore = (db, url, contentHash, metrics) => {
-  db.prepare(`INSERT OR REPLACE INTO pdf_quality (url, content_hash, scored_at, avg_chars_per_page, readable_pages_pct, has_text_layer, word_quality_estimate, composite_score, pages, pdf_title, excerpt)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(url, contentHash, new Date().toISOString(), metrics.avg_chars_per_page, metrics.readable_pages_pct, metrics.has_text_layer, metrics.word_quality_estimate, metrics.composite_score, metrics.pages, metrics.pdf_title || null, metrics.excerpt || null);
+  db.prepare(`INSERT OR REPLACE INTO pdf_quality (url, content_hash, scored_at, avg_chars_per_page, readable_pages_pct, has_text_layer, word_quality_estimate, composite_score, pages, pdf_title, excerpt, ai_language)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(url, contentHash, new Date().toISOString(), metrics.avg_chars_per_page, metrics.readable_pages_pct, metrics.has_text_layer, metrics.word_quality_estimate, metrics.composite_score, metrics.pages, metrics.pdf_title || null, metrics.excerpt || null, metrics.language || null);
 };
-/** Queue a PDF for upgrade if below score threshold. */
-export const maybeQueue = (db, url, contentHash, score, threshold = 0.7) => {
+/** Queue a PDF for upgrade if below score threshold. Priority boosted for English (cheaper to process). */
+export const maybeQueue = (db, url, contentHash, score, threshold = 0.7, language = null) => {
   if (score >= threshold) return false;
   const existing = db.prepare('SELECT status FROM pdf_upgrade_queue WHERE url=?').get(url);
   if (existing && existing.status !== 'pending') return false; // already processed or in progress
+  const langKey = (language || 'unknown').toLowerCase();
+  const langMult = LANG_PRIORITY[langKey] ?? LANG_PRIORITY.unknown;
+  const priority = (1 - score) * langMult;
   db.prepare(`INSERT OR REPLACE INTO pdf_upgrade_queue (url, content_hash, priority, status, queued_at)
     VALUES (?, ?, ?, 'pending', ?)`)
-    .run(url, contentHash, 1 - score, new Date().toISOString());
+    .run(url, contentHash, priority, new Date().toISOString());
   return true;
 };

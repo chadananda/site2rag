@@ -11,12 +11,13 @@ const init = async () => {
   ({ createCanvas } = await import('@napi-rs/canvas'));
 };
 
-parentPort.on('message', async ({ jobId, pdfPath, outPath, targetW }) => {
+parentPort.on('message', async ({ jobId, pdfPath, outPath, targetW, pageNo = 1 }) => {
   try {
     await init();
     const pdfBuf = readFileSync(pdfPath);
     const pdf = await pdfjs.getDocument({ data: new Uint8Array(pdfBuf) }).promise;
-    const page = await pdf.getPage(1);
+    const clampedPage = Math.max(1, Math.min(pageNo, pdf.numPages));
+    const page = await pdf.getPage(clampedPage);
     const vp1 = page.getViewport({ scale: 1 });
     const scale = (targetW * 2) / vp1.width;
     const viewport = page.getViewport({ scale });

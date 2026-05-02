@@ -159,6 +159,8 @@ const migrate = (db) => {
   addCol('pdf_quality', 'ai_author', 'TEXT');
   addCol('pdf_quality', 'ai_summarized_at', 'TEXT');
   addCol('pdf_quality', 'thumbnail_path', 'TEXT');
+  addCol('pdf_quality', 'summary_tier', 'TEXT');   // 'free' | 'haiku'
+  addCol('pdf_quality', 'ai_language', 'TEXT');
   // Fix readable_pages_pct stored as 0-100 instead of 0-1; recompute composite_score
   db.exec(`
     UPDATE pdf_quality

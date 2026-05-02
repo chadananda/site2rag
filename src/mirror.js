@@ -31,6 +31,16 @@ export const urlToMirrorPath = (domain, urlStr) => {
     const base = p.slice(0, -ext.length);
     p = `${base}__${hashQuery(u.search)}${ext}`;
   }
+  // Truncate filename component to 200 bytes to avoid ENAMETOOLONG (Linux 255-byte limit).
+  // Keeps the extension and uses a hash prefix for uniqueness.
+  const parts = p.split('/');
+  const last = parts[parts.length - 1];
+  if (Buffer.byteLength(last, 'utf8') > 200) {
+    const ext = extname(last) || '';
+    const hash = createHash('sha256').update(last).digest('hex').slice(0, 12);
+    parts[parts.length - 1] = `${hash}${ext}`;
+    p = parts.join('/');
+  }
   return join(mirrorDir(domain), p.replace(/^\//, ''));
 };
 /**
@@ -156,27 +166,51 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       continue;
     }
     if (!res.ok) continue;
-    const buf = Buffer.from(await res.arrayBuffer());
+    let buf;
+    try {
+      buf = Buffer.from(await res.arrayBuffer());
+    } catch (bodyErr) {
+      // Connection dropped / reset while reading body (undici "terminated", ECONNRESET, etc.)
+      console.warn(`[mirror] body read error ${canonical}: ${bodyErr.message}`);
+      continue;
+    }
     const contentHash = `sha256:${sha256(buf)}`;
     const mimeType = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
     const mirrorPath = urlToMirrorPath(domain, canonical);
     const pathSlug = urlPathToSlug(new URL(canonical).pathname);
     const isNew = !existing;
     const isChanged = existing && existing.content_hash !== contentHash;
+    let savedPath = mirrorPath;
     if (isNew || isChanged) {
       try {
         mkdirSync(dirname(mirrorPath), { recursive: true });
         writeFileSync(mirrorPath, buf);
         if (isNew) stats.new_pages++; else stats.changed++;
       } catch (writeErr) {
-        console.warn(`[mirror] skipping ${canonical}: ${writeErr.message}`);
-        continue;
+        if (writeErr.code === 'EEXIST') {
+          // A file exists where we need a directory: use a hash-named sibling instead
+          const ext = extname(mirrorPath);
+          const hash = createHash('sha256').update(canonical).digest('hex').slice(0, 12);
+          const dir = dirname(dirname(mirrorPath));
+          savedPath = join(dir, `${hash}${ext || '.html'}`);
+          try {
+            mkdirSync(dirname(savedPath), { recursive: true });
+            writeFileSync(savedPath, buf);
+            if (isNew) stats.new_pages++; else stats.changed++;
+          } catch (e2) {
+            console.warn(`[mirror] skipping ${canonical}: ${e2.message}`);
+            continue;
+          }
+        } else {
+          console.warn(`[mirror] skipping ${canonical}: ${writeErr.message}`);
+          continue;
+        }
       }
       if (mimeType === 'application/pdf') {
         try {
-          const metrics = await scorePdf(mirrorPath);
+          const metrics = await scorePdf(savedPath);
           saveQualityScore(db, canonical, contentHash, metrics);
-          maybeQueue(db, canonical, contentHash, metrics.composite_score);
+          maybeQueue(db, canonical, contentHash, metrics.composite_score, 0.7, metrics.language);
         } catch (scoreErr) {
           console.warn(`[mirror] score failed ${canonical}: ${scoreErr.message}`);
         }
@@ -185,7 +219,7 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     upsertPage(db, {
       url: canonical,
       path_slug: pathSlug,
-      local_path: mirrorPath,
+      local_path: savedPath,
       from_sitemap: fromSitemap ? 1 : 0,
       etag: res.headers.get('etag'),
       last_modified: res.headers.get('last-modified'),

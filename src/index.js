@@ -13,6 +13,7 @@ import { runExportDoc } from './export-doc.js';
 import { runArchive } from './archive.js';
 import { runRetain } from './retain.js';
 import { runScorePdfs } from './score-pdfs.js';
+import { runSummarizePdfs } from './summarize-pdfs.js';
 import { getMeta, setMeta } from './db.js';
 const TICK_MS = 15 * 60 * 1000; // 15 minutes
 /** Ensure all top-level directories exist. */
@@ -91,6 +92,8 @@ const runSite = async (siteConfig) => {
     }
     // Score PDFs (time-budgeted, 5 min max per run)
     runStats.scorePdfs = await runScorePdfs(db, siteConfig);
+    // Summarize image PDFs with Haiku (time-budgeted, 10 min max per run)
+    runStats.summarize = await runSummarizePdfs(db, siteConfig);
     // Classify
     if (siteConfig.classify?.enabled !== false) {
       runStats.classify = runClassify(db, siteConfig);

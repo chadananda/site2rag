@@ -1,18 +1,45 @@
 // PDF upgrade queue worker -- processes one document per tick from pdf_upgrade_queue.
 // Run via PM2 as a long-lived daemon; processes worst-scoring PDFs first.
 import { existsSync, copyFileSync, mkdirSync, readFileSync } from 'fs';
+import { cpus } from 'os';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { loadConfig, getMirrorRoot, mirrorDir, metaDir } from '../config.js';
 import { openDb } from '../db.js';
 import { bossAvailable, reocrDocument } from './reocr.js';
+import { identifyDocument } from './identify.js';
 import { rebuildPdf } from './rebuild.js';
 import { scorePdf, saveQualityScore } from './score.js';
 
 const TICK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes between docs
 const SUMMARIZE_BATCH = 10; // Haiku summaries to generate per tick
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
+const sha256file = (path) => sha256(readFileSync(path));
+
+/**
+ * Check all other site DBs for an already-upgraded PDF with the same content hash.
+ * Returns { upgraded_pdf_path, after_score, score_improvement, pages_processed, method } or null.
+ */
+const findUpgradedDuplicate = (contentHash, allDomains, skipDomain) => {
+  for (const domain of allDomains) {
+    if (domain === skipDomain) continue;
+    let db;
+    try {
+      const dbPath = join(getMirrorRoot(), domain, '_meta', 'site.sqlite');
+      if (!existsSync(dbPath)) continue;
+      db = openDb(domain);
+      const hit = db.prepare(`
+        SELECT u.upgraded_pdf_path, u.after_score, u.score_improvement, u.pages_processed, u.method
+        FROM pdf_upgrade_queue u
+        JOIN pdf_quality pq ON u.url=pq.url
+        WHERE pq.content_hash=? AND u.status='done' AND u.upgraded_pdf_path IS NOT NULL
+        LIMIT 1`).get(contentHash);
+      if (hit && existsSync(hit.upgraded_pdf_path)) return hit;
+    } catch {} finally { try { db?.close(); } catch {} }
+  }
+  return null;
+};
 
 const log = (msg) => console.log(`[pdf-upgrade] ${new Date().toISOString().slice(0,19)} ${msg}`);
 
@@ -59,6 +86,133 @@ const backfillHostsFromMirror = async (db, domain) => {
 
   db.prepare("INSERT OR REPLACE INTO site_meta (key, value) VALUES ('hosts_backfilled_at', ?)").run(now);
   log(`Backfilled hosts: ${inserted} PDF links from ${htmlPages.length} HTML pages`);
+};
+
+/**
+ * Identify language (and optionally topic) for image PDFs with no text layer.
+ * Three-stage cascade per tick, cheapest first:
+ *   1. Free: Unicode scan of anchor text + host page paragraph around the link
+ *   2. Cheap boss scan: single page rasterized at 1.5×, asks "Language: / Topic:" (≤40 tokens)
+ *   3. If still unknown: mark as 'unknown' and heavily deprioritize in queue
+ *
+ * Runs free-detection on up to FREE_BATCH docs. Boss scan limited to BOSS_BATCH.
+ * Unknown-after-scan docs get LANG_PRIORITY.unknown (0.30) so they don't block known ones.
+ */
+const FREE_BATCH = 200;
+const IDENTIFY_BATCH = 40;   // parallel Tesseract+Haiku jobs per tick
+
+const detectLanguageForImagePdfs = async (db, domain) => {
+  const { detectLanguage, LANG_PRIORITY } = await import('./score.js');
+
+  const saveAndReprioritize = (url, langKey, topic) => {
+    db.prepare('UPDATE pdf_quality SET ai_language=? WHERE url=?').run(langKey, url);
+    if (topic) {
+      // Store topic as a rough ai_summary if no better one exists yet
+      const existing = db.prepare('SELECT ai_summary FROM pdf_quality WHERE url=?').get(url);
+      if (!existing?.ai_summary) db.prepare('UPDATE pdf_quality SET ai_summary=? WHERE url=?').run(topic, url);
+    }
+    const queueRow = db.prepare("SELECT priority, before_score FROM pdf_upgrade_queue WHERE url=? AND status='pending'").get(url);
+    if (queueRow) {
+      const score = db.prepare('SELECT composite_score FROM pdf_quality WHERE url=?').get(url)?.composite_score ?? 0.5;
+      const mult = LANG_PRIORITY[langKey] ?? LANG_PRIORITY.unknown;
+      db.prepare('UPDATE pdf_upgrade_queue SET priority=? WHERE url=?').run((1 - score) * mult, url);
+    }
+  };
+
+  // Stage 1 — free Unicode detection (fast, no boss needed)
+  const freeRows = db.prepare(`
+    SELECT pq.url, pq.pdf_title, pq.excerpt,
+           h.hosted_title, hp.local_path as host_local_path, p.local_path
+    FROM pdf_quality pq
+    LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title FROM hosts GROUP BY hosted_url) h ON pq.url=h.hosted_url
+    LEFT JOIN pages hp ON h.host_url=hp.url
+    LEFT JOIN pages p ON pq.url=p.url
+    WHERE (pq.ai_language IS NULL OR pq.ai_language='unknown')
+      AND (pq.has_text_layer=0 OR pq.has_text_layer IS NULL)
+    LIMIT ?`).all(FREE_BATCH);
+
+  let freeDetected = 0;
+  for (const row of freeRows) {
+    // Try anchor text + title
+    const titleSample = [row.hosted_title, row.pdf_title, row.excerpt].filter(Boolean).join(' ');
+    let langKey = detectLanguage(titleSample);
+    if (langKey === 'unknown' || !langKey) {
+      // Try host page paragraph around the link
+      if (row.host_local_path && existsSync(row.host_local_path)) {
+        try {
+          const html = readFileSync(row.host_local_path, 'utf8').slice(0, 80_000);
+          const filename = row.url.split('/').pop();
+          const idx = html.indexOf(filename);
+          const snippet = idx >= 0 ? html.slice(Math.max(0, idx - 800), idx + 800) : html.slice(0, 4000);
+          const text = snippet.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim();
+          langKey = detectLanguage(text);
+        } catch {}
+      }
+    }
+    if (langKey && langKey !== 'unknown') {
+      saveAndReprioritize(row.url, langKey, null);
+      log(`Lang (free): ${row.url} → ${langKey}`);
+      freeDetected++;
+    } else {
+      // Mark as 'unknown' (explicit) so boss-scan stage can find and deprioritize
+      db.prepare('UPDATE pdf_quality SET ai_language=? WHERE url=?').run('unknown', row.url);
+      saveAndReprioritize(row.url, 'unknown', null); // applies 0.30 multiplier
+    }
+  }
+  if (freeDetected) log(`Lang free scan: ${freeDetected}/${freeRows.length} identified`);
+
+  // Stage 2 — multi-stage identify pipeline: Tesseract + Haiku + Boss vision, run in parallel
+  const identifyRows = db.prepare(`
+    SELECT pq.url, pq.pdf_title, pq.excerpt,
+           h.hosted_title, hp.local_path as host_local_path, p.local_path
+    FROM pdf_quality pq
+    JOIN pages p ON pq.url=p.url
+    LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title FROM hosts GROUP BY hosted_url) h ON pq.url=h.hosted_url
+    LEFT JOIN pages hp ON h.host_url=hp.url
+    WHERE pq.ai_language='unknown'
+      AND (pq.has_text_layer=0 OR pq.has_text_layer IS NULL)
+      AND p.local_path IS NOT NULL
+    ORDER BY COALESCE((SELECT priority FROM pdf_upgrade_queue WHERE url=pq.url), 0) DESC
+    LIMIT ?`).all(IDENTIFY_BATCH);
+
+  const concurrency = Math.max(4, Math.floor(cpus().length / 2));
+  let identified = 0;
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+
+  // Concurrency pool — run up to `concurrency` identify jobs simultaneously
+  const queue = identifyRows.filter(r => existsSync(r.local_path));
+  const runOne = async (row) => {
+    try {
+      let hostPageSnippet = '';
+      if (row.host_local_path && existsSync(row.host_local_path)) {
+        try {
+          const html = readFileSync(row.host_local_path, 'utf8').slice(0, 80_000);
+          const filename = row.url.split('/').pop();
+          const idx = html.indexOf(filename);
+          hostPageSnippet = idx >= 0
+            ? html.slice(Math.max(0, idx - 400), idx + 400).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+            : '';
+        } catch {}
+      }
+      const metadata = { hostedTitle: row.hosted_title || null, pdfTitle: row.pdf_title || null, excerpt: row.excerpt || null, hostPageSnippet };
+      const result = await identifyDocument(row.local_path, metadata, db, row.url, apiKey);
+      if (result.langKey && result.langKey !== 'unknown') {
+        saveAndReprioritize(row.url, result.langKey, result.summary);
+        log(`Lang (${result.stage}): ${row.url} → ${result.langKey}${result.summary ? ' / ' + result.summary.slice(0, 60) : ''}`);
+        identified++;
+      } else {
+        saveAndReprioritize(row.url, 'unknown', null);
+      }
+    } catch (e) {
+      log(`Identify failed: ${row.url}: ${e.message}`);
+    }
+  };
+
+  // Run in chunks of `concurrency`
+  for (let i = 0; i < queue.length; i += concurrency) {
+    await Promise.all(queue.slice(i, i + concurrency).map(runOne));
+  }
+  if (identifyRows.length) log(`Identify pipeline: ${identified}/${identifyRows.length} resolved (concurrency=${concurrency})`);
 };
 
 /** Generate Haiku AI summaries for the top N pending queue items that don't have one yet. */
@@ -111,8 +265,8 @@ const summarizeTopPending = async (db, domain) => {
   if (done) log(`Summarized ${done} pending docs via Haiku`);
 };
 
-/** Process one queued PDF document. */
-const processOne = async (db, domain, row) => {
+/** Process one queued PDF document. allDomains used for cross-site dedup check. */
+const processOne = async (db, domain, row, allDomains = []) => {
   const mirrorRoot = getMirrorRoot();
 
   // Look up the page to get local_path
@@ -128,6 +282,28 @@ const processOne = async (db, domain, row) => {
   log(`Processing: ${row.url} (priority ${row.priority.toFixed(2)})`);
 
   try {
+    // Compute content hash for dedup and as OCR cache key
+    const contentHash = sha256file(page.local_path);
+
+    // Cross-site dedup: if another site already upgraded an identical document, reuse the file
+    const dup = findUpgradedDuplicate(contentHash, allDomains, domain);
+    if (dup) {
+      // Copy upgraded file to this domain's .upgraded dir so it's domain-local
+      const hash = sha256(page.url).slice(0, 16);
+      const upgradedDir = join(mirrorDir(domain), '.upgraded');
+      mkdirSync(upgradedDir, { recursive: true });
+      const outputPath = join(upgradedDir, `x${hash}.pdf`);
+      copyFileSync(dup.upgraded_pdf_path, outputPath);
+      const improvement = (dup.after_score || 0) - (row.before_score || 0);
+      db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
+        .run(new Date().toISOString(), outputPath, dup.after_score, improvement, dup.pages_processed, `${dup.method}+dedup`, row.url);
+      log(`Dedup hit: ${row.url} → reused from another site (${contentHash.slice(0, 8)}…)`);
+      return;
+    }
+
+    // Store content hash so future dedup checks can find this document
+    db.prepare('UPDATE pdf_quality SET content_hash=? WHERE url=?').run(contentHash, row.url);
+
     // Get quality data and metadata for embedding
     const quality = db.prepare(`
       SELECT pq.pages, pq.pdf_title, pq.ai_summary, pq.ai_author, h.hosted_title, h.host_url as source_url
@@ -141,10 +317,10 @@ const processOne = async (db, domain, row) => {
       keywords: ['site2rag', domain, ...(quality?.source_url ? [quality.source_url] : []), row.url]
     };
 
-    // Re-OCR via boss
+    // Re-OCR via boss — use content hash as cache key so identical PDFs share OCR cache
     let ocrResults;
     try {
-      ocrResults = await reocrDocument(page.local_path, domain, sha256(page.local_path), numPages, (n, total) => {
+      ocrResults = await reocrDocument(page.local_path, domain, contentHash, numPages, (n, total) => {
         if (n % 5 === 0 || n === total) log(`  page ${n}/${total}`);
       });
     } catch (err) {
@@ -186,10 +362,11 @@ const tick = async () => {
     openDbs.push({ db: openDb(domain), domain });
   }
 
-  // Backfill + summarize run regardless of boss availability
+  // Backfill + summarize + language detection run regardless of boss availability
   for (const { db, domain } of openDbs) {
     await backfillHostsFromMirror(db, domain);
     await summarizeTopPending(db, domain);
+    await detectLanguageForImagePdfs(db, domain);
   }
 
   // OCR processing requires boss
@@ -216,7 +393,8 @@ const tick = async () => {
   }
 
   if (bestRow && bestDb) {
-    await processOne(bestDb, bestDomain, bestRow);
+    const allDomains = openDbs.map(o => o.domain);
+    await processOne(bestDb, bestDomain, bestRow, allDomains);
   } else {
     log('No pending items');
   }
