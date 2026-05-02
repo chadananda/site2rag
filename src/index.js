@@ -125,7 +125,7 @@ const runSite = async (siteConfig) => {
   } catch (err) {
     runStats.status = 'failed';
     runStats.error = err.message;
-    console.error(`[site2rag] site ${domain} failed: ${err.message}`);
+    console.error(`[site2rag] site ${domain} failed: ${err.message}\n${err.stack || '(no stack)'}`);
     finishRun(db, runId, 'failed', { message: err.message });
   }
   clearTimeout(hardKill);
@@ -155,6 +155,12 @@ const tick = async () => {
 };
 // Startup
 ensureDirs();
+process.on('unhandledRejection', (reason) => {
+  console.error(`[site2rag] unhandledRejection: ${reason?.message ?? reason}\n${reason?.stack || ''}`);
+});
+process.on('uncaughtException', (err) => {
+  console.error(`[site2rag] uncaughtException: ${err.message}\n${err.stack || ''}`);
+});
 console.log(`[site2rag] starting, SITE2RAG_ROOT=${getSiteRoot()}`);
 tick();
 setInterval(tick, TICK_MS);
