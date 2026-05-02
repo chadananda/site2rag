@@ -428,6 +428,21 @@ const tick = async () => {
   for (const { db } of openDbs) { try { db.close(); } catch {} }
 };
 
+// On startup: reset any stuck 'processing' docs back to 'pending'
+const resetStuckProcessing = () => {
+  try {
+    const { sites } = loadConfig();
+    for (const site of sites) {
+      const domain = new URL(site.url).hostname;
+      const db = openDb(domain);
+      const n = db.prepare("UPDATE pdf_upgrade_queue SET status='pending', started_at=NULL WHERE status='processing'").run().changes;
+      if (n) log(`Reset ${n} stuck processing docs to pending`);
+      try { db.close(); } catch {}
+    }
+  } catch {}
+};
+resetStuckProcessing();
+
 // Main loop
 log('PDF upgrade worker started');
 const run = async () => {
