@@ -198,9 +198,9 @@ const siteSummary = (domain, siteUrl) => {
   try {
     const totals = db.prepare(`
       SELECT COUNT(*) as total_pages,
-        SUM(CASE WHEN mime_type='application/pdf' AND gone=0 THEN 1 ELSE 0 END) as total_pdfs,
-        SUM(CASE WHEN mime_type LIKE 'text/html%' AND gone=0 THEN 1 ELSE 0 END) as total_html
-      FROM pages`).get();
+        SUM(CASE WHEN mime_type='application/pdf' THEN 1 ELSE 0 END) as total_pdfs,
+        SUM(CASE WHEN mime_type LIKE 'text/html%' THEN 1 ELSE 0 END) as total_html
+      FROM pages WHERE gone=0`).get();
     const classify = db.prepare(`
       SELECT SUM(CASE WHEN page_role='content' THEN 1 ELSE 0 END) as content,
         SUM(CASE WHEN page_role='index' THEN 1 ELSE 0 END) as index_pages,
