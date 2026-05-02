@@ -227,7 +227,7 @@ const summarizeTopPending = async (db, domain) => {
     FROM pdf_quality pq
     LEFT JOIN pdf_upgrade_queue q ON pq.url = q.url
     LEFT JOIN hosts h ON pq.url = h.hosted_url
-    WHERE pq.ai_summarized_at IS NULL AND pq.skip != 1
+    WHERE pq.ai_summarized_at IS NULL AND COALESCE(pq.skip, 0) != 1
     ORDER BY priority DESC, pq.composite_score DESC
     LIMIT ?`).all(SUMMARIZE_BATCH);
   if (!rows.length) return;
