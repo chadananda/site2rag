@@ -172,7 +172,7 @@ describe('runClassify host_page detection', () => {
     expect(hosted.length).toBeGreaterThan(0);
   });
 
-  it('reclassifies pages on every run (rules changes take effect)', () => {
+  it('rule overrides apply even to already-classified pages (no file I/O needed)', () => {
     // classify always re-runs so updated rules in websites.yaml apply immediately
     db = openDb(DOMAIN);
     const dir = join(testRoot, 'html2');

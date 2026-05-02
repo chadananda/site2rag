@@ -72,9 +72,7 @@ export const runClassify = (db, siteConfig) => {
   const pages = db.prepare("SELECT * FROM pages WHERE gone=0 AND mime_type LIKE 'text/html%' AND local_path IS NOT NULL").all();
   const stats = { classified: 0, host_pages: 0, rule_overrides: 0 };
   for (const page of pages) {
-    if (!existsSync(page.local_path)) continue;
-    const html = readFileSync(page.local_path, 'utf8');
-    // Rules-first: check classify_overrides
+    // Rules-first: check classify_overrides (cheap — no file I/O)
     const overrideRole = applyClassifyOverride(compiled, page.url);
     if (overrideRole) {
       db.prepare('UPDATE pages SET page_role=?, classify_method=? WHERE url=?').run(overrideRole, 'rules', page.url);
@@ -83,6 +81,10 @@ export const runClassify = (db, siteConfig) => {
       if (overrideRole === 'host_page') stats.host_pages++;
       continue;
     }
+    // Skip already-classified pages (heuristic result won't change without file changes)
+    if (page.page_role && page.classify_method === 'heuristic') continue;
+    if (!existsSync(page.local_path)) continue;
+    const html = readFileSync(page.local_path, 'utf8');
     // Compute features
     const $ = cheerio.load(html);
     const title = $('title').text().trim() || $('h1').first().text().trim() || '';
