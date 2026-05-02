@@ -15,7 +15,7 @@
     "postinstall": "node bin/setup.js",
     "build:css": "echo '@import \"tailwindcss\";' > public/tw-input.css && node_modules/.bin/tailwindcss -i public/tw-input.css -o public/tailwind.css --minify && rm public/tw-input.css",
     "deploy:ui": "node scripts/deploy-ui.js",
-    "deploy:backend": "ssh tower-nas 'cd /tank/site2rag/app && git pull && pm2 reload site2rag && pm2 reload pdf-report-server'",
+    "deploy:backend": "git push origin main && ssh tower-nas 'cd /tank/site2rag/app && git pull && pm2 reload site2rag && pm2 reload pdf-report-server'",
     "deploy:all": "npm run deploy:ui && npm run deploy:backend",
     "restart:spider": "ssh tower-nas 'pm2 reload site2rag'",
     "restart:api": "ssh tower-nas 'pm2 reload pdf-report-server'",
