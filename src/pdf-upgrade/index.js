@@ -13,8 +13,9 @@ import { rebuildPdf } from './rebuild.js';
 import { scorePdf, saveQualityScore } from './score.js';
 
 const TICK_INTERVAL_MS = 60 * 1000; // 1 minute between ticks
-const SUMMARIZE_BATCH = 40; // Haiku summaries per tick (run concurrently)
-const SUMMARIZE_CONCURRENCY = 10; // parallel API calls for summarization
+const SUMMARIZE_INTERVAL_MS = 15 * 1000; // summarize every 15s independent of OCR
+const SUMMARIZE_BATCH = 100; // Haiku summaries per summarize run
+const SUMMARIZE_CONCURRENCY = 20; // parallel API calls for summarization
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const sha256file = (path) => sha256(readFileSync(path));
 
@@ -221,12 +222,13 @@ const summarizeTopPending = async (db, domain) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return;
   const rows = db.prepare(`
-    SELECT q.url, pq.pdf_title, pq.excerpt, h.hosted_title, h.host_url as source_url
-    FROM pdf_upgrade_queue q
-    JOIN pdf_quality pq ON q.url = pq.url
-    LEFT JOIN hosts h ON q.url = h.hosted_url
-    WHERE q.status = 'pending' AND pq.ai_summarized_at IS NULL
-    ORDER BY q.priority DESC
+    SELECT pq.url, pq.pdf_title, pq.excerpt, h.hosted_title, h.host_url as source_url,
+           COALESCE(q.priority, 0.5) as priority
+    FROM pdf_quality pq
+    LEFT JOIN pdf_upgrade_queue q ON pq.url = q.url
+    LEFT JOIN hosts h ON pq.url = h.hosted_url
+    WHERE pq.ai_summarized_at IS NULL AND pq.skip != 1
+    ORDER BY priority DESC, pq.composite_score DESC
     LIMIT ?`).all(SUMMARIZE_BATCH);
   if (!rows.length) return;
 
@@ -379,10 +381,9 @@ const tick = async () => {
     openDbs.push({ db: openDb(domain), domain });
   }
 
-  // Backfill + summarize + language detection run regardless of boss availability
+  // Backfill + language detection run regardless of boss availability
   for (const { db, domain } of openDbs) {
     await backfillHostsFromMirror(db, domain);
-    await summarizeTopPending(db, domain);
     await detectLanguageForImagePdfs(db, domain);
   }
 
@@ -426,4 +427,20 @@ const run = async () => {
   await tick();
   setTimeout(run, TICK_INTERVAL_MS);
 };
+
+// Independent summarization loop -- runs every 15s regardless of OCR state
+const summarizeLoop = async () => {
+  try {
+    const { sites } = loadConfig();
+    for (const site of sites) {
+      const domain = new URL(site.url).hostname;
+      const db = openDb(domain);
+      await summarizeTopPending(db, domain);
+      try { db.close(); } catch {}
+    }
+  } catch {}
+  setTimeout(summarizeLoop, SUMMARIZE_INTERVAL_MS);
+};
+
 run();
+setTimeout(summarizeLoop, 5000); // start after 5s so main tick runs first
