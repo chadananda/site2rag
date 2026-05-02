@@ -353,8 +353,8 @@ const processOne = async (db, domain, row, allDomains = [], ocrBackend = 'boss')
     const afterMetrics = await scorePdf(outputPath);
     const improvement = afterMetrics.composite_score - row.before_score;
 
-    db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
-      .run(new Date().toISOString(), outputPath, afterMetrics.composite_score, improvement, numPages, method, row.url);
+    db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, before_score=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
+      .run(new Date().toISOString(), outputPath, row.before_score || 0, afterMetrics.composite_score, improvement, numPages, method, row.url);
 
     // Update pdf_quality to reflect the upgraded document's actual metrics
     db.prepare(`UPDATE pdf_quality SET composite_score=?, has_text_layer=?, readable_pages_pct=?, avg_chars_per_page=?, word_quality_estimate=?, excerpt=? WHERE url=?`)

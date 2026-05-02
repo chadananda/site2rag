@@ -1,5 +1,5 @@
 // site2rag service worker — cache static assets, skip API, auto-reload on update
-const CACHE = 'site2rag-0.2.26';
+const CACHE = 'site2rag-0.2.27';
 const STATIC = ['/index.html', '/tailwind.css', '/viewer.html'];
 
 self.addEventListener('install', e => {

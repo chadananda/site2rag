@@ -371,11 +371,15 @@ if ('serviceWorker' in navigator) {
                   <template x-if="activeTab==='upgraded' && doc.status==='done'">
                     <div class="mt-1 mb-1 space-y-1.5">
                       <!-- Before → After scores -->
-                      <template x-if="doc.before_score!=null && doc.after_score!=null">
+                      <template x-if="doc.after_score!=null">
                         <div class="flex items-center gap-2 flex-wrap">
                           <span class="text-xs text-gray-400">score</span>
-                          <span class="score-pill" :class="scorePillCls(doc.before_score)" x-text="Math.round(doc.before_score*100)+'%'"></span>
-                          <span class="text-gray-400 text-xs">→</span>
+                          <template x-if="doc.before_score!=null">
+                            <span class="score-pill" :class="scorePillCls(doc.before_score)" x-text="Math.round(doc.before_score*100)+'%'"></span>
+                          </template>
+                          <template x-if="doc.before_score!=null">
+                            <span class="text-gray-400 text-xs">→</span>
+                          </template>
                           <span class="score-pill bg-green-100 text-green-800 font-bold" x-text="Math.round(doc.after_score*100)+'%'"></span>
                           <span class="text-xs font-bold text-green-600 mono" x-text="doc.score_improvement ? '(+'+Math.round(doc.score_improvement*100)+' pts)' : ''"></span>
                           <template x-if="doc.pages_processed">
@@ -529,10 +533,14 @@ if ('serviceWorker' in navigator) {
                 </div>
               </template>
               <div x-show="effortEstimate(expandedDoc)" class="text-amber-600 font-medium" x-text="effortEstimate(expandedDoc)"></div>
-              <template x-if="expandedDoc.before_score!=null && expandedDoc.after_score!=null">
+              <template x-if="expandedDoc.after_score!=null">
                 <div class="flex items-center gap-1.5">
-                  <span class="score-pill" :class="scorePillCls(expandedDoc.before_score)" x-text="Math.round(expandedDoc.before_score*100)+'%'"></span>
-                  <span class="text-gray-400">→</span>
+                  <template x-if="expandedDoc.before_score!=null">
+                    <span class="score-pill" :class="scorePillCls(expandedDoc.before_score)" x-text="Math.round(expandedDoc.before_score*100)+'%'"></span>
+                  </template>
+                  <template x-if="expandedDoc.before_score!=null">
+                    <span class="text-gray-400">→</span>
+                  </template>
                   <span class="score-pill bg-green-100 text-green-800" x-text="Math.round(expandedDoc.after_score*100)+'%'"></span>
                   <span class="text-green-700 font-bold mono text-xs" x-text="expandedDoc.score_improvement ? '+'+Math.round(expandedDoc.score_improvement*100)+'pts' : ''"></span>
                 </div>
