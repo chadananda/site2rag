@@ -102,7 +102,6 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   const seedUrl = siteConfig.url;
   const ua = siteConfig.user_agent || 'site2rag/1.0';
   const maxDepth = siteConfig.max_depth ?? 8;
-  const timeout = (siteConfig.timeout_seconds ?? 1800) * 1000;
   const requestDelay = siteConfig.request_delay_ms ?? 0;
   const compiled = compileRules(siteConfig.rules);
   const seedHost = new URL(seedUrl).hostname;
@@ -156,54 +155,41 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   const stats = { checked: 0, new_pages: 0, changed: 0, gone: 0 };
   const countPages = db.prepare('SELECT COUNT(*) as n FROM pages WHERE gone=0');
   const upsertMeta = db.prepare('INSERT OR REPLACE INTO site_meta (key, value) VALUES (?, ?)');
-  const started = Date.now();
-  while ((discoverQueue.length > 0 || recheckQueue.length > 0) && (Date.now() - started) < timeout) {
-    const { url, depth, fromSitemap } = discoverQueue.length > 0 ? discoverQueue.shift() : recheckQueue.shift();
-    let canonical;
-    try { canonical = stripQueryParams(compiled, url); new URL(canonical); } catch {
-      console.warn(`[mirror] skipping malformed URL: ${url}`); continue;
-    }
-    if (visited.has(canonical)) continue;
-    visited.add(canonical);
-    if (depth > maxDepth) continue;
-    if (siteConfig.respect_robots_txt && !isRobotsAllowed(canonical)) continue;
-    const followOverride = applyFollowOverride(compiled, canonical);
-    if (followOverride === false) continue;
-    // Conditional GET
+  const concurrency = siteConfig.crawl_concurrency ?? 4;
+  const inFlight = new Set();
+
+  // Process one URL: fetch, save, extract links. Runs concurrently with other fetches.
+  const processOne = async (canonical, depth, fromSitemap) => {
     const existing = db.prepare('SELECT * FROM pages WHERE url=?').get(canonical);
     const headers = { 'User-Agent': ua };
     if (existing?.etag) headers['If-None-Match'] = existing.etag;
     if (existing?.last_modified) headers['If-Modified-Since'] = existing.last_modified;
-    if (requestDelay > 0) await new Promise(r => setTimeout(r, requestDelay));
     let res;
     try {
       res = await fetch(canonical, { headers, signal: AbortSignal.timeout(30000), redirect: 'follow' });
     } catch (err) {
       console.error(`[mirror] fetch error ${canonical}: ${err.message}`);
-      continue;
+      return;
     }
     stats.checked++;
-    // Write live progress every 10 pages so the UI shows frequent updates
-    // visited.size reflects cumulative progress across PM2 restarts (not reset to 0)
     if (stats.checked % 10 === 0) {
       upsertMeta.run('mirror_progress', JSON.stringify({ checked: visited.size, total: countPages.get().n, new_pages: stats.new_pages, changed: stats.changed, started_at: runStartedAt }));
     }
     if (res.status === 404 || res.status === 410) {
       if (existing) db.prepare('UPDATE pages SET gone=1, gone_since=COALESCE(gone_since, ?) WHERE url=?').run(new Date().toISOString(), canonical);
-      continue;
+      return;
     }
     if (res.status === 304) {
       db.prepare('UPDATE pages SET last_seen_at=? WHERE url=?').run(new Date().toISOString(), canonical);
-      continue;
+      return;
     }
-    if (!res.ok) continue;
+    if (!res.ok) return;
     let buf;
     try {
       buf = Buffer.from(await res.arrayBuffer());
     } catch (bodyErr) {
-      // Connection dropped / reset while reading body (undici "terminated", ECONNRESET, etc.)
       console.warn(`[mirror] body read error ${canonical}: ${bodyErr.message}`);
-      continue;
+      return;
     }
     const contentHash = `sha256:${sha256(buf)}`;
     const mimeType = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
@@ -219,22 +205,20 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
         if (isNew) stats.new_pages++; else stats.changed++;
       } catch (writeErr) {
         if (writeErr.code === 'EEXIST') {
-          // A file exists where we need a directory: use a hash-named sibling instead
           const ext = extname(mirrorPath);
           const hash = createHash('sha256').update(canonical).digest('hex').slice(0, 12);
-          const dir = dirname(dirname(mirrorPath));
-          savedPath = join(dir, `${hash}${ext || '.html'}`);
+          savedPath = join(dirname(dirname(mirrorPath)), `${hash}${ext || '.html'}`);
           try {
             mkdirSync(dirname(savedPath), { recursive: true });
             writeFileSync(savedPath, buf);
             if (isNew) stats.new_pages++; else stats.changed++;
           } catch (e2) {
             console.warn(`[mirror] skipping ${canonical}: ${e2.message}`);
-            continue;
+            return;
           }
         } else {
           console.warn(`[mirror] skipping ${canonical}: ${writeErr.message}`);
-          continue;
+          return;
         }
       }
       if (mimeType === 'application/pdf') {
@@ -251,29 +235,42 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       }
     }
     upsertPage(db, {
-      url: canonical,
-      path_slug: pathSlug,
-      local_path: savedPath,
+      url: canonical, path_slug: pathSlug, local_path: savedPath,
       from_sitemap: fromSitemap ? 1 : 0,
-      etag: res.headers.get('etag'),
-      last_modified: res.headers.get('last-modified'),
-      content_hash: contentHash,
-      mime_type: mimeType,
-      status_code: res.status,
-      depth,
-      page_role: null,
-      word_count_clean: null
+      etag: res.headers.get('etag'), last_modified: res.headers.get('last-modified'),
+      content_hash: contentHash, mime_type: mimeType, status_code: res.status,
+      depth, page_role: null, word_count_clean: null
     });
-    // Extract links from HTML for crawl queue
     if (mimeType.includes('text/html') && depth < maxDepth) {
       const $ = cheerio.load(buf.toString('utf8'));
-      const links = extractLinks($, canonical);
-      for (const link of links) {
+      for (const link of extractLinks($, canonical)) {
         if (!visited.has(link) && inScope(link, siteConfig, seedHost)) {
           discoverQueue.push({ url: link, depth: depth + 1, fromSitemap: false });
         }
       }
     }
+  };
+
+  // Pump: dequeue URLs and fire concurrent fetches, rate-limited by requestDelay.
+  while (discoverQueue.length > 0 || recheckQueue.length > 0 || inFlight.size > 0) {
+    // Drain completed promises
+    if (inFlight.size >= concurrency || (discoverQueue.length === 0 && recheckQueue.length === 0)) {
+      await Promise.race(inFlight);
+      continue;
+    }
+    const { url, depth, fromSitemap } = discoverQueue.length > 0 ? discoverQueue.shift() : recheckQueue.shift();
+    let canonical;
+    try { canonical = stripQueryParams(compiled, url); new URL(canonical); } catch {
+      console.warn(`[mirror] skipping malformed URL: ${url}`); continue;
+    }
+    if (visited.has(canonical)) continue;
+    visited.add(canonical);
+    if (depth > maxDepth) continue;
+    if (siteConfig.respect_robots_txt && !isRobotsAllowed(canonical)) continue;
+    if (applyFollowOverride(compiled, canonical) === false) continue;
+    const p = processOne(canonical, depth, fromSitemap).finally(() => inFlight.delete(p));
+    inFlight.add(p);
+    if (requestDelay > 0) await new Promise(r => setTimeout(r, requestDelay));
   }
   const ranToCompletion = discoverQueue.length === 0 && recheckQueue.length === 0;
   if (ranToCompletion) {
