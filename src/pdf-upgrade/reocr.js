@@ -7,7 +7,7 @@ import { metaDir } from '../config.js';
 const LOCAL_LLM = process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:8000/v1';
 const LOCAL_LLM_MODEL = process.env.LOCAL_LLM_MODEL || 'llava';
 const TIMEOUT_MS = 120_000;
-const PAGE_DELAY_MS = 500;
+const PAGE_CONCURRENCY = 8; // parallel page OCR calls per document
 // Claude Haiku for OCR fallback — cheap vision model, good at text transcription
 const CLAUDE_OCR_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -176,13 +176,14 @@ export const identifyPage = async (pdfPath, backend = 'boss') => {
 export const reocrDocument = async (pdfPath, domain, docHash, numPages, onProgress, backend = 'boss') => {
   const cacheDir = join(metaDir(domain), 'reocr', docHash);
   mkdirSync(cacheDir, { recursive: true });
-  const results = [];
-  for (let i = 1; i <= numPages; i++) {
+  const results = new Array(numPages + 1); // 1-indexed
+
+  const processPage = async (i) => {
     const cacheFile = join(cacheDir, `page-${String(i).padStart(3, '0')}.json`);
     if (existsSync(cacheFile)) {
-      results.push(JSON.parse(readFileSync(cacheFile, 'utf8')));
+      results[i] = JSON.parse(readFileSync(cacheFile, 'utf8'));
       onProgress?.(i, numPages);
-      continue;
+      return;
     }
     const pngPath = rasterizePage(pdfPath, i, cacheDir);
     const { text_md, confidence } = backend === 'claude'
@@ -190,9 +191,14 @@ export const reocrDocument = async (pdfPath, domain, docHash, numPages, onProgre
       : await ocrPageViaBoss(pngPath);
     const entry = { pageNo: i, text_md, confidence };
     writeFileSync(cacheFile, JSON.stringify(entry), 'utf8');
-    results.push(entry);
+    results[i] = entry;
     onProgress?.(i, numPages);
-    if (i < numPages) await sleep(PAGE_DELAY_MS);
+  };
+
+  // Process pages in parallel batches
+  for (let i = 1; i <= numPages; i += PAGE_CONCURRENCY) {
+    const batch = Array.from({ length: Math.min(PAGE_CONCURRENCY, numPages - i + 1) }, (_, k) => i + k);
+    await Promise.all(batch.map(processPage));
   }
-  return results;
+  return results.slice(1).filter(Boolean); // remove index-0 gap
 };

@@ -16,6 +16,7 @@ const TICK_INTERVAL_MS = 60 * 1000; // 1 minute between ticks
 const SUMMARIZE_INTERVAL_MS = 15 * 1000; // summarize every 15s independent of OCR
 const SUMMARIZE_BATCH = 100; // Haiku summaries per summarize run
 const SUMMARIZE_CONCURRENCY = 20; // parallel API calls for summarization
+const OCR_DOC_CONCURRENCY = 4; // parallel documents processed simultaneously
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const sha256file = (path) => sha256(readFileSync(path));
 
@@ -396,24 +397,30 @@ const tick = async () => {
   }
   if (ocrBackend === 'claude') log('Boss unavailable, using Claude vision API for OCR');
 
-  let bestRow = null, bestDomain = null, bestDb = null;
+  // Collect top-priority pending items across all domains
+  const candidates = [];
   for (const { db, domain } of openDbs) {
-    const row = db.prepare(`
+    const rows = db.prepare(`
       SELECT q.*, pq.composite_score as before_score
       FROM pdf_upgrade_queue q
       LEFT JOIN pdf_quality pq ON q.url = pq.url
       WHERE q.status='pending'
       ORDER BY q.priority DESC
-      LIMIT 1
-    `).get();
-    if (row && (!bestRow || row.priority > bestRow.priority)) {
-      bestRow = row; bestDomain = domain; bestDb = db;
-    }
+      LIMIT ?
+    `).all(OCR_DOC_CONCURRENCY);
+    for (const row of rows) candidates.push({ db, domain, row });
   }
+  candidates.sort((a, b) => (b.row.priority || 0) - (a.row.priority || 0));
+  const batch = candidates.slice(0, OCR_DOC_CONCURRENCY);
 
-  if (bestRow && bestDb) {
+  if (batch.length) {
+    // Mark all as processing before launching to prevent re-selection
+    const now = new Date().toISOString();
+    for (const { db, row } of batch) {
+      db.prepare("UPDATE pdf_upgrade_queue SET status='processing', started_at=? WHERE url=?").run(now, row.url);
+    }
     const allDomains = openDbs.map(o => o.domain);
-    await processOne(bestDb, bestDomain, bestRow, allDomains, ocrBackend);
+    await Promise.all(batch.map(({ db, domain, row }) => processOne(db, domain, row, allDomains, ocrBackend)));
   } else {
     log('No pending items');
   }
