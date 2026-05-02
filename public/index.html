@@ -162,10 +162,10 @@ if ('serviceWorker' in navigator) {
               <!-- Muted red: needs upgrading — fills remainder so no gap -->
               <div class="seg-fill bg-red-300" :style="'width:'+upgradeSegPct(s,'needs')+'%'" :title="fmt((s.pending||0)+(s.failed||0)+(s.processing||0))+' need upgrade'"></div>
             </div>
-            <div class="flex gap-3 text-xs mt-1 flex-wrap">
-              <span x-show="s.already_ok" class="text-blue-400" x-text="fmt(s.already_ok)+' OK'"></span>
-              <span x-show="s.upgraded" class="text-green-600 font-medium" x-text="fmt(s.upgraded)+' upgraded'"></span>
-              <span x-show="(s.pending||0)+(s.failed||0)+(s.processing||0)" class="text-red-400 font-medium" x-text="fmt((s.pending||0)+(s.failed||0)+(s.processing||0))+' need upgrade'"></span>
+            <div class="flex justify-between text-xs mt-1">
+              <span class="text-blue-400" x-text="fmt(s.already_ok||0)+' OK'"></span>
+              <span class="text-green-600 font-medium" x-text="fmt(s.upgraded||0)+' upgraded'"></span>
+              <span class="text-red-400 font-medium" x-text="fmt((s.pending||0)+(s.failed||0)+(s.processing||0))+' need upgrade'"></span>
             </div>
           </div>
         </button>
