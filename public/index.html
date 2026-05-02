@@ -127,19 +127,12 @@ if ('serviceWorker' in navigator) {
               <span class="mono text-gray-600" x-text="fmt(s.total_pages)+' pages · '+fmt(s.total_pdfs)+' PDFs'"></span>
             </div>
             <div class="prog-bar" style="height:8px">
-              <div class="prog-fill" :style="'width:'+siteProgressPct(s,'pages')+'%'"
-                   :class="s.last_run?.status==='running' ? 'bg-blue-400 processing-pulse' : 'bg-gray-500'"></div>
+              <div class="prog-fill" :style="'width:'+(s.mirror_progress ? Math.round(s.mirror_progress.checked/Math.max(s.mirror_progress.total,1)*100) : siteProgressPct(s,'pages'))+'%'"
+                   :class="s.mirror_progress ? 'bg-blue-400 processing-pulse' : 'bg-gray-500'"></div>
             </div>
-            <!-- Live crawl progress when mirror is active -->
-            <template x-if="s.mirror_progress">
-              <div class="mt-1">
-                <div class="prog-bar" style="height:4px">
-                  <div class="prog-fill bg-blue-300 processing-pulse" :style="'width:'+(s.mirror_progress.total>0 ? Math.round(s.mirror_progress.checked/s.mirror_progress.total*100) : 0)+'%'"></div>
-                </div>
-                <div class="text-xs text-blue-500 mt-0.5" x-text="'crawled: '+fmt(s.mirror_progress.checked)+' / '+fmt(s.mirror_progress.total)+' · '+fmt(s.mirror_progress.new_pages)+' new · '+fmt(s.mirror_progress.changed)+' changed'"></div>
-              </div>
-            </template>
-            <div x-show="!s.mirror_progress" class="text-xs text-gray-400 mt-0.5" x-text="s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started')"></div>
+            <div class="text-xs mt-0.5"
+                 :class="s.mirror_progress ? 'text-blue-500' : 'text-gray-400'"
+                 x-text="s.mirror_progress ? fmt(s.mirror_progress.checked)+' / '+fmt(s.mirror_progress.total)+' crawled · '+fmt(s.mirror_progress.new_pages)+' new · '+fmt(s.mirror_progress.changed)+' changed' : (s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started'))"></div>
           </div>
 
           <!-- Summarizing progress bar -->
