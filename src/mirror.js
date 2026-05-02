@@ -185,8 +185,9 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     }
     stats.checked++;
     // Write live progress every 10 pages so the UI shows frequent updates
+    // visited.size reflects cumulative progress across PM2 restarts (not reset to 0)
     if (stats.checked % 10 === 0) {
-      upsertMeta.run('mirror_progress', JSON.stringify({ checked: stats.checked, total: totalToCheck, new_pages: stats.new_pages, changed: stats.changed, started_at: runStartedAt }));
+      upsertMeta.run('mirror_progress', JSON.stringify({ checked: visited.size, total: totalToCheck, new_pages: stats.new_pages, changed: stats.changed, started_at: runStartedAt }));
     }
     if (res.status === 404 || res.status === 410) {
       if (existing) db.prepare('UPDATE pages SET gone=1, gone_since=COALESCE(gone_since, ?) WHERE url=?').run(new Date().toISOString(), canonical);

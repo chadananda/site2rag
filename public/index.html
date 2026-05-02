@@ -115,7 +115,7 @@ if ('serviceWorker' in navigator) {
             <div><span class="font-bold mono text-gray-700" x-text="fmt(s.total_pdfs)"></span><span class="text-gray-400 ml-1">PDFs</span></div>
             <div><span class="font-bold mono text-amber-600" x-text="fmt(s.pending)"></span><span class="text-gray-400 ml-1">queued</span></div>
             <template x-if="s.processing">
-              <div><span class="font-bold mono text-blue-500 processing-pulse inline-block" x-text="fmt(s.processing)"></span><span class="text-gray-400 ml-1">running</span></div>
+              <div><span class="font-bold mono text-blue-500 processing-pulse inline-block" x-text="fmt(s.processing)"></span><span class="text-gray-400 ml-1">processing</span></div>
             </template>
             <div><span class="font-bold mono text-green-600" x-text="fmt(s.upgraded)"></span><span class="text-gray-400 ml-1">upgraded</span></div>
           </div>
@@ -136,7 +136,7 @@ if ('serviceWorker' in navigator) {
                 <div class="prog-bar" style="height:4px">
                   <div class="prog-fill bg-blue-300 processing-pulse" :style="'width:'+(s.mirror_progress.total>0 ? Math.round(s.mirror_progress.checked/s.mirror_progress.total*100) : 0)+'%'"></div>
                 </div>
-                <div class="text-xs text-blue-500 mt-0.5" x-text="'checking: '+fmt(s.mirror_progress.checked)+' / '+fmt(s.mirror_progress.total)+' · '+fmt(s.mirror_progress.new_pages)+' new · '+fmt(s.mirror_progress.changed)+' changed'"></div>
+                <div class="text-xs text-blue-500 mt-0.5" x-text="'crawled: '+fmt(s.mirror_progress.checked)+' / '+fmt(s.mirror_progress.total)+' · '+fmt(s.mirror_progress.new_pages)+' new · '+fmt(s.mirror_progress.changed)+' changed'"></div>
               </div>
             </template>
             <div x-show="!s.mirror_progress" class="text-xs text-gray-400 mt-0.5" x-text="s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started')"></div>
@@ -815,7 +815,7 @@ function app() {
           const site = this.sites.find(s => s.domain === domain);
           if (!site) continue;
           const elapsed = (now - r.ts) / 1000;
-          const est = Math.min(site.scored, Math.round(r.value + r.rate * elapsed));
+          const est = Math.min(site.image_pdfs || 0, Math.round(r.value + r.rate * elapsed));
           if (est > (this.sumDisplay[domain] || 0)) {
             this.sumDisplay = { ...this.sumDisplay, [domain]: est };
           }
