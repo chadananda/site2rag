@@ -86,7 +86,8 @@ const serveStatic = (res, reqPath) => {
     return res.end(readFileSync(index));
   }
   const mime = STATIC_MIME[extname(filePath).toLowerCase()] || 'application/octet-stream';
-  res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'public, max-age=3600' });
+  const noCache = filePath.endsWith('sw.js') || filePath.endsWith('version.json');
+  res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': noCache ? 'no-cache, no-store' : 'public, max-age=3600' });
   res.end(readFileSync(filePath));
 };
 
