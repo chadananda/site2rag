@@ -15,14 +15,15 @@ const buildFrontmatter = (obj) => {
     .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join('\n');
   return `---\n${yaml}\n---\n\n`;
 };
-/** Append backlink to paragraph text per config. */
+/** Append backlink + data attributes to paragraph text per config. */
 const addBacklink = (text, sourceUrl, pageNo, paraNo, format, granularity) => {
   if (granularity === 'page') return text; // page-level headers added separately
-  const visibleLink = ` [↗ p.${pageNo}](${sourceUrl}#page=${pageNo})`;
-  const commentLink = `\n<!-- src: {"url":"${sourceUrl}","page":${pageNo},"para":${paraNo}} -->`;
+  const anchor = `${sourceUrl}#page=${pageNo}`;
+  const visibleLink = ` [↗ p.${pageNo}](${anchor})`;
+  const dataSpan = `\n<span data-pdf-page="${pageNo}" data-pdf-para="${paraNo}" data-pdf-src="${anchor}"></span>`;
   if (format === 'visible') return text + visibleLink;
-  if (format === 'comment') return text + commentLink;
-  return text + visibleLink + commentLink;
+  if (format === 'comment') return text + dataSpan;
+  return text + visibleLink + dataSpan;
 };
 /** Try to parse PDF with pdf-parse. Returns { text, numpages } or null. */
 const withTimeout = (promise, ms, label) =>
@@ -160,6 +161,60 @@ const exportDoc = async (db, siteConfig, page) => {
   writeFileSync(mdPath, fullMd, 'utf8');
   return { mdPath, totalPages, ocrUsed, ocrEnginesUsed, reconcilerUsed, agreementAvg, flaggedPages };
 };
+/**
+ * Export a text-layer PDF to MD immediately (no OCR). Returns true if exported.
+ * Used for inline export during mirror and after PDF upgrade completes.
+ * @param {object} db - Site SQLite db
+ * @param {object} siteConfig - Merged site config
+ * @param {object} page - Page row (url, local_path, content_hash, path_slug, last_seen_at)
+ */
+export const exportTextPdf = async (db, siteConfig, page) => {
+  const domain = siteConfig.domain;
+  const ocrCfg = siteConfig.ocr || {};
+  const docCfg = siteConfig.document || {};
+  const minCharsPerPage = ocrCfg.min_text_chars_per_page ?? 50;
+  const backlinkFormat = docCfg.backlink_format || 'both';
+  const backlinkGranularity = docCfg.backlink_granularity || 'paragraph';
+  if (!existsSync(page.local_path)) return false;
+  // Skip if already exported with this exact content hash
+  const existing = db.prepare('SELECT source_hash FROM exports WHERE url=?').get(page.url);
+  if (existing?.source_hash === page.content_hash) return false;
+  let buf;
+  try { buf = readFileSync(page.local_path); } catch { return false; }
+  const pdfData = await tryPdfParse(buf);
+  if (!pdfData || pdfData.text.length / (pdfData.numpages || 1) < minCharsPerPage) return false;
+  const totalPages = pdfData.numpages;
+  const pageTexts = pdfData.text.split(/\f/).filter(t => t.trim());
+  const pageResults = [];
+  for (let i = 0; i < totalPages; i++) pageResults.push({ pageNo: i + 1, text_md: pageTexts[i] || '' });
+  const docMd = assembleDocMd(pageResults, page.url, backlinkFormat, backlinkGranularity);
+  const hostRow = db.prepare('SELECT h.*, e.md_path FROM hosts h LEFT JOIN exports e ON h.host_url=e.url WHERE h.hosted_url=?').get(page.url);
+  const frontmatter = {
+    source_url: page.url, backup_url: page.backup_url || null, domain,
+    title: page.url.split('/').pop().replace(/\.\w+$/, ''),
+    fetched_at: page.last_seen_at, content_hash: page.content_hash,
+    mime_type: page.mime_type, mirror_path: page.local_path,
+    url_path: new URL(page.url).pathname, page_role: 'document',
+    ocr_used: false, pages: totalPages,
+    host_page_url: hostRow?.host_url || null, host_page_md: hostRow?.md_path || null,
+    backlink_format: backlinkFormat, backlink_granularity: backlinkGranularity
+  };
+  const outDir = mdDir(domain);
+  mkdirSync(outDir, { recursive: true });
+  const mdPath = join(outDir, `${page.path_slug}.md`);
+  const fullMd = buildFrontmatter(frontmatter) + docMd;
+  writeFileSync(mdPath, fullMd, 'utf8');
+  upsertExport(db, {
+    url: page.url, md_path: mdPath, source_hash: page.content_hash,
+    md_hash: `sha256:${sha256(Buffer.from(fullMd))}`, exported_at: new Date().toISOString(),
+    conversion_method: 'pdf-text', word_count: fullMd.split(/\s+/).filter(Boolean).length,
+    ocr_used: 0, ocr_engines: null, reconciler: null, pages: totalPages,
+    agreement_avg: null, flagged_pages: null, host_page_url: hostRow?.host_url || null,
+    status: 'ok', error: null
+  });
+  return true;
+};
+
 /**
  * Run document export stage for all PDF pages in site.
  * @param {object} db - Site SQLite db

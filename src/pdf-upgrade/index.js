@@ -299,7 +299,7 @@ const summarizeTopPending = async (db, domain) => {
 };
 
 /** Process one queued PDF document. allDomains used for cross-site dedup check. */
-const processOne = async (db, domain, row, allDomains = [], ocrBackend = 'boss') => {
+const processOne = async (db, domain, row, allDomains = [], ocrBackend = 'boss', siteConfig = null) => {
   const mirrorRoot = getMirrorRoot();
 
   // Look up the page to get local_path
@@ -337,6 +337,14 @@ const processOne = async (db, domain, row, allDomains = [], ocrBackend = 'boss')
           .run(dupMetrics.composite_score, dupMetrics.has_text_layer, dupMetrics.readable_pages_pct, dupMetrics.avg_chars_per_page, dupMetrics.word_quality_estimate, dupMetrics.excerpt, row.url);
       } catch {}
       log(`Dedup hit: ${row.url} → reused from another site (${contentHash.slice(0, 8)}…)`);
+      // Export the dedup'd upgraded PDF to MD
+      if (siteConfig) {
+        try {
+          const { exportTextPdf } = await import('../export-doc.js');
+          const upgradedPage = { ...page, local_path: outputPath, content_hash: sha256file(outputPath) };
+          await exportTextPdf(db, siteConfig, upgradedPage);
+        } catch (e) { log(`MD export failed (dedup): ${row.url}: ${e.message}`); }
+      }
       return;
     }
 
@@ -387,6 +395,14 @@ const processOne = async (db, domain, row, allDomains = [], ocrBackend = 'boss')
       .run(afterMetrics.composite_score, afterMetrics.has_text_layer, afterMetrics.readable_pages_pct, afterMetrics.avg_chars_per_page, afterMetrics.word_quality_estimate, afterMetrics.excerpt, row.url);
 
     log(`Done: ${row.url} score ${(row.before_score||0).toFixed(2)} → ${afterMetrics.composite_score.toFixed(2)} (+${improvement.toFixed(2)}) via ${method}`);
+    // Export upgraded PDF to MD immediately
+    if (siteConfig) {
+      try {
+        const { exportTextPdf } = await import('../export-doc.js');
+        const upgradedPage = { ...page, local_path: outputPath, content_hash: sha256file(outputPath) };
+        await exportTextPdf(db, siteConfig, upgradedPage);
+      } catch (e) { log(`MD export failed: ${row.url}: ${e.message}`); }
+    }
   } catch (err) {
     log(`Failed: ${row.url}: ${err.message}`);
     db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
@@ -431,7 +447,8 @@ const tick = async () => {
       ORDER BY q.priority DESC
       LIMIT ?
     `).all(OCR_DOC_CONCURRENCY);
-    for (const row of rows) candidates.push({ db, domain, row });
+    const sc = sites.find(s => new URL(s.url).hostname === domain) || null;
+    for (const row of rows) candidates.push({ db, domain, row, siteConfig: sc });
   }
   candidates.sort((a, b) => (b.row.priority || 0) - (a.row.priority || 0));
   const batch = candidates.slice(0, OCR_DOC_CONCURRENCY);
@@ -443,7 +460,7 @@ const tick = async () => {
       db.prepare("UPDATE pdf_upgrade_queue SET status='processing', started_at=? WHERE url=?").run(now, row.url);
     }
     const allDomains = openDbs.map(o => o.domain);
-    await Promise.all(batch.map(({ db, domain, row }) => processOne(db, domain, row, allDomains, ocrBackend)));
+    await Promise.all(batch.map(({ db, domain, row, siteConfig }) => processOne(db, domain, row, allDomains, ocrBackend, siteConfig)));
   } else {
     log('No pending items');
   }

@@ -8,6 +8,8 @@ import { mirrorDir } from './config.js';
 import { upsertPage, markGoneUrls } from './db.js';
 import { compileRules, applyFollowOverride, stripQueryParams } from './rules.js';
 import { scorePdf, saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
+import { exportHtmlPage } from './export-html.js';
+import { exportTextPdf } from './export-doc.js';
 // Document MIME types that get treated as downloadable documents
 const DOC_MIMES = new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.oasis.opendocument.text', 'application/epub+zip', 'text/plain']);
 const DOC_EXTS = new Set(['.pdf', '.doc', '.docx', '.odt', '.epub', '.txt']);
@@ -241,6 +243,21 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       content_hash: contentHash, mime_type: mimeType, status_code: res.status,
       depth, page_role: null, word_count_clean: null
     });
+    // Inline MD export for new/changed pages
+    if (isNew || isChanged) {
+      const pageRow = { url: canonical, path_slug: pathSlug, local_path: savedPath,
+        content_hash: contentHash, mime_type: mimeType, depth, from_sitemap: fromSitemap ? 1 : 0,
+        page_role: null, last_seen_at: new Date().toISOString(), backup_url: null,
+        backup_archived_at: null, archive_only: 0, last_changed_at: null };
+      if (mimeType.includes('text/html')) {
+        try { exportHtmlPage(db, siteConfig, pageRow, buf.toString('utf8')); }
+        catch (e) { console.warn(`[mirror] html export ${canonical}: ${e.message}`); }
+      } else if (mimeType === 'application/pdf') {
+        exportTextPdf(db, siteConfig, pageRow).catch(e =>
+          console.warn(`[mirror] pdf export ${canonical}: ${e.message}`)
+        );
+      }
+    }
     if (mimeType.includes('text/html') && depth < maxDepth) {
       const $ = cheerio.load(buf.toString('utf8'));
       for (const link of extractLinks($, canonical)) {

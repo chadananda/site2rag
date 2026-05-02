@@ -59,70 +59,91 @@ const convertHtml = (html, url, page, compiled, rewriteLinks, db, domain) => {
   return { md, method, titleOverride: titleEl };
 };
 /**
- * Run HTML export stage for a site.
+ * Export a single HTML page to MD. Called inline during mirror (page_role may be null)
+ * and by runExportHtml after classify (page_role set). source_hash=null marks preliminary
+ * exports so the batch stage re-exports with full metadata after classify.
  * @param {object} db - Site SQLite db
  * @param {object} siteConfig - Merged site config
- * @returns {object} Stats: { written, skipped, failed }
+ * @param {object} page - Page row
+ * @param {string} htmlStr - HTML content (avoids re-reading from disk)
  */
-export const runExportHtml = (db, siteConfig) => {
+export const exportHtmlPage = (db, siteConfig, page, htmlStr) => {
   const domain = siteConfig.domain;
   const compiled = compileRules(siteConfig.rules);
   const rewriteLinks = siteConfig.assets?.rewrite_links ?? true;
   const outDir = mdDir(domain);
   mkdirSync(outDir, { recursive: true });
+  try {
+    const meta = extractMetadata(htmlStr, page.url);
+    const { md, method, titleOverride } = convertHtml(htmlStr, page.url, page, compiled, rewriteLinks, db, domain);
+    const mdPath = join(outDir, `${page.path_slug}.md`);
+    let hostsArr = null;
+    if (page.page_role === 'host_page') {
+      const hosted = db.prepare('SELECT h.*, e.md_path FROM hosts h LEFT JOIN exports e ON h.hosted_url=e.url WHERE h.host_url=?').all(page.url);
+      hostsArr = hosted.map(h => ({ url: h.hosted_url, backup_url: h.backup_url || null, title: h.hosted_title, md_path: h.md_path || null }));
+    }
+    const frontmatter = {
+      source_url: page.url, canonical_url: meta.canonical_url || page.url,
+      backup_url: page.backup_url || null, backup_archived_at: page.backup_archived_at || null,
+      archive_only: page.archive_only === 1, domain,
+      title: titleOverride || meta.title, title_source: meta.title_source,
+      fetched_at: page.last_seen_at, modified_at: page.last_changed_at,
+      date_published: meta.date_published || null, date_modified: meta.date_modified || null,
+      content_hash: page.content_hash, mime_type: page.mime_type,
+      mirror_path: page.local_path, url_path: new URL(page.url).pathname,
+      crawl_depth: page.depth, from_sitemap: page.from_sitemap === 1,
+      language: meta.language || null, page_role: page.page_role,
+      conversion_method: method, ocr_used: false,
+      word_count: md.split(/\s+/).filter(Boolean).length,
+      authors: meta.authors?.length ? JSON.stringify(meta.authors) : null,
+      keywords: meta.keywords?.length ? JSON.stringify(meta.keywords) : null,
+      schema_org_type: meta.schema_org_type || null,
+      ...(hostsArr ? { hosts: JSON.stringify(hostsArr) } : {})
+    };
+    const fullMd = buildFrontmatter(frontmatter) + md;
+    writeFileSync(mdPath, fullMd, 'utf8');
+    // source_hash=null when page_role is unset (preliminary) so batch re-exports after classify
+    upsertExport(db, {
+      url: page.url, md_path: mdPath,
+      source_hash: page.page_role ? page.content_hash : null,
+      md_hash: `sha256:${sha256(fullMd)}`, exported_at: new Date().toISOString(),
+      conversion_method: method, word_count: frontmatter.word_count,
+      ocr_used: 0, ocr_engines: null, reconciler: null, pages: null,
+      agreement_avg: null, flagged_pages: null, host_page_url: null, status: 'ok', error: null
+    });
+    return true;
+  } catch (err) {
+    console.error(`[export-html] ${page.url}: ${err.message}`);
+    upsertExport(db, {
+      url: page.url, md_path: null, source_hash: page.content_hash, md_hash: null,
+      exported_at: new Date().toISOString(), conversion_method: null, word_count: null,
+      ocr_used: 0, ocr_engines: null, reconciler: null, pages: null,
+      agreement_avg: null, flagged_pages: null, host_page_url: null, status: 'failed', error: err.message
+    });
+    return false;
+  }
+};
+
+/**
+ * Run HTML export stage for a site. Exports all classified pages; re-exports
+ * preliminary exports (source_hash=null) with correct page_role after classify.
+ * @param {object} db - Site SQLite db
+ * @param {object} siteConfig - Merged site config
+ * @returns {object} Stats: { written, skipped, failed }
+ */
+export const runExportHtml = (db, siteConfig) => {
   const stats = { written: 0, skipped: 0, failed: 0 };
+  // Include pages with exp_hash=null (preliminary exports) even if content unchanged
   const pages = db.prepare("SELECT p.*, e.source_hash as exp_hash FROM pages p LEFT JOIN exports e ON p.url=e.url WHERE p.gone=0 AND p.mime_type LIKE 'text/html%' AND p.local_path IS NOT NULL AND p.page_role IS NOT NULL").all();
   for (const page of pages) {
     if (!existsSync(page.local_path)) { stats.failed++; continue; }
-    // Skip if source unchanged
     if (page.exp_hash && page.exp_hash === page.content_hash) { stats.skipped++; continue; }
     try {
       const html = readFileSync(page.local_path, 'utf8');
-      const meta = extractMetadata(html, page.url);
-      const { md, method, titleOverride } = convertHtml(html, page.url, page, compiled, rewriteLinks, db, domain);
-      const mdPath = join(outDir, `${page.path_slug}.md`);
-      // Build host-page hosts array
-      let hostsArr = null;
-      if (page.page_role === 'host_page') {
-        const hosted = db.prepare('SELECT h.*, e.md_path FROM hosts h LEFT JOIN exports e ON h.hosted_url=e.url WHERE h.host_url=?').all(page.url);
-        hostsArr = hosted.map(h => ({ url: h.hosted_url, backup_url: h.backup_url || null, title: h.hosted_title, md_path: h.md_path || null }));
-      }
-      const frontmatter = {
-        source_url: page.url,
-        canonical_url: meta.canonical_url || page.url,
-        backup_url: page.backup_url || null,
-        backup_archived_at: page.backup_archived_at || null,
-        archive_only: page.archive_only === 1,
-        domain,
-        title: titleOverride || meta.title,
-        title_source: meta.title_source,
-        fetched_at: page.last_seen_at,
-        modified_at: page.last_changed_at,
-        date_published: meta.date_published || null,
-        date_modified: meta.date_modified || null,
-        content_hash: page.content_hash,
-        mime_type: page.mime_type,
-        mirror_path: page.local_path,
-        url_path: new URL(page.url).pathname,
-        crawl_depth: page.depth,
-        from_sitemap: page.from_sitemap === 1,
-        language: meta.language || null,
-        page_role: page.page_role,
-        conversion_method: method,
-        ocr_used: false,
-        word_count: md.split(/\s+/).filter(Boolean).length,
-        authors: meta.authors?.length ? JSON.stringify(meta.authors) : null,
-        keywords: meta.keywords?.length ? JSON.stringify(meta.keywords) : null,
-        schema_org_type: meta.schema_org_type || null,
-        ...(hostsArr ? { hosts: JSON.stringify(hostsArr) } : {})
-      };
-      const fullMd = buildFrontmatter(frontmatter) + md;
-      writeFileSync(mdPath, fullMd, 'utf8');
-      upsertExport(db, { url: page.url, md_path: mdPath, source_hash: page.content_hash, md_hash: `sha256:${sha256(fullMd)}`, exported_at: new Date().toISOString(), conversion_method: method, word_count: frontmatter.word_count, ocr_used: 0, ocr_engines: null, reconciler: null, pages: null, agreement_avg: null, flagged_pages: null, host_page_url: null, status: 'ok', error: null });
-      stats.written++;
+      if (exportHtmlPage(db, siteConfig, page, html)) stats.written++;
+      else stats.failed++;
     } catch (err) {
       console.error(`[export-html] ${page.url}: ${err.message}`);
-      upsertExport(db, { url: page.url, md_path: null, source_hash: page.content_hash, md_hash: null, exported_at: new Date().toISOString(), conversion_method: null, word_count: null, ocr_used: 0, ocr_engines: null, reconciler: null, pages: null, agreement_avg: null, flagged_pages: null, host_page_url: null, status: 'failed', error: err.message });
       stats.failed++;
     }
   }
