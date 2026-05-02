@@ -127,12 +127,12 @@ if ('serviceWorker' in navigator) {
               <span class="mono text-gray-600" x-text="fmt(s.total_pages)+' pages · '+fmt(s.total_pdfs)+' PDFs'"></span>
             </div>
             <div class="prog-bar" style="height:8px">
-              <div class="prog-fill" :style="'width:'+(s.mirror_progress ? Math.round(s.mirror_progress.checked/Math.max(s.mirror_progress.total,1)*100) : siteProgressPct(s,'pages'))+'%'"
+              <div class="prog-fill" :style="'width:'+(s.mirror_progress ? Math.round(s.mirror_progress.checked/Math.max(s.total_pages,1)*100) : siteProgressPct(s,'pages'))+'%'"
                    :class="s.mirror_progress ? 'bg-blue-400 processing-pulse' : 'bg-gray-500'"></div>
             </div>
             <div class="text-xs mt-0.5"
                  :class="s.mirror_progress ? 'text-blue-500' : 'text-gray-400'"
-                 x-text="s.mirror_progress ? fmt(s.mirror_progress.checked)+' / '+fmt(s.mirror_progress.total)+' crawled · '+fmt(s.mirror_progress.new_pages)+' new · '+fmt(s.mirror_progress.changed)+' changed' : (s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started'))"></div>
+                 x-text="s.mirror_progress ? fmt(s.mirror_progress.checked)+' / '+fmt(s.total_pages)+' crawled · '+fmt(s.mirror_progress.new_pages)+' new · '+fmt(s.mirror_progress.changed)+' changed' : (s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started'))"></div>
           </div>
 
           <!-- Summarizing progress bar -->
