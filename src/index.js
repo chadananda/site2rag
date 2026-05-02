@@ -123,12 +123,14 @@ const runSite = async (siteConfig) => {
   db.close();
   console.log(`[site2rag] finished site: ${domain} (${runStats.status})`);
 };
-/** Main tick -- runs all due sites sequentially. */
+const runningDomains = new Set();
+/** Main tick -- runs all due sites sequentially. Skips domains already running. */
 const tick = async () => {
   let config;
   try { config = loadConfig(); } catch (err) { console.error(`[site2rag] config load failed: ${err.message}`); return; }
   const enabledSites = config.sites.filter(s => s.enabled !== false);
   for (const site of enabledSites) {
+    if (runningDomains.has(site.domain)) { console.log(`[site2rag] ${site.domain} already running, skipping tick`); continue; }
     let db;
     try {
       mkdirSync(metaDir(site.domain), { recursive: true });
@@ -137,7 +139,8 @@ const tick = async () => {
       db.close();
       if (!due) { console.log(`[site2rag] ${site.domain} not due, skipping`); continue; }
     } catch { continue; }
-    await runSite(site);
+    runningDomains.add(site.domain);
+    runSite(site).catch(err => console.error(`[site2rag] unhandled error for ${site.domain}: ${err.message}`)).finally(() => runningDomains.delete(site.domain));
   }
 };
 // Startup

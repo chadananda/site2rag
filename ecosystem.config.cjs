@@ -57,7 +57,7 @@ module.exports = {
       },
       autorestart: true,
       watch: false,
-      max_memory_restart: '128M',
+      max_memory_restart: '512M',
       out_file: '../logs/report-server.out.log',
       error_file: '../logs/report-server.err.log',
       merge_logs: true
