@@ -216,7 +216,9 @@ const siteSummary = (domain, siteUrl) => {
         SUM(CASE WHEN u.url IS NULL AND q.skip=0 AND q.composite_score >= 0.7 THEN 1 ELSE 0 END) as already_ok,
         SUM(CASE WHEN q.summary_tier='haiku' THEN 1 ELSE 0 END) as summarized_haiku,
         SUM(CASE WHEN q.ai_summary IS NOT NULL THEN 1 ELSE 0 END) as summarized_any
-      FROM pdf_quality q LEFT JOIN pdf_upgrade_queue u ON q.url=u.url`).get();
+      FROM pdf_quality q
+      LEFT JOIN pdf_upgrade_queue u ON q.url=u.url
+      JOIN pages p ON q.url=p.url AND p.gone=0`).get();
     const exp = db.prepare(`
       SELECT SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) as ok,
         SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed
