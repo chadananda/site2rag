@@ -12,8 +12,9 @@ import { identifyDocument } from './identify.js';
 import { rebuildPdf } from './rebuild.js';
 import { scorePdf, saveQualityScore } from './score.js';
 
-const TICK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes between docs
-const SUMMARIZE_BATCH = 10; // Haiku summaries to generate per tick
+const TICK_INTERVAL_MS = 60 * 1000; // 1 minute between ticks
+const SUMMARIZE_BATCH = 40; // Haiku summaries per tick (run concurrently)
+const SUMMARIZE_CONCURRENCY = 10; // parallel API calls for summarization
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const sha256file = (path) => sha256(readFileSync(path));
 
@@ -231,14 +232,15 @@ const summarizeTopPending = async (db, domain) => {
 
   const client = new Anthropic({ apiKey });
   let done = 0;
-  for (const row of rows) {
+
+  const summarizeOne = async (row) => {
     try {
       const title = row.hosted_title || row.pdf_title || null;
       const slug = row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
       const displayTitle = title || (slug.length > 3 && !/^\d+$/.test(slug.trim()) ? slug : null);
       if (!displayTitle && !row.excerpt && !row.source_url) {
         db.prepare('UPDATE pdf_quality SET ai_summarized_at=? WHERE url=?').run(new Date().toISOString(), row.url);
-        done++; continue;
+        done++; return;
       }
       const prompt = `Metadata for a PDF document:\n${[
         displayTitle && `Title: ${displayTitle}`,
@@ -261,6 +263,11 @@ const summarizeTopPending = async (db, domain) => {
     } catch (e) {
       log(`summarize failed: ${row.url}: ${e.message}`);
     }
+  };
+
+  // Run in parallel batches of SUMMARIZE_CONCURRENCY
+  for (let i = 0; i < rows.length; i += SUMMARIZE_CONCURRENCY) {
+    await Promise.all(rows.slice(i, i + SUMMARIZE_CONCURRENCY).map(summarizeOne));
   }
   if (done) log(`Summarized ${done} pending docs via Haiku`);
 };

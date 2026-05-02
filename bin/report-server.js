@@ -314,7 +314,9 @@ const siteDocs = (domain, params) => {
       ? (orderMap[sort] || 'COALESCE(u.score_improvement, 0) DESC')
       : tab === 'adequate'
         ? (orderMap[sort] || orderMap.score_desc)
-        : (orderMap[sort] || orderMap.score_asc);
+        : (sort && orderMap[sort])
+          ? `CASE WHEN u.status='processing' THEN 0 ELSE 1 END ASC, ${orderMap[sort]}`
+          : `CASE WHEN u.status='processing' THEN 0 ELSE 1 END ASC, ${orderMap.score_asc}`;
     const where = wheres.join(' AND ');
 
     const total = db.prepare(`SELECT COUNT(*) as n FROM pages p
