@@ -131,8 +131,9 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       visited.add(url);
     }
   }
-  // Build queue: sitemap priority URLs first, then seed URL
-  const toVisit = [
+  // discoverQueue: seed + sitemap + newly found links (drained first)
+  // recheckQueue: stale existing pages (only processed after discoverQueue is empty)
+  const discoverQueue = [
     ...priorityQueue.filter(u => inScope(u, siteConfig, seedHost)).map(u => ({ url: u, depth: 0, fromSitemap: true })),
     { url: seedUrl, depth: 0, fromSitemap: false }
   ];
@@ -144,18 +145,19 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   const lastComplete = db.prepare('SELECT value FROM site_meta WHERE key=?').get(COMPLETE_KEY)?.value;
   const staleCutoff = isResume ? runStartedAt : (lastComplete ?? runStartedAt);
   const existingPages = db.prepare('SELECT url, depth FROM pages WHERE gone=0 AND last_seen_at < ?').all(staleCutoff);
+  const recheckQueue = [];
   for (const p of existingPages) {
     if (!priorityQueue.includes(p.url) && inScope(p.url, siteConfig, seedHost)) {
-      toVisit.push({ url: p.url, depth: p.depth || 0, fromSitemap: false });
+      recheckQueue.push({ url: p.url, depth: p.depth || 0, fromSitemap: false });
     }
   }
   const stats = { checked: 0, new_pages: 0, changed: 0, gone: 0 };
-  // Use live page count as total estimate — toVisit grows as links are discovered
-  const totalToCheck = db.prepare('SELECT COUNT(*) as n FROM pages WHERE gone=0').get().n || toVisit.length;
+  // Use live page count as total estimate — discoverQueue grows as links are discovered
+  const totalToCheck = db.prepare('SELECT COUNT(*) as n FROM pages WHERE gone=0').get().n || (discoverQueue.length + recheckQueue.length);
   const upsertMeta = db.prepare('INSERT OR REPLACE INTO site_meta (key, value) VALUES (?, ?)');
   const started = Date.now();
-  while (toVisit.length > 0 && (Date.now() - started) < timeout) {
-    const { url, depth, fromSitemap } = toVisit.shift();
+  while ((discoverQueue.length > 0 || recheckQueue.length > 0) && (Date.now() - started) < timeout) {
+    const { url, depth, fromSitemap } = discoverQueue.length > 0 ? discoverQueue.shift() : recheckQueue.shift();
     let canonical;
     try { canonical = stripQueryParams(compiled, url); new URL(canonical); } catch {
       console.warn(`[mirror] skipping malformed URL: ${url}`); continue;
@@ -266,12 +268,12 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       const links = extractLinks($, canonical);
       for (const link of links) {
         if (!visited.has(link) && inScope(link, siteConfig, seedHost)) {
-          toVisit.push({ url: link, depth: depth + 1, fromSitemap: false });
+          discoverQueue.push({ url: link, depth: depth + 1, fromSitemap: false });
         }
       }
     }
   }
-  const ranToCompletion = toVisit.length === 0;
+  const ranToCompletion = discoverQueue.length === 0 && recheckQueue.length === 0;
   if (ranToCompletion) {
     // Safe gone detection: only mark pages gone if they haven't been seen in 3× the check interval.
     // Per-URL 404/410 already marks individual dead pages. This catches pages that silently
