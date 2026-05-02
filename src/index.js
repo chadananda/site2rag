@@ -69,9 +69,15 @@ const writeStatusYaml = (siteConfig, db, runStats, runId) => {
   const statusPath = join(metaDir(domain), 'status.yaml');
   writeFileSync(statusPath, yaml.dump(status, { lineWidth: 120 }));
 };
-/** Run full pipeline for one site. */
+/** Run full pipeline for one site — hard-killed after 4h to prevent infinite hangs. */
 const runSite = async (siteConfig) => {
   const domain = siteConfig.domain;
+  const HARD_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours absolute max
+  const hardKill = setTimeout(() => {
+    console.error(`[site2rag] ${domain} exceeded 4h hard timeout, forcing exit`);
+    process.exit(1); // PM2 will restart
+  }, HARD_TIMEOUT_MS);
+  hardKill.unref(); // don't keep process alive just for this timer
   console.log(`[site2rag] starting site: ${domain}`);
   mkdirSync(metaDir(domain), { recursive: true });
   const db = openDb(domain);
@@ -101,7 +107,10 @@ const runSite = async (siteConfig) => {
     // Export
     if (siteConfig.export_md) {
       runStats.exportHtml = runExportHtml(db, siteConfig);
-      runStats.exportDoc = await runExportDoc(db, siteConfig);
+      runStats.exportDoc = await Promise.race([
+        runExportDoc(db, siteConfig),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('exportDoc timeout after 30min')), 30 * 60 * 1000))
+      ]);
     }
     // Archive
     if (siteConfig.archive?.enabled) {
@@ -119,6 +128,7 @@ const runSite = async (siteConfig) => {
     console.error(`[site2rag] site ${domain} failed: ${err.message}`);
     finishRun(db, runId, 'failed', { message: err.message });
   }
+  clearTimeout(hardKill);
   writeStatusYaml(siteConfig, db, runStats, runId);
   db.close();
   console.log(`[site2rag] finished site: ${domain} (${runStats.status})`);

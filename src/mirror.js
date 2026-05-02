@@ -208,7 +208,10 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       }
       if (mimeType === 'application/pdf') {
         try {
-          const metrics = await scorePdf(savedPath);
+          const metrics = await Promise.race([
+            scorePdf(savedPath),
+            new Promise((_, rej) => setTimeout(() => rej(new Error('score timeout')), 30000))
+          ]);
           saveQualityScore(db, canonical, contentHash, metrics);
           maybeQueue(db, canonical, contentHash, metrics.composite_score, 0.7, metrics.language);
         } catch (scoreErr) {
