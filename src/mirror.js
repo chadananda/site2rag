@@ -145,6 +145,8 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     }
   }
   const stats = { checked: 0, new_pages: 0, changed: 0, gone: 0 };
+  const totalToCheck = toVisit.length;
+  const upsertMeta = db.prepare('INSERT OR REPLACE INTO site_meta (key, value) VALUES (?, ?)');
   const started = Date.now();
   while (toVisit.length > 0 && (Date.now() - started) < timeout) {
     const { url, depth, fromSitemap } = toVisit.shift();
@@ -171,6 +173,10 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       continue;
     }
     stats.checked++;
+    // Write live progress every 100 pages so the API can show crawl status
+    if (stats.checked % 100 === 0) {
+      upsertMeta.run('mirror_progress', JSON.stringify({ checked: stats.checked, total: totalToCheck, new_pages: stats.new_pages, changed: stats.changed, started_at: runStartedAt }));
+    }
     if (res.status === 404 || res.status === 410) {
       if (existing) db.prepare('UPDATE pages SET gone=1, gone_since=COALESCE(gone_since, ?) WHERE url=?').run(new Date().toISOString(), canonical);
       continue;
@@ -260,7 +266,8 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   }
   // Mark pages not seen this run as gone
   stats.gone = markGoneUrls(db, runStartedAt);
-  // Clear resume checkpoint — run completed normally
+  // Clear resume checkpoint and progress — run completed normally
   db.prepare('DELETE FROM site_meta WHERE key=?').run(RESUME_KEY);
+  db.prepare('DELETE FROM site_meta WHERE key=?').run('mirror_progress');
   return stats;
 };

@@ -232,6 +232,8 @@ const siteSummary = (domain, siteUrl) => {
     const avgSec = doneDocs.length
       ? doneDocs.reduce((a, d) => a + (new Date(d.finished_at) - new Date(d.started_at)) / 1000, 0) / doneDocs.length
       : 300;
+    const mirrorProgressRaw = db.prepare(`SELECT value FROM site_meta WHERE key='mirror_progress'`).get()?.value;
+    const mirror_progress = mirrorProgressRaw ? JSON.parse(mirrorProgressRaw) : null;
     return {
       domain, url: siteUrl, available: true,
       total_pages: totals.total_pages || 0, total_html: totals.total_html || 0, total_pdfs: totals.total_pdfs || 0,
@@ -245,7 +247,8 @@ const siteSummary = (domain, siteUrl) => {
       eta_seconds: (pdf.pending || 0) * avgSec,
       md_exported: exp.ok || 0, md_failed: exp.failed || 0,
       last_run: lastRun || null,
-      recent_fails: recentFails
+      recent_fails: recentFails,
+      mirror_progress
     };
   } finally { db.close(); }
 };

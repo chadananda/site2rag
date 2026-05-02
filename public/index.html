@@ -130,7 +130,16 @@ if ('serviceWorker' in navigator) {
               <div class="prog-fill" :style="'width:'+siteProgressPct(s,'pages')+'%'"
                    :class="s.last_run?.status==='running' ? 'bg-blue-400 processing-pulse' : 'bg-gray-500'"></div>
             </div>
-            <div class="text-xs text-gray-400 mt-0.5" x-text="s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started')"></div>
+            <!-- Live crawl progress when mirror is active -->
+            <template x-if="s.mirror_progress">
+              <div class="mt-1">
+                <div class="prog-bar" style="height:4px">
+                  <div class="prog-fill bg-blue-300 processing-pulse" :style="'width:'+(s.mirror_progress.total>0 ? Math.round(s.mirror_progress.checked/s.mirror_progress.total*100) : 0)+'%'"></div>
+                </div>
+                <div class="text-xs text-blue-500 mt-0.5" x-text="'checking: '+fmt(s.mirror_progress.checked)+' / '+fmt(s.mirror_progress.total)+' · '+fmt(s.mirror_progress.new_pages)+' new · '+fmt(s.mirror_progress.changed)+' changed'"></div>
+              </div>
+            </template>
+            <div x-show="!s.mirror_progress" class="text-xs text-gray-400 mt-0.5" x-text="s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started')"></div>
           </div>
 
           <!-- Summarizing progress bar -->
