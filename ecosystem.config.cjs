@@ -1,9 +1,9 @@
 const path = require('path');
 const fs = require('fs');
-const SITE2RAG_ROOT = process.env.SITE2RAG_ROOT || path.resolve(__dirname, '..');
+const SITE2RAG_ROOT = process.env.SITE2RAG_ROOT || __dirname;
 // Load .env from SITE2RAG_ROOT so PM2 picks up secrets without shell sourcing
 const envVars = {};
-const envFile = path.join(__dirname, '.env');
+const envFile = path.join(SITE2RAG_ROOT, '.env');
 if (fs.existsSync(envFile)) {
   fs.readFileSync(envFile, 'utf8').split('\n').forEach(line => {
     const m = line.match(/^([A-Z_]+)=(.*)$/);
