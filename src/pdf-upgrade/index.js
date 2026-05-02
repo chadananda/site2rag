@@ -222,13 +222,17 @@ const detectLanguageForImagePdfs = async (db, domain) => {
 const summarizeTopPending = async (db, domain) => {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) return;
+  const { detectLanguage } = await import('./score.js');
+  const NON_ENGLISH = new Set(['arabic','persian','hebrew','japanese','chinese']);
   const rows = db.prepare(`
-    SELECT pq.url, pq.pdf_title, pq.excerpt, h.hosted_title, h.host_url as source_url,
+    SELECT pq.url, pq.pdf_title, pq.excerpt, pq.ai_language,
+           h.hosted_title, h.host_url as source_url,
            COALESCE(q.priority, 0.5) as priority
     FROM pdf_quality pq
     LEFT JOIN pdf_upgrade_queue q ON pq.url = q.url
     LEFT JOIN hosts h ON pq.url = h.hosted_url
     WHERE pq.ai_summarized_at IS NULL AND COALESCE(pq.skip, 0) != 1
+      AND COALESCE(pq.ai_language, 'unknown') NOT IN ('arabic','persian','hebrew','japanese','chinese')
     ORDER BY priority DESC, pq.composite_score DESC
     LIMIT ?`).all(SUMMARIZE_BATCH);
   if (!rows.length) return;
@@ -239,6 +243,18 @@ const summarizeTopPending = async (db, domain) => {
   const summarizeOne = async (row) => {
     try {
       const title = row.hosted_title || row.pdf_title || null;
+      // Detect language from available text if not yet known — skip non-English
+      if (!row.ai_language || row.ai_language === 'unknown') {
+        const sample = [title, row.excerpt].filter(Boolean).join(' ');
+        const detected = detectLanguage(sample);
+        if (detected && detected !== 'unknown') {
+          db.prepare('UPDATE pdf_quality SET ai_language=? WHERE url=?').run(detected, row.url);
+          if (NON_ENGLISH.has(detected)) {
+            db.prepare('UPDATE pdf_quality SET ai_summarized_at=? WHERE url=?').run(new Date().toISOString(), row.url);
+            done++; return;
+          }
+        }
+      }
       const slug = row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
       const displayTitle = title || (slug.length > 3 && !/^\d+$/.test(slug.trim()) ? slug : null);
       if (!displayTitle && !row.excerpt && !row.source_url) {
