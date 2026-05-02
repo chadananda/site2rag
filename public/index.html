@@ -127,12 +127,12 @@ if ('serviceWorker' in navigator) {
               <span class="mono text-gray-600" x-text="fmt(s.total_pages)+' pages · '+fmt(s.total_pdfs)+' PDFs'"></span>
             </div>
             <div class="prog-bar" style="height:8px">
-              <div class="prog-fill" :style="'width:'+(s.mirror_progress ? Math.round(s.mirror_progress.checked/Math.max(s.total_pages,1)*100) : siteProgressPct(s,'pages'))+'%'"
+              <div class="prog-fill" :style="'width:'+(s.mirror_progress ? Math.round((crawlDisplay[s.domain]||s.mirror_progress.checked)/Math.max(s.total_pages,1)*100) : siteProgressPct(s,'pages'))+'%'"
                    :class="s.mirror_progress ? 'bg-blue-400 processing-pulse' : 'bg-gray-500'"></div>
             </div>
             <div class="text-xs mt-0.5"
                  :class="s.mirror_progress ? 'text-blue-500' : 'text-gray-400'"
-                 x-text="s.mirror_progress ? fmt(s.mirror_progress.checked)+' / '+fmt(s.total_pages)+' crawled · '+fmt(s.mirror_progress.new_pages)+' new · '+fmt(s.mirror_progress.changed)+' changed' : (s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started'))"></div>
+                 x-text="s.mirror_progress ? fmt(crawlDisplay[s.domain]||s.mirror_progress.checked)+' / '+fmt(s.total_pages)+' crawled · '+fmt(s.mirror_progress.new_pages)+' new · '+fmt(s.mirror_progress.changed)+' changed' : (s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started'))"></div>
           </div>
 
           <!-- Summarizing progress bar -->
@@ -701,6 +701,8 @@ function app() {
     loading: false, apiStatus: '', apiError: '', lastRefresh: '',
     sumDisplay: {},   // domain -> interpolated summarized_haiku for smooth bar
     _sumRates: {},    // domain -> { value, rate, ts } for interpolation
+    crawlDisplay: {}, // domain -> interpolated crawl checked count for smooth bar
+    _crawlRates: {},  // domain -> { value, rate, ts } for interpolation
     expandedDoc: null,
     modalPage: 1,
     activeTab: 'failed',
@@ -813,6 +815,15 @@ function app() {
             this.sumDisplay = { ...this.sumDisplay, [domain]: est };
           }
         }
+        for (const [domain, r] of Object.entries(this._crawlRates)) {
+          const site = this.sites.find(s => s.domain === domain);
+          if (!site?.mirror_progress) continue;
+          const elapsed = (now - r.ts) / 1000;
+          const est = Math.min(site.total_pages, Math.round(r.value + r.rate * elapsed));
+          if (est > (this.crawlDisplay[domain] || 0)) {
+            this.crawlDisplay = { ...this.crawlDisplay, [domain]: est };
+          }
+        }
       }, 500);
     },
 
@@ -823,7 +834,6 @@ function app() {
         const newVal = s.image_pdfs_summarized || 0;
         if (prev) {
           const dt = (now - prev.ts) / 1000;
-          // Exponential smoothing of rate: blend new observation with old rate
           const observed = dt > 0 ? (newVal - prev.value) / dt : 0;
           const rate = observed > 0 ? observed * 0.4 + prev.rate * 0.6 : prev.rate * 0.7;
           this._sumRates[s.domain] = { value: newVal, rate, ts: now };
@@ -834,13 +844,31 @@ function app() {
       }
     },
 
+    _updateCrawlRates(newSites) {
+      const now = Date.now();
+      for (const s of newSites) {
+        if (!s.mirror_progress) continue;
+        const prev = this._crawlRates[s.domain];
+        const newVal = s.mirror_progress.checked || 0;
+        if (prev) {
+          const dt = (now - prev.ts) / 1000;
+          const observed = dt > 0 ? (newVal - prev.value) / dt : 0;
+          const rate = observed > 0 ? observed * 0.4 + prev.rate * 0.6 : prev.rate * 0.7;
+          this._crawlRates[s.domain] = { value: newVal, rate, ts: now };
+        } else {
+          this._crawlRates[s.domain] = { value: newVal, rate: 0, ts: now };
+          this.crawlDisplay = { ...this.crawlDisplay, [s.domain]: newVal };
+        }
+      }
+    },
+
     async loadSites() {
       try {
         const res = await fetch(`${API_BASE}/api/sites`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         this.sites = data.sites || (Array.isArray(data) ? data : []);
-        this._updateSumRates(this.sites);
+        this._updateSumRates(this.sites); this._updateCrawlRates(this.sites);
         this.apiStatus = 'connected'; this.apiError = '';
         if (!this.activeSite && this.sites.length) await this.selectSite(this.sites[0]);
         else if (this.activeSite) {
@@ -852,7 +880,7 @@ function app() {
 
     async refresh() {
       await this.checkVersion();
-      const res = await fetch(`${API_BASE}/api/sites`).catch(() => null);
+      const res = await fetch(`${API_BASE}/api/sites`, { signal: AbortSignal.timeout(10000) }).catch(() => null);
       if (!res?.ok) return;
       const data = await res.json();
       this.sites = data.sites || (Array.isArray(data) ? data : []);
