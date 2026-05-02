@@ -132,7 +132,7 @@ if ('serviceWorker' in navigator) {
             </div>
             <div class="text-xs mt-0.5"
                  :class="s.mirror_progress ? 'text-blue-500' : 'text-gray-400'"
-                 x-text="s.mirror_progress ? fmt(crawlDisplay[s.domain]||s.mirror_progress.checked)+' / '+fmt(s.total_pages)+' crawled · '+fmt(s.mirror_progress.new_pages)+' new · '+fmt(s.mirror_progress.changed)+' changed' : (s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started'))"></div>
+                 x-text="s.mirror_progress ? fmt(crawlDisplay[s.domain]||s.mirror_progress.checked)+' / '+fmt(s.total_pages)+' crawled · '+fmt(s.mirror_progress.new_pages)+' new' : (s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started'))"></div>
           </div>
 
           <!-- Summarizing progress bar -->
