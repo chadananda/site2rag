@@ -127,12 +127,12 @@ if ('serviceWorker' in navigator) {
               <span class="mono text-gray-600" x-text="fmt(s.total_pages)+' pages · '+fmt(s.total_pdfs)+' PDFs'"></span>
             </div>
             <div class="prog-bar" style="height:8px">
-              <div class="prog-fill" :style="'width:'+(s.mirror_progress ? Math.round((crawlDisplay[s.domain]||s.mirror_progress.checked)/Math.max(s.total_pages,1)*100) : siteProgressPct(s,'pages'))+'%'"
+              <div class="prog-fill" :style="'width:'+(s.mirror_progress ? Math.round(crawlEst(s)/Math.max(s.total_pages,1)*100) : siteProgressPct(s,'pages'))+'%'"
                    :class="s.mirror_progress ? 'bg-blue-400 processing-pulse' : 'bg-gray-500'"></div>
             </div>
             <div class="text-xs mt-0.5"
                  :class="s.mirror_progress ? 'text-blue-500' : 'text-gray-400'"
-                 x-text="s.mirror_progress ? fmt(crawlDisplay[s.domain]||s.mirror_progress.checked)+' crawled · '+fmt(Math.max(0,s.total_pages-(crawlDisplay[s.domain]||s.mirror_progress.checked)))+' remaining' : (s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started'))"></div>
+                 x-text="s.mirror_progress ? fmt(crawlEst(s))+' crawled · '+fmt(Math.max(0,s.total_pages-crawlEst(s)))+' remaining' : (s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started'))"></div>
           </div>
 
           <!-- Summarizing progress bar -->
@@ -701,8 +701,8 @@ function app() {
     loading: false, apiStatus: '', apiError: '', lastRefresh: '',
     sumDisplay: {},   // domain -> interpolated summarized_haiku for smooth bar
     _sumRates: {},    // domain -> { value, rate, ts } for interpolation
-    crawlDisplay: {}, // domain -> interpolated crawl checked count for smooth bar
     _crawlRates: {},  // domain -> { value, rate, ts } for interpolation
+    _tick: 0,         // increments every 500ms to force template re-evaluation
     expandedDoc: null,
     modalPage: 1,
     activeTab: 'failed',
@@ -815,15 +815,7 @@ function app() {
             this.sumDisplay = { ...this.sumDisplay, [domain]: est };
           }
         }
-        for (const [domain, r] of Object.entries(this._crawlRates)) {
-          const site = this.sites.find(s => s.domain === domain);
-          if (!site?.mirror_progress) continue;
-          const elapsed = (now - r.ts) / 1000;
-          const est = Math.min(site.total_pages, Math.round(r.value + r.rate * elapsed));
-          if (est > (this.crawlDisplay[domain] || 0)) {
-            this.crawlDisplay = { ...this.crawlDisplay, [domain]: est };
-          }
-        }
+        this._tick++;
       }, 500);
     },
 
@@ -850,18 +842,23 @@ function app() {
         if (!s.mirror_progress) continue;
         const prev = this._crawlRates[s.domain];
         const newVal = s.mirror_progress.checked || 0;
-        let rate = 0;
-        if (prev && prev.value < newVal) {
+        let rate = prev?.rate || 0;
+        if (prev && newVal > prev.value) {
           const dt = (now - prev.ts) / 1000;
           const observed = dt > 0 ? (newVal - prev.value) / dt : 0;
-          rate = observed > 0 ? observed * 0.4 + (prev.rate || 0) * 0.6 : (prev.rate || 0) * 0.7;
+          if (observed > 0) rate = observed * 0.4 + rate * 0.6;
         }
         this._crawlRates[s.domain] = { value: newVal, rate, ts: now };
-        // Always advance crawlDisplay to at least the real API value
-        if (newVal > (this.crawlDisplay[s.domain] || 0)) {
-          this.crawlDisplay = { ...this.crawlDisplay, [s.domain]: newVal };
-        }
       }
+    },
+
+    crawlEst(s) {
+      if (!s.mirror_progress) return 0;
+      void this._tick; // reactive dependency — re-runs every 500ms
+      const r = this._crawlRates[s.domain];
+      if (!r) return s.mirror_progress.checked;
+      const elapsed = (Date.now() - r.ts) / 1000;
+      return Math.min(s.total_pages, Math.round(r.value + r.rate * elapsed));
     },
 
     async loadSites() {
