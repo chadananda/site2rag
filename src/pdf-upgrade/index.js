@@ -266,7 +266,7 @@ const summarizeTopPending = async (db, domain) => {
 };
 
 /** Process one queued PDF document. allDomains used for cross-site dedup check. */
-const processOne = async (db, domain, row, allDomains = []) => {
+const processOne = async (db, domain, row, allDomains = [], ocrBackend = 'boss') => {
   const mirrorRoot = getMirrorRoot();
 
   // Look up the page to get local_path
@@ -395,7 +395,7 @@ const tick = async () => {
 
   if (bestRow && bestDb) {
     const allDomains = openDbs.map(o => o.domain);
-    await processOne(bestDb, bestDomain, bestRow, allDomains);
+    await processOne(bestDb, bestDomain, bestRow, allDomains, ocrBackend);
   } else {
     log('No pending items');
   }
