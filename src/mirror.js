@@ -266,9 +266,12 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     }
   }
   const ranToCompletion = toVisit.length === 0;
-  // Only mark gone if crawl completed fully — partial runs (timeout/crash) must not destroy live pages
   if (ranToCompletion) {
-    stats.gone = markGoneUrls(db, runStartedAt);
+    // Safe gone detection: only mark pages gone if they haven't been seen in 3× the check interval.
+    // Per-URL 404/410 already marks individual dead pages. This catches pages that silently
+    // disappeared from the link graph over many cycles without ever returning 404.
+    const safeGoneCutoff = new Date(Date.now() - staleMs * 3).toISOString();
+    stats.gone = markGoneUrls(db, safeGoneCutoff);
     db.prepare('DELETE FROM site_meta WHERE key=?').run(RESUME_KEY);
     db.prepare('DELETE FROM site_meta WHERE key=?').run('mirror_progress');
   }

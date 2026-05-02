@@ -130,7 +130,8 @@ describe('mirror markGoneUrls: only on complete runs', () => {
   it('DOES mark pages gone when crawl completes fully', async () => {
     const db = openDb(DOMAIN);
     const ghostUrl = `${SEED}/ghost-page`;
-    const oldDate = new Date(Date.now() - 5 * 86400000).toISOString();
+    // Must be old enough to pass the 3× staleMs cutoff used by safe gone detection
+    const oldDate = new Date(Date.now() - 10 * 86400000).toISOString(); // 10 days ago
     db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone, last_seen_at, first_seen_at) VALUES (?,?,?,?,?,?,?)')
       .run(ghostUrl, 'ghost', null, 'text/html', 0, oldDate, oldDate);
 
