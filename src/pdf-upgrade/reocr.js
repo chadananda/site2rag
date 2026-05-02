@@ -1,6 +1,7 @@
 // Re-OCR via local AI (boss) or Claude vision fallback. Page-by-page OCR with caching.
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
-import { join } from 'path';
+import { join, basename } from 'path';
+import { execFileSync } from 'child_process';
 import { metaDir } from '../config.js';
 
 const LOCAL_LLM = process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:8000/v1';
@@ -84,27 +85,24 @@ const ocrPageViaClaude = async (pngPath) => {
   return { text_md, confidence: text_md.length > 20 ? 0.9 : 0.3 };
 };
 
-/** Build a NodeCanvasFactory for pdfjs-dist (required for server-side rendering). */
-const makeCanvasFactory = (createCanvas) => ({
-  create(width, height) { const canvas = createCanvas(width, height); return { canvas, context: canvas.getContext('2d') }; },
-  reset(pair, width, height) { pair.canvas.width = width; pair.canvas.height = height; },
-  destroy(pair) { pair.canvas.width = 0; pair.canvas.height = 0; },
-});
-
-/** Rasterize one page of a PDF to a temp PNG. Returns png path. */
-const rasterizePage = async (pdfBuf, pageNo, outDir) => {
+/**
+ * Rasterize one page of a PDF to PNG using pdftoppm (poppler).
+ * More reliable than pdfjs for server-side rendering.
+ */
+const rasterizePage = (pdfPath, pageNo, outDir) => {
   const pngPath = join(outDir, `reocr-page-${String(pageNo).padStart(3, '0')}.png`);
   if (existsSync(pngPath)) return pngPath;
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const { createCanvas } = await import('canvas');
-  const canvasFactory = makeCanvasFactory(createCanvas);
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(pdfBuf), canvasFactory }).promise;
-  const page = await pdf.getPage(pageNo);
-  const viewport = page.getViewport({ scale: 2.5 });
-  const { canvas, context } = canvasFactory.create(viewport.width, viewport.height);
-  await page.render({ canvasContext: context, viewport }).promise;
-  writeFileSync(pngPath, canvas.toBuffer('image/png'));
-  return pngPath;
+  // pdftoppm outputs: outDir/reocr-page-NNN-PPP.ppm  (first arg is output prefix)
+  const prefix = join(outDir, 'reocr-page');
+  execFileSync('pdftoppm', [
+    '-png', '-r', '200',
+    '-f', String(pageNo), '-l', String(pageNo),
+    '-singlefile',
+    pdfPath, join(outDir, `reocr-page-${String(pageNo).padStart(3, '0')}`)
+  ], { timeout: 30000 });
+  // pdftoppm with -singlefile writes: prefix.png
+  const out = join(outDir, `reocr-page-${String(pageNo).padStart(3, '0')}.png`);
+  return out;
 };
 
 /**
@@ -112,16 +110,16 @@ const rasterizePage = async (pdfBuf, pageNo, outDir) => {
  * Used for image PDFs with unknown language to classify before expensive full OCR.
  */
 export const identifyPage = async (pdfPath, backend = 'boss') => {
-  const pdfBuf = readFileSync(pdfPath);
-  const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const { createCanvas } = await import('canvas');
-  const canvasFactory = makeCanvasFactory(createCanvas);
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(pdfBuf), canvasFactory }).promise;
-  const page = await pdf.getPage(1);
-  const viewport = page.getViewport({ scale: 1.5 });
-  const { canvas, context } = canvasFactory.create(viewport.width, viewport.height);
-  await page.render({ canvasContext: context, viewport }).promise;
-  const b64 = canvas.toBuffer('image/jpeg', { quality: 75 }).toString('base64');
+  // Rasterize first page to a temp file
+  const { mkdtempSync } = await import('fs');
+  const { tmpdir } = await import('os');
+  const tmpDir = mkdtempSync(join(tmpdir(), 'reocr-id-'));
+  let pngPath;
+  try {
+    pngPath = rasterizePage(pdfPath, 1, tmpDir);
+  } catch { return { language: null, topic: null }; }
+  const imgBuf = readFileSync(pngPath);
+  const b64 = imgBuf.toString('base64');
 
   let text;
   if (backend === 'claude') {
@@ -178,7 +176,6 @@ export const identifyPage = async (pdfPath, backend = 'boss') => {
 export const reocrDocument = async (pdfPath, domain, docHash, numPages, onProgress, backend = 'boss') => {
   const cacheDir = join(metaDir(domain), 'reocr', docHash);
   mkdirSync(cacheDir, { recursive: true });
-  const pdfBuf = readFileSync(pdfPath);
   const results = [];
   for (let i = 1; i <= numPages; i++) {
     const cacheFile = join(cacheDir, `page-${String(i).padStart(3, '0')}.json`);
@@ -187,7 +184,7 @@ export const reocrDocument = async (pdfPath, domain, docHash, numPages, onProgre
       onProgress?.(i, numPages);
       continue;
     }
-    const pngPath = await rasterizePage(pdfBuf, i, cacheDir);
+    const pngPath = rasterizePage(pdfPath, i, cacheDir);
     const { text_md, confidence } = backend === 'claude'
       ? await ocrPageViaClaude(pngPath)
       : await ocrPageViaBoss(pngPath);
