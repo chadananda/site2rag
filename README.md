@@ -267,23 +267,42 @@ The Markdown export is designed to be ingested directly by the SifterSearch pipe
 
 ---
 
-## Running locally
+## Operations
+
+### Deploy UI (Cloudflare Pages)
 
 ```bash
-# Install dependencies
-npm install
-
-# Start the pipeline (PM2)
-pm2 start ecosystem.config.js
-
-# Start the report server
-pm2 start bin/report-server.js --name site2rag-report
-
-# Open dashboard
-open http://localhost:7840
-
-# Pre-generate thumbnails for a site
-node scripts/pregen-thumbs.js --site example.org --pages 5
+npm run deploy:ui
 ```
 
-The dashboard is proxied to `https://site2rag.lnker.com` via nginx in production.
+Bumps patch version, stamps build time into the service worker, builds CSS, deploys `public/` to Cloudflare Pages project `site2rag-report`, commits version.json. **Always use this script** — never run wrangler directly.
+
+Live at: `https://site2rag.lnker.com`
+
+### Deploy backend (tower-nas)
+
+```bash
+npm run deploy:backend
+```
+
+SSH to tower-nas, pulls latest code, reloads `site2rag` (spider) and `pdf-report-server` (API). The updater process polls git hourly but does **not** reload PM2 — you must reload manually after pushing.
+
+API live at: `https://api.lnker.com` → Cloudflare tunnel → tower-nas:7840
+
+### PM2 processes on tower-nas (`/tank/site2rag/app`)
+
+| process | script | notes |
+|---------|--------|-------|
+| `site2rag` | `src/index.js` | 15-min tick scheduler |
+| `pdf-report-server` | `bin/report-server.js` | API + static UI on :7840 |
+| `lnker-server` | `bin/lnker-server.js` | Asset server on :7841 |
+| `pdf-upgrade-worker` | `bin/pdf-upgrade-worker.js` | LLM OCR upgrade worker |
+| `site2rag-updater` | `bin/updater.js` | git pull watchdog (hourly) |
+
+### Local development
+
+```bash
+npm install
+npm test                          # run Vitest suite
+SITE2RAG_ROOT=/path/to/data npm start   # run pipeline once
+```
