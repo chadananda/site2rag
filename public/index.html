@@ -10,7 +10,7 @@
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <script>
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/sw.js').then(reg => {
+  navigator.serviceWorker.register('/sw.js?v=0.2.27').then(reg => {
     reg.addEventListener('updatefound', () => {
       reg.installing.addEventListener('statechange', function() {
         if (this.state === 'activated') location.reload();
