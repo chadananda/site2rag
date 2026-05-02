@@ -105,7 +105,12 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   const timeout = (siteConfig.timeout_seconds ?? 1800) * 1000;
   const compiled = compileRules(siteConfig.rules);
   const seedHost = new URL(seedUrl).hostname;
-  const runStartedAt = new Date().toISOString();
+  // Resume support: if a prior run was interrupted, continue from its start time
+  const RESUME_KEY = 'mirror_run_started_at';
+  const savedStart = db.prepare('SELECT value FROM site_meta WHERE key=?').get(RESUME_KEY)?.value;
+  const isResume = savedStart && (Date.now() - new Date(savedStart).getTime()) < timeout;
+  const runStartedAt = isResume ? savedStart : new Date().toISOString();
+  if (!isResume) db.prepare('INSERT OR REPLACE INTO site_meta (key, value) VALUES (?, ?)').run(RESUME_KEY, runStartedAt);
   // Fetch robots.txt
   let disallowed = new Set();
   if (siteConfig.respect_robots_txt) {
@@ -118,8 +123,14 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     const path = new URL(url).pathname;
     return ![...disallowed].some(d => path.startsWith(d));
   };
-  // Build queue: sitemap priority URLs first, then seed URL
+  // Pre-populate visited from pages already fetched in this run (resume support)
   const visited = new Set();
+  if (isResume) {
+    for (const { url } of db.prepare('SELECT url FROM pages WHERE last_seen_at >= ?').all(runStartedAt)) {
+      visited.add(url);
+    }
+  }
+  // Build queue: sitemap priority URLs first, then seed URL
   const toVisit = [
     ...priorityQueue.filter(u => inScope(u, siteConfig, seedHost)).map(u => ({ url: u, depth: 0, fromSitemap: true })),
     { url: seedUrl, depth: 0, fromSitemap: false }
@@ -249,5 +260,7 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   }
   // Mark pages not seen this run as gone
   stats.gone = markGoneUrls(db, runStartedAt);
+  // Clear resume checkpoint — run completed normally
+  db.prepare('DELETE FROM site_meta WHERE key=?').run(RESUME_KEY);
   return stats;
 };
