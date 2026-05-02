@@ -48,8 +48,9 @@ if ('serviceWorker' in navigator) {
   /* Progress bars */
   .prog-bar{height:5px;background:#e5e7eb;border-radius:3px;overflow:hidden}
   .prog-fill{height:100%;border-radius:3px;transition:width .4s}
-  .seg-bar{height:10px;border-radius:4px;overflow:hidden;display:flex;gap:1px;background:#e5e7eb}
+  .seg-bar{height:10px;border-radius:4px;overflow:hidden;display:flex;background:#e5e7eb}
   .seg-fill{height:100%;transition:width .4s;flex-shrink:0}
+  .seg-fill-rest{height:100%;transition:flex .4s;flex:1}
 
   /* Tabs */
   .tab-btn{padding:6px 14px;font-size:.8rem;font-weight:600;border-bottom:2px solid transparent;color:#6b7280;transition:all .15s}
@@ -159,8 +160,8 @@ if ('serviceWorker' in navigator) {
               <div class="seg-fill bg-blue-200" :style="'width:'+upgradeSegPct(s,'ok')+'%'" :title="fmt(s.already_ok||0)+' already readable'"></div>
               <!-- Green: upgraded/done -->
               <div class="seg-fill bg-green-400" :style="'width:'+upgradeSegPct(s,'done')+'%'" :title="fmt(s.upgraded)+' upgraded'"></div>
-              <!-- Muted red: needs upgrading — fills remainder so no gap -->
-              <div class="seg-fill bg-red-300" :style="'width:'+upgradeSegPct(s,'needs')+'%'" :title="fmt((s.pending||0)+(s.failed||0)+(s.processing||0))+' need upgrade'"></div>
+              <!-- Muted red: fills all remaining space so no gray gap -->
+              <div class="seg-fill-rest bg-red-300" :title="fmt((s.pending||0)+(s.failed||0)+(s.processing||0))+' need upgrade'"></div>
             </div>
             <div class="flex justify-between text-xs mt-1">
               <span class="text-blue-400" x-text="fmt(s.already_ok||0)+' OK'"></span>
