@@ -103,12 +103,13 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   const ua = siteConfig.user_agent || 'site2rag/1.0';
   const maxDepth = siteConfig.max_depth ?? 8;
   const timeout = (siteConfig.timeout_seconds ?? 1800) * 1000;
+  const requestDelay = siteConfig.request_delay_ms ?? 0;
   const compiled = compileRules(siteConfig.rules);
   const seedHost = new URL(seedUrl).hostname;
   // Resume support: if a prior run was interrupted, continue from its start time
   const RESUME_KEY = 'mirror_run_started_at';
   const savedStart = db.prepare('SELECT value FROM site_meta WHERE key=?').get(RESUME_KEY)?.value;
-  const isResume = savedStart && (Date.now() - new Date(savedStart).getTime()) < timeout;
+  const isResume = savedStart && (Date.now() - new Date(savedStart).getTime()) < 86400000; // 24h resume window
   const runStartedAt = isResume ? savedStart : new Date().toISOString();
   if (!isResume) db.prepare('INSERT OR REPLACE INTO site_meta (key, value) VALUES (?, ?)').run(RESUME_KEY, runStartedAt);
   // Fetch robots.txt
@@ -135,9 +136,13 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     ...priorityQueue.filter(u => inScope(u, siteConfig, seedHost)).map(u => ({ url: u, depth: 0, fromSitemap: true })),
     { url: seedUrl, depth: 0, fromSitemap: false }
   ];
-  // Re-check existing pages only if stale (not seen within check_every_days)
   const staleMs = (siteConfig.check_every_days ?? 3) * 86400000;
-  const staleCutoff = new Date(Date.now() - staleMs).toISOString();
+  // Determine which pages to re-check:
+  // - Resume: pages not yet seen in this run (continue where we left off)
+  // - Fresh run: pages not seen since the last complete crawl (or all pages if no complete crawl)
+  const COMPLETE_KEY = 'last_complete_crawl_at';
+  const lastComplete = db.prepare('SELECT value FROM site_meta WHERE key=?').get(COMPLETE_KEY)?.value;
+  const staleCutoff = isResume ? runStartedAt : (lastComplete ?? runStartedAt);
   const existingPages = db.prepare('SELECT url, depth FROM pages WHERE gone=0 AND last_seen_at < ?').all(staleCutoff);
   for (const p of existingPages) {
     if (!priorityQueue.includes(p.url) && inScope(p.url, siteConfig, seedHost)) {
@@ -166,6 +171,7 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     const headers = { 'User-Agent': ua };
     if (existing?.etag) headers['If-None-Match'] = existing.etag;
     if (existing?.last_modified) headers['If-Modified-Since'] = existing.last_modified;
+    if (requestDelay > 0) await new Promise(r => setTimeout(r, requestDelay));
     let res;
     try {
       res = await fetch(canonical, { headers, signal: AbortSignal.timeout(30000), redirect: 'follow' });
@@ -174,8 +180,8 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       continue;
     }
     stats.checked++;
-    // Write live progress every 100 pages so the API can show crawl status
-    if (stats.checked % 100 === 0) {
+    // Write live progress every 10 pages so the UI shows frequent updates
+    if (stats.checked % 10 === 0) {
       upsertMeta.run('mirror_progress', JSON.stringify({ checked: stats.checked, total: totalToCheck, new_pages: stats.new_pages, changed: stats.changed, started_at: runStartedAt }));
     }
     if (res.status === 404 || res.status === 410) {
@@ -272,6 +278,7 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     // disappeared from the link graph over many cycles without ever returning 404.
     const safeGoneCutoff = new Date(Date.now() - staleMs * 3).toISOString();
     stats.gone = markGoneUrls(db, safeGoneCutoff);
+    db.prepare('INSERT OR REPLACE INTO site_meta (key, value) VALUES (?, ?)').run(COMPLETE_KEY, runStartedAt);
     db.prepare('DELETE FROM site_meta WHERE key=?').run(RESUME_KEY);
     db.prepare('DELETE FROM site_meta WHERE key=?').run('mirror_progress');
   }
