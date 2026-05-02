@@ -215,7 +215,9 @@ export const upsertPage = (db, page) => {
 /** Mark URLs as gone that haven't been seen in this run (last_seen_at < run_start). */
 export const markGoneUrls = (db, runStartedAt) => {
   const now = new Date().toISOString();
-  return db.prepare(`UPDATE pages SET gone=1, gone_since=? WHERE last_seen_at < ? AND gone=0`)
+  // Never mark gone: pages in the upgrade queue (being actively processed)
+  return db.prepare(`UPDATE pages SET gone=1, gone_since=? WHERE last_seen_at < ? AND gone=0
+    AND url NOT IN (SELECT url FROM pdf_upgrade_queue WHERE status IN ('pending','processing','done'))`)
     .run(now, runStartedAt).changes;
 };
 /** Get site_meta value. */
