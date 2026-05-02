@@ -97,8 +97,16 @@ if ('serviceWorker' in navigator) {
           <div class="flex items-center gap-2 mb-1">
             <span class="font-bold mono text-sm" x-text="s.domain"></span>
             <span class="text-xs px-2 py-0.5 rounded-full font-semibold" :class="runBadgeCls(s)" x-text="runBadge(s)"></span>
+            <template x-if="s.recent_fails > 0 && s.last_run?.status !== 'running'">
+              <span class="text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold"
+                    :title="s.last_run?.message ? 'Last error: '+s.last_run.message : ''"
+                    x-text="s.recent_fails+' fail'+(s.recent_fails!==1?'s':'')+' today'"></span>
+            </template>
             <span class="ml-auto text-xs text-gray-400 mono" x-text="lastRunAgo(s)"></span>
           </div>
+          <template x-if="s.last_run?.status==='failed' && s.last_run?.message">
+            <div class="text-xs text-red-500 mb-1 truncate" :title="s.last_run.message" x-text="'⚠ '+s.last_run.message"></div>
+          </template>
 
           <!-- Stats row -->
           <div class="flex gap-4 text-xs mb-3 flex-wrap">
@@ -124,7 +132,23 @@ if ('serviceWorker' in navigator) {
             <div class="text-xs text-gray-400 mt-0.5" x-text="s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started')"></div>
           </div>
 
-          <!-- Upgrade progress segmented bar: green=done, red=needs upgrade, gray=already OK -->
+          <!-- Summarizing progress bar -->
+          <template x-if="s.scored > 0">
+            <div class="mb-3">
+              <div class="flex justify-between text-xs mb-1">
+                <span class="text-gray-500 font-medium">summarizing</span>
+                <span class="mono text-gray-600" x-text="fmt(sumDisplay[s.domain]||s.image_pdfs_summarized||0)+' / '+fmt(s.image_pdfs)+' image PDFs summarized'"></span>
+              </div>
+              <div class="prog-bar" style="height:6px">
+                <div class="prog-fill bg-violet-400"
+                     :style="'width:'+Math.round(((sumDisplay[s.domain]||s.image_pdfs_summarized||0)/Math.max(s.image_pdfs,1))*100)+'%'"
+                     :title="fmt(sumDisplay[s.domain]||s.image_pdfs_summarized||0)+' of '+fmt(s.image_pdfs)+' image PDFs summarized'"></div>
+              </div>
+              <div class="text-xs text-gray-400 mt-0.5" x-text="s.image_pdfs_summarized ? fmt(s.image_pdfs_summarized)+' summarized · '+fmt((s.image_pdfs||0)-(s.image_pdfs_summarized||0))+' remaining' : 'no summaries yet'"></div>
+            </div>
+          </template>
+
+          <!-- Upgrade progress segmented bar: 3 segments filling 100% -->
           <div>
             <div class="flex justify-between text-xs mb-1">
               <span class="text-gray-500 font-medium">PDF upgrade</span>
@@ -135,17 +159,13 @@ if ('serviceWorker' in navigator) {
               <div class="seg-fill bg-blue-200" :style="'width:'+upgradeSegPct(s,'ok')+'%'" :title="fmt(s.already_ok||0)+' already readable'"></div>
               <!-- Green: upgraded/done -->
               <div class="seg-fill bg-green-400" :style="'width:'+upgradeSegPct(s,'done')+'%'" :title="fmt(s.upgraded)+' upgraded'"></div>
-              <!-- Blue pulse: actively processing -->
-              <div class="seg-fill bg-blue-400 processing-pulse" :style="'width:'+upgradeSegPct(s,'processing')+'%'" :title="fmt(s.processing)+' processing'"></div>
-              <!-- Muted red: needs upgrading (pending + failed) -->
-              <div class="seg-fill bg-red-300" :style="'width:'+upgradeSegPct(s,'needs')+'%'" :title="fmt((s.pending||0)+(s.failed||0))+' need upgrade'"></div>
+              <!-- Muted red: needs upgrading — fills remainder so no gap -->
+              <div class="seg-fill bg-red-300" :style="'width:'+upgradeSegPct(s,'needs')+'%'" :title="fmt((s.pending||0)+(s.failed||0)+(s.processing||0))+' need upgrade'"></div>
             </div>
             <div class="flex gap-3 text-xs mt-1 flex-wrap">
               <span x-show="s.already_ok" class="text-blue-400" x-text="fmt(s.already_ok)+' OK'"></span>
               <span x-show="s.upgraded" class="text-green-600 font-medium" x-text="fmt(s.upgraded)+' upgraded'"></span>
-              <span x-show="s.processing" class="text-blue-500 font-medium" x-text="fmt(s.processing)+' running'"></span>
-              <span x-show="(s.pending||0)+(s.failed||0)" class="text-red-400 font-medium" x-text="fmt((s.pending||0)+(s.failed||0))+' need upgrade'"></span>
-              <span x-show="s.skipped" class="text-gray-400" x-text="fmt(s.skipped)+' skipped'"></span>
+              <span x-show="(s.pending||0)+(s.failed||0)+(s.processing||0)" class="text-red-400 font-medium" x-text="fmt((s.pending||0)+(s.failed||0)+(s.processing||0))+' need upgrade'"></span>
             </div>
           </div>
         </button>
@@ -168,17 +188,17 @@ if ('serviceWorker' in navigator) {
         <button class="tab-btn" :class="activeTab==='failed'?'active':''" @click="switchTab('failed')">
           Failed
           <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='failed'?'text-red-400':'text-gray-400'"
-            x-text="'('+fmt((selectedSiteData()?.total_pdfs||0)-(selectedSiteData()?.already_ok||0)-(selectedSiteData()?.upgraded||0))+')'"></span>
+            x-text="'('+fmt(tabTotals.failed ?? ((selectedSiteData()?.total_pdfs||0)-(selectedSiteData()?.already_ok||0)-(selectedSiteData()?.upgraded||0)))+')'"></span>
         </button>
         <button class="tab-btn" :class="activeTab==='adequate'?'active':''" @click="switchTab('adequate')">
           Adequate
           <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='adequate'?'text-blue-400':'text-gray-400'"
-            x-text="'('+fmt(selectedSiteData()?.already_ok||0)+')'"></span>
+            x-text="'('+fmt(tabTotals.adequate ?? (selectedSiteData()?.already_ok||0))+')'"></span>
         </button>
         <button class="tab-btn" :class="activeTab==='upgraded'?'active':''" @click="switchTab('upgraded')">
           Upgraded
           <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='upgraded'?'text-green-500':'text-gray-400'"
-            x-text="'('+fmt(selectedSiteData()?.upgraded||0)+')'"></span>
+            x-text="'('+fmt(tabTotals.upgraded ?? (selectedSiteData()?.upgraded||0))+')'"></span>
         </button>
       </div>
 
@@ -266,10 +286,22 @@ if ('serviceWorker' in navigator) {
 
       <template x-if="!loading || docs.length">
         <div>
+          <!-- Top pagination -->
+          <template x-if="docsPages > 1">
+            <div class="flex items-center justify-between text-sm mb-3">
+              <button @click="goPage(docsPage-1)" :disabled="docsPage<=1"
+                class="px-4 py-2 border border-gray-300 rounded-lg bg-white disabled:opacity-30 hover:bg-gray-50">← Prev</button>
+              <span class="text-gray-500 mono text-xs" x-text="'Page '+docsPage+' of '+docsPages+' ('+fmt(docsTotal)+' total)'"></span>
+              <button @click="goPage(docsPage+1)" :disabled="docsPage>=docsPages"
+                class="px-4 py-2 border border-gray-300 rounded-lg bg-white disabled:opacity-30 hover:bg-gray-50">Next →</button>
+            </div>
+          </template>
+
           <!-- Doc rows -->
           <div class="space-y-2 mb-4">
             <template x-for="doc in docs" :key="doc.url">
-              <div class="border rounded-xl p-3 flex gap-3 shadow-sm hover:shadow-md transition-shadow"
+              <div class="border rounded-xl p-3 flex gap-3 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
+                   @click="openDetail(doc)"
                    :class="[
                      doc.skip ? 'opacity-40' : '',
                      doc.status==='processing' ? 'bg-green-50 border-green-200 ring-1 ring-green-300' :
@@ -280,12 +312,12 @@ if ('serviceWorker' in navigator) {
                    ]">
 
                 <!-- Thumbnail -->
-                <button @click="openDetail(doc)" class="shrink-0 focus:outline-none self-start mt-0.5" title="View details">
+                <div class="shrink-0 self-start mt-0.5">
                   <img :src="thumbSrc(doc)" :alt="docTitle(doc)"
-                       class="thumb hover:opacity-80 transition-opacity cursor-zoom-in"
+                       class="thumb hover:opacity-80 transition-opacity"
                        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
                   <div class="thumb-placeholder" style="display:none">📄</div>
-                </button>
+                </div>
 
                 <!-- Score block -->
                 <div class="score-block shrink-0 self-start mt-0.5" :class="scoreBlockCls(doc)">
@@ -302,7 +334,7 @@ if ('serviceWorker' in navigator) {
                 <div class="flex-1 min-w-0">
                   <!-- Title row -->
                   <div class="flex items-start gap-2 mb-0.5">
-                    <a :href="doc.url" target="_blank" rel="noopener"
+                    <a :href="doc.url" target="_blank" rel="noopener" @click.stop
                        class="font-semibold text-sm text-gray-900 hover:text-blue-600 leading-snug line-clamp-2 flex-1"
                        x-text="docTitle(doc)"></a>
                     <!-- Status badge -->
@@ -327,12 +359,11 @@ if ('serviceWorker' in navigator) {
                     <div class="text-xs text-gray-500 mb-0.5 italic" x-text="doc.ai_author"></div>
                   </template>
 
-                  <!-- AI summary (loads on demand) -->
+                  <!-- Summary (free tier shows italic, haiku shows normal) -->
                   <template x-if="doc.ai_summary">
-                    <p class="text-xs text-gray-600 leading-relaxed line-clamp-2 mb-1" x-text="doc.ai_summary"></p>
-                  </template>
-                  <template x-if="!doc.ai_summary && doc.excerpt">
-                    <p class="text-xs text-gray-500 leading-relaxed line-clamp-2 mb-1 italic" x-text="doc.excerpt"></p>
+                    <p class="text-xs leading-relaxed line-clamp-2 mb-1"
+                       :class="doc.summary_tier==='haiku' ? 'text-gray-600' : 'text-gray-500 italic'"
+                       x-text="doc.ai_summary"></p>
                   </template>
 
                   <!-- Upgraded tab: full improvement panel -->
@@ -366,39 +397,38 @@ if ('serviceWorker' in navigator) {
 
                   <!-- Impossible to upgrade indicator -->
                   <template x-if="cannotUpgrade(doc)">
-                    <div class="text-xs text-gray-400 bg-gray-50 rounded px-2 py-0.5 inline-block mb-1">
-                      ⚠ No upgradeable content — already readable or empty
+                    <div class="text-xs rounded px-2 py-0.5 inline-block mb-1"
+                         :class="doc.pages === 0 ? 'text-gray-400 bg-gray-50' : 'text-green-600 bg-green-50'">
+                      <span x-text="doc.pages === 0 ? '⚠ Empty document' : '✓ Already readable — no upgrade needed'"></span>
                     </div>
                   </template>
 
                   <!-- Metadata row -->
                   <div class="flex items-center gap-3 text-xs text-gray-400 flex-wrap mt-1">
                     <span x-show="doc.pages" class="mono font-medium text-gray-500" x-text="fmt(doc.pages)+' pp'"></span>
+                    <template x-if="doc.lang_key && doc.lang_key !== 'english'">
+                      <span class="px-1.5 py-0.5 rounded font-medium"
+                            :class="langBadgeCls(doc)"
+                            :title="doc.lang_key==='unknown' ? 'Language undetected — deprioritized in queue' : doc.ai_language"
+                            x-text="doc.lang_key==='unknown' ? '?' : doc.ai_language"></span>
+                    </template>
                     <template x-if="effortEstimate(doc) && activeTab==='failed'">
-                      <span class="text-amber-600 font-medium" x-text="effortEstimate(doc)"></span>
+                      <span :class="(doc.lang_key && doc.lang_key !== 'english' && doc.lang_key !== 'unknown') ? 'text-amber-600 font-bold' : 'text-amber-600 font-medium'"
+                            x-text="effortEstimate(doc)"></span>
                     </template>
                     <template x-if="doc.readable_pages_pct!=null">
                       <span x-text="Math.round(doc.readable_pages_pct*100)+'% readable'"></span>
                     </template>
-                    <a x-show="doc.source_url" :href="doc.source_url" target="_blank" rel="noopener"
+                    <a x-show="doc.source_url" :href="doc.source_url" target="_blank" rel="noopener" @click.stop
                        class="hover:text-blue-500 truncate max-w-xs"
                        x-text="'↗ '+(doc.source_url||'').replace(/^https?:\/\//,'').split('/')[0]"></a>
                     <template x-if="activeTab==='upgraded' && doc.upgraded_pdf_path">
                       <a :href="`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
-                         class="font-semibold text-green-700 hover:underline ml-auto">↓ upgraded PDF</a>
-                    </template>
-                    <!-- Summarize button -->
-                    <template x-if="!doc.ai_summary && !doc.ai_summarized_at">
-                      <button @click="summarize(doc)" class="text-blue-400 hover:text-blue-600 transition-colors" title="Generate AI summary">
-                        ✦ summarize
-                      </button>
-                    </template>
-                    <template x-if="doc._summarizing">
-                      <span class="text-blue-400 animate-pulse">generating summary…</span>
+                         @click.stop class="font-semibold text-green-700 hover:underline ml-auto">↓ upgraded PDF</a>
                     </template>
                     <!-- Skip toggle (failed tab) -->
                     <template x-if="activeTab==='failed'">
-                      <button @click="toggleSkip(doc)"
+                      <button @click.stop="toggleSkip(doc)"
                               class="ml-auto px-2 py-0.5 rounded border text-xs transition-colors"
                               :class="doc.skip ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-gray-200 text-gray-300 hover:text-amber-600 hover:border-amber-300'"
                               x-text="doc.skip ? '⊘ skipped' : 'skip'"></button>
@@ -451,13 +481,24 @@ if ('serviceWorker' in navigator) {
        @click.self="closeDetail()" @keydown.escape.window="closeDetail()">
     <div class="bg-white rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
       <div class="flex gap-5 p-6">
-        <div class="shrink-0">
-          <img :src="thumbSrc(expandedDoc, 800)" :alt="docTitle(expandedDoc)"
-               class="rounded-lg w-80 cursor-pointer"
-               style="box-shadow:0 2px 12px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06)"
-               @click="window.open(expandedDoc.url,'_blank')"
-               title="Click to open PDF"
-               onerror="this.style.display='none'">
+        <div class="shrink-0 flex flex-col gap-1.5">
+          <div class="relative flex items-center" style="width:288px">
+            <button @click.stop="modalPagePrev()"
+                    :disabled="modalPage <= 1"
+                    class="absolute left-0 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-black/40 hover:bg-black/60 text-white text-lg leading-none disabled:opacity-20 disabled:cursor-default transition-opacity -translate-x-1/2">‹</button>
+            <img :src="thumbSrc(expandedDoc, 800, modalPage, null)" :alt="docTitle(expandedDoc)"
+                 class="rounded-lg w-72 cursor-pointer block"
+                 style="box-shadow:0 2px 12px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06)"
+                 @click="window.open(expandedDoc.url,'_blank')"
+                 title="Click to open PDF"
+                 onerror="this.style.display='none'">
+            <button @click.stop="modalPageNext()"
+                    :disabled="modalPage >= (expandedDoc.pages || 1)"
+                    class="absolute right-0 z-10 w-8 h-8 flex items-center justify-center rounded-full bg-black/40 hover:bg-black/60 text-white text-lg leading-none disabled:opacity-20 disabled:cursor-default transition-opacity translate-x-1/2">›</button>
+          </div>
+          <template x-if="(expandedDoc.pages || 0) > 1">
+            <div class="text-center text-xs text-gray-400 mono">p.<span x-text="modalPage"></span> / <span x-text="expandedDoc.pages"></span></div>
+          </template>
         </div>
         <div class="flex-1 min-w-0">
           <div class="flex items-start justify-between gap-2 mb-1">
@@ -478,6 +519,14 @@ if ('serviceWorker' in navigator) {
               <div x-show="expandedDoc.pages" x-text="fmt(expandedDoc.pages)+' pages'"></div>
               <div x-show="expandedDoc.readable_pages_pct!=null" x-text="Math.round((expandedDoc.readable_pages_pct||0)*100)+'% readable pages'"></div>
               <div x-show="expandedDoc.has_text_layer!=null" x-text="expandedDoc.has_text_layer ? 'Has text layer' : 'No text layer (image PDF)'"></div>
+              <template x-if="expandedDoc.ai_language">
+                <div class="flex items-center gap-1.5">
+                  <span class="px-1.5 py-0.5 rounded font-medium" :class="langBadgeCls(expandedDoc)" x-text="expandedDoc.ai_language"></span>
+                  <template x-if="expandedDoc.lang_key && expandedDoc.lang_key !== 'english'">
+                    <span class="text-gray-400" x-text="'~'+((LANG_COST_MAP[expandedDoc.lang_key]||1.2)*100|0)+'% cost vs EN'"></span>
+                  </template>
+                </div>
+              </template>
               <div x-show="effortEstimate(expandedDoc)" class="text-amber-600 font-medium" x-text="effortEstimate(expandedDoc)"></div>
               <template x-if="expandedDoc.before_score!=null && expandedDoc.after_score!=null">
                 <div class="flex items-center gap-1.5">
@@ -490,11 +539,29 @@ if ('serviceWorker' in navigator) {
             </div>
           </div>
 
-          <!-- Summary -->
-          <template x-if="expandedDoc.ai_summary">
-            <p class="text-sm text-gray-700 leading-relaxed mb-3" x-text="expandedDoc.ai_summary"></p>
+          <!-- Summary with tier indicator -->
+          <template x-if="expandedDoc.ai_summary && !expandedDoc._summarizing">
+            <div class="mb-3">
+              <p class="text-sm leading-relaxed"
+                 :class="expandedDoc.summary_tier==='haiku' ? 'text-gray-700' : 'text-gray-500 italic'"
+                 x-text="expandedDoc.ai_summary"></p>
+              <div class="flex items-center gap-2 mt-1">
+                <template x-if="expandedDoc.ai_language">
+                  <span class="text-xs px-1.5 py-0.5 rounded bg-gray-100 text-gray-500 font-medium" x-text="expandedDoc.ai_language"></span>
+                </template>
+                <template x-if="expandedDoc.summary_tier !== 'haiku'">
+                  <span class="text-xs text-blue-400 animate-pulse">✦ enhancing…</span>
+                </template>
+                <template x-if="expandedDoc.summary_tier === 'haiku'">
+                  <span class="text-xs text-gray-300">✦ AI enhanced</span>
+                </template>
+              </div>
+            </div>
           </template>
-          <template x-if="!expandedDoc.ai_summary && expandedDoc.excerpt">
+          <template x-if="expandedDoc._summarizing">
+            <div class="mb-3 text-sm text-gray-400 italic animate-pulse">Generating AI summary…</div>
+          </template>
+          <template x-if="!expandedDoc.ai_summary && !expandedDoc._summarizing && expandedDoc.excerpt">
             <p class="text-sm text-gray-500 leading-relaxed mb-3 italic" x-text="expandedDoc.excerpt"></p>
           </template>
 
@@ -509,15 +576,12 @@ if ('serviceWorker' in navigator) {
 
           <!-- Actions -->
           <div class="flex gap-2 flex-wrap">
+            <a :href="'/viewer.html?url=' + encodeURIComponent(expandedDoc.url)" target="_blank"
+               class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold">📖 Read PDF</a>
             <a :href="expandedDoc.url" target="_blank"
                class="px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold">Open PDF ↗</a>
             <a x-show="expandedDoc.archive_url" :href="expandedDoc.archive_url" target="_blank"
                class="px-3 py-1.5 text-xs rounded-lg bg-green-100 hover:bg-green-200 text-green-800 font-semibold">↓ Upgraded PDF</a>
-            <template x-if="!expandedDoc.ai_summary">
-              <button @click="summarize(expandedDoc)"
-                      class="px-3 py-1.5 text-xs rounded-lg border border-blue-200 text-blue-600 hover:bg-blue-50 font-semibold"
-                      x-text="expandedDoc._summarizing ? 'Generating…' : '✦ Generate Summary'"></button>
-            </template>
             <button @click="toggleSkip(expandedDoc)"
                     class="px-3 py-1.5 text-xs rounded-lg border font-semibold"
                     :class="expandedDoc.skip ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-gray-200 text-gray-500 hover:text-amber-600'"
@@ -535,6 +599,8 @@ const API_BASE = ['localhost','127.0.0.1'].includes(location.hostname)
   : 'https://api.lnker.com';
 
 const PER_PAGE = 50;
+
+const LANG_COST_MAP = { english:1.0, russian:1.15, unknown:1.2, arabic:1.35, persian:1.35, hebrew:1.35, japanese:1.5, chinese:1.5 };
 
 function fmt(n) {
   if (n == null || n === '') return '0';
@@ -577,12 +643,21 @@ function scoreLabel(doc) {
 }
 
 function effortEstimate(doc) {
-  if (!doc.pages || doc.readable_pages_pct == null) return null;
-  const pagesNeeded = Math.round(doc.pages * (1 - (doc.readable_pages_pct || 0)));
-  if (pagesNeeded <= 0) return null;
-  const mins = Math.max(1, Math.round(pagesNeeded * 0.5));
+  const mins = doc.effort_mins;
+  if (!mins || mins <= 0) return null;
   if (mins < 60) return `~${mins} min`;
   return `~${Math.round(mins/60)}h`;
+}
+
+function langBadgeCls(doc) {
+  const k = doc.lang_key || 'unknown';
+  if (k === 'unknown') return 'bg-gray-50 text-gray-300 border border-gray-200';
+  if (k === 'english') return 'bg-gray-100 text-gray-500';
+  if (k === 'russian') return 'bg-blue-50 text-blue-500';
+  if (k === 'arabic' || k === 'persian') return 'bg-amber-50 text-amber-600';
+  if (k === 'hebrew') return 'bg-purple-50 text-purple-500';
+  if (k === 'japanese' || k === 'chinese') return 'bg-rose-50 text-rose-500';
+  return 'bg-gray-100 text-gray-400';
 }
 
 function cannotUpgrade(doc) {
@@ -607,21 +682,34 @@ function app() {
     sites: [], activeSite: null,
     docs: [],
     docsTotal: 0, docsPage: 1, docsPages: 1,
+    tabTotals: { failed: null, adequate: null, upgraded: null },
     filters: { q: '', status: '', score_max: 1, sort: 'score_asc' },
     loading: false, apiStatus: '', apiError: '', lastRefresh: '',
+    sumDisplay: {},   // domain -> interpolated summarized_haiku for smooth bar
+    _sumRates: {},    // domain -> { value, rate, ts } for interpolation
     expandedDoc: null,
+    modalPage: 1,
     activeTab: 'failed',
     showUpgradeInfo: false,
     appVersion: '', _buildId: null,
     _searchTimer: null,
-    fmt, scorePillCls, scoreBlockCls, scoreLabel, effortEstimate, cannotUpgrade,
+    fmt, scorePillCls, scoreBlockCls, scoreLabel, effortEstimate, cannotUpgrade, langBadgeCls,
 
-    thumbSrc(doc, w = 144) {
-      return `${API_BASE}/api/thumbnail?url=${encodeURIComponent(doc.url)}&w=${w}`;
+    thumbSrc(doc, w = 144, page = 1, h = 192) {
+      const hParam = h ? `&h=${h}` : '';
+      return `${API_BASE}/api/thumbnail?url=${encodeURIComponent(doc.url)}&w=${w}${hParam}&page=${page}`;
     },
 
-    openDetail(doc) { this.expandedDoc = { ...doc }; },
-    closeDetail() { this.expandedDoc = null; },
+    openDetail(doc) {
+      this.expandedDoc = { ...doc };
+      this.modalPage = 1;
+      // Auto-trigger deep Haiku summary if not already enhanced
+      if (doc.summary_tier !== 'haiku') this.summarize(this.expandedDoc);
+    },
+    closeDetail() { this.expandedDoc = null; this.modalPage = 1; },
+    modalPagePrev() { if (this.modalPage > 1) this.modalPage--; },
+
+    modalPageNext() { if (this.expandedDoc && this.modalPage < (this.expandedDoc.pages || 1)) this.modalPage++; },
 
     async summarize(doc) {
       if (doc._summarizing) return;
@@ -630,14 +718,20 @@ function app() {
       try {
         const res = await fetch(`${API_BASE}/api/docs/summarize?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}`, { method: 'POST' });
         if (res.ok) {
-          const { summary, author } = await res.json();
+          const { summary, author, language, tier } = await res.json();
           doc.ai_summary = summary;
           doc.ai_author = author;
+          doc.ai_language = language || doc.ai_language;
+          doc.summary_tier = tier || 'haiku';
           doc.ai_summarized_at = new Date().toISOString();
+          // Sync back to the docs array so card updates too
+          const idx = this.docs.findIndex(d => d.url === doc.url);
+          if (idx >= 0) Object.assign(this.docs[idx], { ai_summary: doc.ai_summary, ai_author: doc.ai_author, ai_language: doc.ai_language, summary_tier: doc.summary_tier });
           if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
         }
       } catch {}
       doc._summarizing = false;
+      if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
     },
 
     async toggleSkip(doc) {
@@ -657,10 +751,11 @@ function app() {
 
     upgradeSegPct(s, type) {
       const total = s.total_pdfs || 1;
-      if (type === 'done') return Math.round((s.upgraded||0) / total * 100);
-      if (type === 'processing') return Math.round((s.processing||0) / total * 100);
-      if (type === 'needs') return Math.round(((s.pending||0) + (s.failed||0)) / total * 100);
-      if (type === 'ok') return Math.round((s.already_ok||0) / total * 100);
+      const okPct = Math.round((s.already_ok||0) / total * 100);
+      const donePct = Math.round((s.upgraded||0) / total * 100);
+      if (type === 'ok') return okPct;
+      if (type === 'done') return donePct;
+      if (type === 'needs') return Math.max(0, 100 - okPct - donePct);
       return 0;
     },
 
@@ -688,6 +783,37 @@ function app() {
       await this.checkVersion();
       await this.loadSites();
       setInterval(() => this.refresh(), 30000);
+      // Smooth interpolation ticker: advance sumDisplay at measured rate between refreshes
+      setInterval(() => {
+        const now = Date.now();
+        for (const [domain, r] of Object.entries(this._sumRates)) {
+          const site = this.sites.find(s => s.domain === domain);
+          if (!site) continue;
+          const elapsed = (now - r.ts) / 1000;
+          const est = Math.min(site.scored, Math.round(r.value + r.rate * elapsed));
+          if (est > (this.sumDisplay[domain] || 0)) {
+            this.sumDisplay = { ...this.sumDisplay, [domain]: est };
+          }
+        }
+      }, 500);
+    },
+
+    _updateSumRates(newSites) {
+      const now = Date.now();
+      for (const s of newSites) {
+        const prev = this._sumRates[s.domain];
+        const newVal = s.image_pdfs_summarized || 0;
+        if (prev) {
+          const dt = (now - prev.ts) / 1000;
+          // Exponential smoothing of rate: blend new observation with old rate
+          const observed = dt > 0 ? (newVal - prev.value) / dt : 0;
+          const rate = observed > 0 ? observed * 0.4 + prev.rate * 0.6 : prev.rate * 0.7;
+          this._sumRates[s.domain] = { value: newVal, rate, ts: now };
+        } else {
+          this._sumRates[s.domain] = { value: newVal, rate: 0, ts: now };
+          this.sumDisplay = { ...this.sumDisplay, [s.domain]: newVal };
+        }
+      }
     },
 
     async loadSites() {
@@ -696,6 +822,7 @@ function app() {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         this.sites = data.sites || (Array.isArray(data) ? data : []);
+        this._updateSumRates(this.sites);
         this.apiStatus = 'connected'; this.apiError = '';
         if (!this.activeSite && this.sites.length) await this.selectSite(this.sites[0]);
         else if (this.activeSite) {
@@ -711,6 +838,7 @@ function app() {
       if (!res?.ok) return;
       const data = await res.json();
       this.sites = data.sites || (Array.isArray(data) ? data : []);
+      this._updateSumRates(this.sites);
       if (this.activeSite) { const u = this.sites.find(s => s.domain === this.activeSite.domain); if (u) this.activeSite = u; }
       this.lastRefresh = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     },
@@ -718,6 +846,7 @@ function app() {
     async selectSite(s) {
       this.activeSite = s;
       this.docsPage = 1;
+      this.tabTotals = { failed: null, adequate: null, upgraded: null };
       this.filters = { q: '', status: '', score_max: 1, sort: 'score_asc' };
       await this.loadDocs();
     },
@@ -751,6 +880,7 @@ function app() {
         this.docs = data.docs;
         this.docsTotal = data.total;
         this.docsPages = data.pages;
+        this.tabTotals = { ...this.tabTotals, [this.activeTab]: data.total };
         this.lastRefresh = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
         this.apiError = '';
       } catch (e) { this.apiError = e.message; }
@@ -766,9 +896,19 @@ function app() {
 
     docTitle(doc) {
       const decode = s => { try { return decodeURIComponent(s); } catch { return s; } };
-      if (doc.title) return decode(doc.title);
-      const slug = decode(doc.url.split('/').pop()).replace(/\.pdf$/i,'').replace(/[_-]/g,' ').trim();
-      return slug || doc.url;
+      const clean = s => s.replace(/&amp;/g,'&').replace(/&gt;/g,'').replace(/&lt;/g,'').replace(/[<>]+$/,'').trim();
+      let title;
+      if (doc.title) {
+        title = clean(decode(doc.title));
+      } else {
+        title = clean(decode(doc.url.split('/').pop()).replace(/\.pdf$/i,'').replace(/[_-]/g,' ').trim()) || doc.url;
+      }
+      // If title looks like a code (no spaces, short, has digits/dots), add source domain for context
+      if (title && !title.includes(' ') && title.length < 20 && /[0-9#.]/.test(title) && doc.source_url) {
+        const domain = doc.source_url.replace(/^https?:\/\//,'').split('/')[0];
+        return `${title} (${domain})`;
+      }
+      return title;
     },
     runBadge(s) {
       if (!s.last_run) return 'no runs';

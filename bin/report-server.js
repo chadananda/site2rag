@@ -181,13 +181,13 @@ const _makeWorker = () => {
 for (let i = 0; i < THUMB_WORKERS; i++) _workers.push(_makeWorker());
 
 /** Queue a thumbnail generation job; resolves when the file is written. */
-const generateThumb = (pdfPath, outPath, targetW = 300, pageNo = 1) =>
+const generateThumb = (pdfPath, outPath, targetW = 300, pageNo = 1, targetH = null) =>
   new Promise((resolve, reject) => {
     const jobId = ++_jobId;
     _pending.set(jobId, { resolve, reject });
     const free = _workers.find(w => !w.busy);
-    if (free) { free.busy = true; free.worker.postMessage({ jobId, pdfPath, outPath, targetW, pageNo }); }
-    else _queue.push({ jobId, pdfPath, outPath, targetW, pageNo });
+    if (free) { free.busy = true; free.worker.postMessage({ jobId, pdfPath, outPath, targetW, targetH, pageNo }); }
+    else _queue.push({ jobId, pdfPath, outPath, targetW, targetH, pageNo });
   });
 
 /** Summary stats for one site. */
@@ -386,10 +386,12 @@ createServer(async (req, res) => {
     if (!row?.local_path || !existsSync(row.local_path)) return err(res, 404, 'pdf not found');
 
     const w = Math.min(1200, Math.max(50, parseInt(url.searchParams.get('w') || '300', 10)));
+    const h = url.searchParams.get('h') ? Math.min(2400, Math.max(50, parseInt(url.searchParams.get('h'), 10))) : null;
     const pageNo = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10));
     const hash = createHash('sha256').update(docUrl).digest('hex').slice(0, 16);
     const thumbDir = join(getMirrorRoot(), domain, '.thumbs');
-    const thumbPath = join(thumbDir, `x${hash}_p${pageNo}_${w}w.jpg`);
+    const sizeKey = h ? `${w}x${h}` : `${w}w`;
+    const thumbPath = join(thumbDir, `x${hash}_p${pageNo}_${sizeKey}.jpg`);
 
     if (existsSync(thumbPath)) {
       res.writeHead(200, { 'Content-Type': 'image/jpeg', ...cacheHeaders(604800) });
@@ -398,8 +400,8 @@ createServer(async (req, res) => {
 
     try {
       mkdirSync(thumbDir, { recursive: true });
-      await generateThumb(row.local_path, thumbPath, w, pageNo);
-      if (w === 144 && pageNo === 1) {
+      await generateThumb(row.local_path, thumbPath, w, pageNo, h);
+      if (w === 144 && h === 192 && pageNo === 1) {
         const db2 = safeOpenDb(domain);
         if (db2) { try { db2.prepare('UPDATE pdf_quality SET thumbnail_path=? WHERE url=?').run(thumbPath, docUrl); } finally { db2.close(); } }
       }
