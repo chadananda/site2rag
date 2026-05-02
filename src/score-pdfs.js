@@ -63,7 +63,7 @@ export const runScorePdfs = async (db, siteConfig) => {
   for (const { row, result } of results) {
     if (!result.ok) { stats.skipped++; continue; }
     saveQualityScore(db, row.url, row.content_hash, result.metrics);
-    if (maybeQueue(db, row.url, row.content_hash, result.metrics.composite_score, threshold)) stats.queued++;
+    if (maybeQueue(db, row.url, row.content_hash, result.metrics.composite_score, threshold, result.metrics.language)) stats.queued++;
     stats.scored++;
   }
 
