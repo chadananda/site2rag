@@ -84,17 +84,25 @@ const ocrPageViaClaude = async (pngPath) => {
   return { text_md, confidence: text_md.length > 20 ? 0.9 : 0.3 };
 };
 
+/** Build a NodeCanvasFactory for pdfjs-dist (required for server-side rendering). */
+const makeCanvasFactory = (createCanvas) => ({
+  create(width, height) { const canvas = createCanvas(width, height); return { canvas, context: canvas.getContext('2d') }; },
+  reset(pair, width, height) { pair.canvas.width = width; pair.canvas.height = height; },
+  destroy(pair) { pair.canvas.width = 0; pair.canvas.height = 0; },
+});
+
 /** Rasterize one page of a PDF to a temp PNG. Returns png path. */
 const rasterizePage = async (pdfBuf, pageNo, outDir) => {
   const pngPath = join(outDir, `reocr-page-${String(pageNo).padStart(3, '0')}.png`);
   if (existsSync(pngPath)) return pngPath;
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(pdfBuf) }).promise;
-  const page = await pdf.getPage(pageNo);
-  const viewport = page.getViewport({ scale: 2.5 }); // higher res for boss
   const { createCanvas } = await import('canvas');
-  const canvas = createCanvas(viewport.width, viewport.height);
-  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  const canvasFactory = makeCanvasFactory(createCanvas);
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(pdfBuf), canvasFactory }).promise;
+  const page = await pdf.getPage(pageNo);
+  const viewport = page.getViewport({ scale: 2.5 });
+  const { canvas, context } = canvasFactory.create(viewport.width, viewport.height);
+  await page.render({ canvasContext: context, viewport }).promise;
   writeFileSync(pngPath, canvas.toBuffer('image/png'));
   return pngPath;
 };
@@ -106,12 +114,13 @@ const rasterizePage = async (pdfBuf, pageNo, outDir) => {
 export const identifyPage = async (pdfPath, backend = 'boss') => {
   const pdfBuf = readFileSync(pdfPath);
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
-  const pdf = await pdfjs.getDocument({ data: new Uint8Array(pdfBuf) }).promise;
+  const { createCanvas } = await import('canvas');
+  const canvasFactory = makeCanvasFactory(createCanvas);
+  const pdf = await pdfjs.getDocument({ data: new Uint8Array(pdfBuf), canvasFactory }).promise;
   const page = await pdf.getPage(1);
   const viewport = page.getViewport({ scale: 1.5 });
-  const { createCanvas } = await import('canvas');
-  const canvas = createCanvas(viewport.width, viewport.height);
-  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  const { canvas, context } = canvasFactory.create(viewport.width, viewport.height);
+  await page.render({ canvasContext: context, viewport }).promise;
   const b64 = canvas.toBuffer('image/jpeg', { quality: 75 }).toString('base64');
 
   let text;
