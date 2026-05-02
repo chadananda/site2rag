@@ -132,7 +132,7 @@ if ('serviceWorker' in navigator) {
             </div>
             <div class="text-xs mt-0.5"
                  :class="s.mirror_progress ? 'text-blue-500' : 'text-gray-400'"
-                 x-text="s.mirror_progress ? fmt(crawlDisplay[s.domain]||s.mirror_progress.checked)+' / '+fmt(s.total_pages)+' crawled' : (s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started'))"></div>
+                 x-text="s.mirror_progress ? fmt(crawlDisplay[s.domain]||s.mirror_progress.checked)+' crawled' : (s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started'))"></div>
           </div>
 
           <!-- Summarizing progress bar -->
@@ -850,13 +850,15 @@ function app() {
         if (!s.mirror_progress) continue;
         const prev = this._crawlRates[s.domain];
         const newVal = s.mirror_progress.checked || 0;
-        if (prev) {
+        let rate = 0;
+        if (prev && prev.value < newVal) {
           const dt = (now - prev.ts) / 1000;
           const observed = dt > 0 ? (newVal - prev.value) / dt : 0;
-          const rate = observed > 0 ? observed * 0.4 + prev.rate * 0.6 : prev.rate * 0.7;
-          this._crawlRates[s.domain] = { value: newVal, rate, ts: now };
-        } else {
-          this._crawlRates[s.domain] = { value: newVal, rate: 0, ts: now };
+          rate = observed > 0 ? observed * 0.4 + (prev.rate || 0) * 0.6 : (prev.rate || 0) * 0.7;
+        }
+        this._crawlRates[s.domain] = { value: newVal, rate, ts: now };
+        // Always advance crawlDisplay to at least the real API value
+        if (newVal > (this.crawlDisplay[s.domain] || 0)) {
           this.crawlDisplay = { ...this.crawlDisplay, [s.domain]: newVal };
         }
       }
