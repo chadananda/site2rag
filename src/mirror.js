@@ -137,7 +137,10 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   const started = Date.now();
   while (toVisit.length > 0 && (Date.now() - started) < timeout) {
     const { url, depth, fromSitemap } = toVisit.shift();
-    const canonical = stripQueryParams(compiled, url);
+    let canonical;
+    try { canonical = stripQueryParams(compiled, url); new URL(canonical); } catch {
+      console.warn(`[mirror] skipping malformed URL: ${url}`); continue;
+    }
     if (visited.has(canonical)) continue;
     visited.add(canonical);
     if (depth > maxDepth) continue;
