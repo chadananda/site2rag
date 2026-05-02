@@ -255,8 +255,8 @@ const summarizeTopPending = async (db, domain) => {
       const summary = lines[0] || null;
       const authorLine = lines.find(l => l.toLowerCase().startsWith('author:'));
       const author = authorLine ? authorLine.replace(/^author:\s*/i, '').trim() : null;
-      db.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_summarized_at=? WHERE url=?')
-        .run(summary, author, new Date().toISOString(), row.url);
+      db.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, summary_tier=?, ai_summarized_at=? WHERE url=?')
+        .run(summary, author, 'haiku', new Date().toISOString(), row.url);
       done++;
     } catch (e) {
       log(`summarize failed: ${row.url}: ${e.message}`);
