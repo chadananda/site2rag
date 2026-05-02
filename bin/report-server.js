@@ -215,7 +215,9 @@ const siteSummary = (domain, siteUrl) => {
         SUM(CASE WHEN q.skip=1 THEN 1 ELSE 0 END) as skipped,
         SUM(CASE WHEN u.url IS NULL AND q.skip=0 AND q.composite_score >= 0.7 THEN 1 ELSE 0 END) as already_ok,
         SUM(CASE WHEN q.summary_tier='haiku' THEN 1 ELSE 0 END) as summarized_haiku,
-        SUM(CASE WHEN q.ai_summary IS NOT NULL THEN 1 ELSE 0 END) as summarized_any
+        SUM(CASE WHEN q.ai_summary IS NOT NULL THEN 1 ELSE 0 END) as summarized_any,
+        SUM(CASE WHEN (q.has_text_layer=0 OR q.has_text_layer IS NULL OR q.readable_pages_pct < 0.4) THEN 1 ELSE 0 END) as image_pdfs,
+        SUM(CASE WHEN (q.has_text_layer=0 OR q.has_text_layer IS NULL OR q.readable_pages_pct < 0.4) AND q.ai_summary IS NOT NULL THEN 1 ELSE 0 END) as image_pdfs_summarized
       FROM pdf_quality q
       LEFT JOIN pdf_upgrade_queue u ON q.url=u.url
       JOIN pages p ON q.url=p.url AND p.gone=0`).get();
@@ -238,6 +240,7 @@ const siteSummary = (domain, siteUrl) => {
       pending: pdf.pending || 0, processing: pdf.processing || 0,
       failed: pdf.failed || 0, skipped: pdf.skipped || 0, already_ok: pdf.already_ok || 0,
       summarized_haiku: pdf.summarized_haiku || 0, summarized_any: pdf.summarized_any || 0,
+      image_pdfs: pdf.image_pdfs || 0, image_pdfs_summarized: pdf.image_pdfs_summarized || 0,
       eta_seconds: (pdf.pending || 0) * avgSec,
       md_exported: exp.ok || 0, md_failed: exp.failed || 0,
       last_run: lastRun || null,
