@@ -25,10 +25,13 @@ const addBacklink = (text, sourceUrl, pageNo, paraNo, format, granularity) => {
   return text + visibleLink + commentLink;
 };
 /** Try to parse PDF with pdf-parse. Returns { text, numpages } or null. */
+const withTimeout = (promise, ms, label) =>
+  Promise.race([promise, new Promise((_, r) => setTimeout(() => r(new Error(`${label} timed out after ${ms}ms`)), ms))]);
+
 const tryPdfParse = async (buf) => {
   try {
     const pdfParse = (await import('pdf-parse')).default;
-    const data = await pdfParse(buf);
+    const data = await withTimeout(pdfParse(buf), 30000, 'pdf-parse');
     return { text: data.text, numpages: data.numpages };
   } catch { return null; }
 };
@@ -38,7 +41,7 @@ const rasterizePdf = async (buf, docHash, domain) => {
   mkdirSync(rasterDir, { recursive: true });
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buf) });
-  const pdf = await loadingTask.promise;
+  const pdf = await withTimeout(loadingTask.promise, 60000, 'pdfjs.getDocument');
   const pngPaths = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const pngPath = join(rasterDir, `page-${String(i).padStart(3, '0')}.png`);
@@ -51,7 +54,7 @@ const rasterizePdf = async (buf, docHash, domain) => {
       const { createCanvas } = await import('canvas');
       const canvas = createCanvas(viewport.width, viewport.height);
       const ctx = canvas.getContext('2d');
-      await page.render({ canvasContext: ctx, viewport }).promise;
+      await withTimeout(page.render({ canvasContext: ctx, viewport }).promise, 30000, 'page.render');
       writeFileSync(pngPath, canvas.toBuffer('image/png'));
     } catch { writeFileSync(pngPath, Buffer.alloc(0)); } // placeholder if canvas unavailable
   }
@@ -173,10 +176,10 @@ export const runExportDoc = async (db, siteConfig) => {
       const result = await exportDoc(db, siteConfig, page);
       upsertExport(db, { url: page.url, md_path: result.mdPath, source_hash: page.content_hash, md_hash: null, exported_at: new Date().toISOString(), conversion_method: result.ocrUsed ? 'ocr' : 'pdf-text', word_count: null, ocr_used: result.ocrUsed ? 1 : 0, ocr_engines: result.ocrEnginesUsed?.join(',') || null, reconciler: result.reconcilerUsed, pages: result.totalPages, agreement_avg: result.agreementAvg, flagged_pages: result.flaggedPages?.join(',') || null, host_page_url: null, status: 'ok', error: null });
       // Score PDF quality and queue for upgrade if below threshold
-      const qualityMetrics = await scorePdf(page.local_path);
+      const qualityMetrics = await withTimeout(scorePdf(page.local_path), 30000, 'scorePdf');
       saveQualityScore(db, page.url, page.content_hash, qualityMetrics);
       const upgradeThreshold = siteConfig.pdf_upgrade?.score_threshold ?? 0.7;
-      maybeQueue(db, page.url, page.content_hash, qualityMetrics.composite_score, upgradeThreshold);
+      maybeQueue(db, page.url, page.content_hash, qualityMetrics.composite_score, upgradeThreshold, qualityMetrics.language);
       stats.written++;
       if (result.ocrUsed) stats.ocr_pages += result.totalPages;
       stats.flagged += result.flaggedPages?.length || 0;

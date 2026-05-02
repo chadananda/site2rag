@@ -89,7 +89,8 @@ export const runAssets = async (db, siteConfig) => {
         res = await fetch(assetUrl, { headers: { 'User-Agent': ua }, signal: AbortSignal.timeout(15000), redirect: 'follow' });
         if (!res.ok) { stats.skipped++; continue; }
       } catch { stats.skipped++; continue; }
-      const buf = Buffer.from(await res.arrayBuffer());
+      let buf;
+      try { buf = Buffer.from(await res.arrayBuffer()); } catch { stats.skipped++; continue; }
       const mime = (res.headers.get('content-type') || '').split(';')[0].trim();
       // Size cap for images
       if (type === 'image' && buf.length > imageMaxBytes) {
