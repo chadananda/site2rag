@@ -145,7 +145,8 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     }
   }
   const stats = { checked: 0, new_pages: 0, changed: 0, gone: 0 };
-  const totalToCheck = toVisit.length;
+  // Use live page count as total estimate — toVisit grows as links are discovered
+  const totalToCheck = db.prepare('SELECT COUNT(*) as n FROM pages WHERE gone=0').get().n || toVisit.length;
   const upsertMeta = db.prepare('INSERT OR REPLACE INTO site_meta (key, value) VALUES (?, ?)');
   const started = Date.now();
   while (toVisit.length > 0 && (Date.now() - started) < timeout) {
