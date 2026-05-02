@@ -122,7 +122,7 @@ const detectLanguageForImagePdfs = async (db, domain) => {
     }
   };
 
-  // Stage 1 — free Unicode detection (fast, no boss needed)
+  // Stage 1 — free Unicode detection on ALL docs with unknown language (not just image PDFs)
   const freeRows = db.prepare(`
     SELECT pq.url, pq.pdf_title, pq.excerpt,
            h.hosted_title, hp.local_path as host_local_path, p.local_path
@@ -131,14 +131,21 @@ const detectLanguageForImagePdfs = async (db, domain) => {
     LEFT JOIN pages hp ON h.host_url=hp.url
     LEFT JOIN pages p ON pq.url=p.url
     WHERE (pq.ai_language IS NULL OR pq.ai_language='unknown')
-      AND (pq.has_text_layer=0 OR pq.has_text_layer IS NULL)
     LIMIT ?`).all(FREE_BATCH);
 
+  const URL_LANG_HINTS = { arabic: /\/arabic\/|[_-]ar[_-]|\/ar\//, persian: /\/persian\/|\/farsi\/|[_-]fa[_-]|\/fa\//, hebrew: /\/hebrew\/|[_-]he[_-]|\/he\//, japanese: /\/japanese\/|[_-]ja[_-]|\/ja\//, chinese: /\/chinese\/|[_-]zh[_-]|\/zh\// };
   let freeDetected = 0;
   for (const row of freeRows) {
+    // Try URL path for language hints first
+    let langKey = 'unknown';
+    for (const [lang, re] of Object.entries(URL_LANG_HINTS)) {
+      if (re.test(row.url)) { langKey = lang; break; }
+    }
     // Try anchor text + title
-    const titleSample = [row.hosted_title, row.pdf_title, row.excerpt].filter(Boolean).join(' ');
-    let langKey = detectLanguage(titleSample);
+    if (langKey === 'unknown') {
+      const titleSample = [row.hosted_title, row.pdf_title, row.excerpt].filter(Boolean).join(' ');
+      langKey = detectLanguage(titleSample);
+    }
     if (langKey === 'unknown' || !langKey) {
       // Try host page paragraph around the link
       if (row.host_local_path && existsSync(row.host_local_path)) {
