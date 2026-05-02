@@ -297,6 +297,12 @@ const processOne = async (db, domain, row, allDomains = [], ocrBackend = 'boss')
       const improvement = (dup.after_score || 0) - (row.before_score || 0);
       db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
         .run(new Date().toISOString(), outputPath, dup.after_score, improvement, dup.pages_processed, `${dup.method}+dedup`, row.url);
+      // Re-score from copied file so pdf_quality reflects the upgraded metrics
+      try {
+        const dupMetrics = await scorePdf(outputPath);
+        db.prepare(`UPDATE pdf_quality SET composite_score=?, has_text_layer=?, readable_pages_pct=?, avg_chars_per_page=?, word_quality_estimate=?, excerpt=? WHERE url=?`)
+          .run(dupMetrics.composite_score, dupMetrics.has_text_layer, dupMetrics.readable_pages_pct, dupMetrics.avg_chars_per_page, dupMetrics.word_quality_estimate, dupMetrics.excerpt, row.url);
+      } catch {}
       log(`Dedup hit: ${row.url} → reused from another site (${contentHash.slice(0, 8)}…)`);
       return;
     }
@@ -342,6 +348,10 @@ const processOne = async (db, domain, row, allDomains = [], ocrBackend = 'boss')
 
     db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
       .run(new Date().toISOString(), outputPath, afterMetrics.composite_score, improvement, numPages, method, row.url);
+
+    // Update pdf_quality to reflect the upgraded document's actual metrics
+    db.prepare(`UPDATE pdf_quality SET composite_score=?, has_text_layer=?, readable_pages_pct=?, avg_chars_per_page=?, word_quality_estimate=?, excerpt=? WHERE url=?`)
+      .run(afterMetrics.composite_score, afterMetrics.has_text_layer, afterMetrics.readable_pages_pct, afterMetrics.avg_chars_per_page, afterMetrics.word_quality_estimate, afterMetrics.excerpt, row.url);
 
     log(`Done: ${row.url} score ${(row.before_score||0).toFixed(2)} → ${afterMetrics.composite_score.toFixed(2)} (+${improvement.toFixed(2)}) via ${method}`);
   } catch (err) {

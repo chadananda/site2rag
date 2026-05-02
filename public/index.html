@@ -335,7 +335,7 @@ if ('serviceWorker' in navigator) {
                 <div class="flex-1 min-w-0">
                   <!-- Title row -->
                   <div class="flex items-start gap-2 mb-0.5">
-                    <a :href="doc.url" target="_blank" rel="noopener" @click.stop
+                    <a :href="pdfSrc(doc)" target="_blank" rel="noopener" @click.stop
                        class="font-semibold text-sm text-gray-900 hover:text-blue-600 leading-snug line-clamp-2 flex-1"
                        x-text="docTitle(doc)"></a>
                     <!-- Status badge -->
@@ -490,7 +490,7 @@ if ('serviceWorker' in navigator) {
             <img :src="thumbSrc(expandedDoc, 800, modalPage, null)" :alt="docTitle(expandedDoc)"
                  class="rounded-lg w-72 cursor-pointer block"
                  style="box-shadow:0 2px 12px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06)"
-                 @click="window.open(expandedDoc.url,'_blank')"
+                 @click="window.open(pdfSrc(expandedDoc),'_blank')"
                  title="Click to open PDF"
                  onerror="this.style.display='none'">
             <button @click.stop="modalPageNext()"
@@ -699,6 +699,10 @@ function app() {
     thumbSrc(doc, w = 144, page = 1, h = 192) {
       const hParam = h ? `&h=${h}` : '';
       return `${API_BASE}/api/thumbnail?url=${encodeURIComponent(doc.url)}&w=${w}${hParam}&page=${page}`;
+    },
+    pdfSrc(doc) {
+      if (doc.upgraded_pdf_path) return `${API_BASE}/api/docs/download?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}`;
+      return doc.url;
     },
 
     openDetail(doc) {

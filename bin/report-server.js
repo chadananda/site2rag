@@ -1,6 +1,6 @@
 // site2rag API + report server. Routes: /api/sites, /api/docs, /api/thumbnail, /api/docs/skip, /api/docs/summarize; static public/.
 import { createServer } from 'http';
-import { existsSync, readFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, mkdirSync, statSync } from 'fs';
 import { join, extname, dirname, resolve } from 'path';
 import { Worker } from 'worker_threads';
 import { createHash } from 'crypto';
@@ -394,7 +394,10 @@ createServer(async (req, res) => {
     const thumbPath = join(thumbDir, `x${hash}_p${pageNo}_${sizeKey}.jpg`);
 
     if (existsSync(thumbPath)) {
-      res.writeHead(200, { 'Content-Type': 'image/jpeg', ...cacheHeaders(604800) });
+      const stat = statSync(thumbPath);
+      const etag = `"${stat.size}-${stat.mtimeMs}"`;
+      if (req.headers['if-none-match'] === etag) { res.writeHead(304, cacheHeaders(604800)); return res.end(); }
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'ETag': etag, ...cacheHeaders(604800) });
       return res.end(readFileSync(thumbPath));
     }
 
@@ -405,7 +408,9 @@ createServer(async (req, res) => {
         const db2 = safeOpenDb(domain);
         if (db2) { try { db2.prepare('UPDATE pdf_quality SET thumbnail_path=? WHERE url=?').run(thumbPath, docUrl); } finally { db2.close(); } }
       }
-      res.writeHead(200, { 'Content-Type': 'image/jpeg', ...cacheHeaders(604800) });
+      const stat = statSync(thumbPath);
+      const etag = `"${stat.size}-${stat.mtimeMs}"`;
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'ETag': etag, ...cacheHeaders(604800) });
       return res.end(readFileSync(thumbPath));
     } catch (e) {
       console.error(`[thumbnail] failed for ${docUrl}: ${e.message}`);
