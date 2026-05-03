@@ -22,6 +22,9 @@ const sha256file = (path) => sha256(readFileSync(path));
 const now = () => new Date().toISOString();
 const log = (msg) => console.log(`[pdf-upgrade] ${now().slice(0,19)} ${msg}`);
 
+/** Safely parse a URL hostname — returns null on invalid URLs instead of throwing. */
+const safeHostname = (url) => { try { return new URL(url).hostname; } catch { return null; } };
+
 /** Check all other site DBs for an already-upgraded PDF with matching content hash. */
 const findUpgradedDuplicate = (contentHash, allDomains, skipDomain) => {
   for (const domain of allDomains) {
@@ -71,7 +74,6 @@ const upgradeDocumentMarker = async (db, domain, row, allDomains, siteConfig) =>
     const contentHash = sha256file(page.local_path);
     const dup = findUpgradedDuplicate(contentHash, allDomains, domain);
     if (dup) {
-      // Dedup hit — reuse without Marker
       const hash = sha256(page.url).slice(0, 16);
       const upgradedDir = join(mirrorDir(domain), '.upgraded');
       mkdirSync(upgradedDir, { recursive: true });
@@ -158,9 +160,13 @@ const upgradeDocumentOcr = async (db, domain, row, allDomains, ocrBackend, siteC
       keywords: ['site2rag', domain, ...(quality?.source_url ? [quality.source_url] : []), row.url]
     };
 
-    const ocrResults = await reocrDocument(page.local_path, domain, contentHash, numPages,
-      (n, total) => { if (n % 5 === 0 || n === total) log(`  page ${n}/${total}`); },
-      ocrBackend, db, page.url);
+    // Per-document timeout: 30 min max (large PDFs with many pages)
+    const ocrResults = await Promise.race([
+      reocrDocument(page.local_path, domain, contentHash, numPages,
+        (n, total) => { if (n % 5 === 0 || n === total) log(`  page ${n}/${total}`); },
+        ocrBackend, db, page.url),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('OCR timeout after 30min')), 30 * 60 * 1000))
+    ]);
 
     const hash = sha256(page.url).slice(0, 16);
     const upgradedDir = join(mirrorDir(domain), '.upgraded');
@@ -191,87 +197,110 @@ const upgradeDocumentOcr = async (db, domain, row, allDomains, ocrBackend, siteC
 };
 
 const tick = async () => {
-  const { sites } = loadConfig();
+  let sites;
+  try {
+    ({ sites } = loadConfig());
+  } catch (err) {
+    log(`Config load failed: ${err.message}`);
+    return;
+  }
   if (!sites.length) return;
 
-  const openDbs = sites.map(site => ({ db: openDb(new URL(site.url).hostname), domain: new URL(site.url).hostname }));
+  // Filter out sites with invalid URLs before opening any DBs
+  const validSites = sites.filter(site => safeHostname(site.url));
 
-  for (const { db, domain } of openDbs) {
-    await backfillHostsFromMirror(db, domain);
-    await detectLanguageForImagePdfs(db, domain);
-  }
-
-  const allDomains = openDbs.map(o => o.domain);
-  const pass1 = [], pass2plus = [];
-
-  for (const { db, domain } of openDbs) {
-    const sc = sites.find(s => new URL(s.url).hostname === domain) || null;
-    const p1 = db.prepare(`
-      SELECT q.*, pq.composite_score as before_score
-      FROM pdf_upgrade_queue q LEFT JOIN pdf_quality pq ON q.url=pq.url
-      WHERE q.status='pending' AND (q.pass IS NULL OR q.pass=1)
-      ORDER BY q.priority DESC LIMIT ?`).all(MARKER_CONCURRENCY);
-    const p2 = db.prepare(`
-      SELECT q.*, pq.composite_score as before_score
-      FROM pdf_upgrade_queue q LEFT JOIN pdf_quality pq ON q.url=pq.url
-      WHERE q.status='pending' AND q.pass>=2
-      ORDER BY q.priority DESC LIMIT ?`).all(OCR_DOC_CONCURRENCY);
-    for (const row of p1) pass1.push({ db, domain, row, siteConfig: sc });
-    for (const row of p2) pass2plus.push({ db, domain, row, siteConfig: sc });
-  }
-
-  // Pre-warm boss if pass-2+ work is queued — non-blocking, fire and forget
-  if (pass2plus.length > 0) {
-    bossPrewarm().catch(() => {});
-    log(`Pre-warming boss for ${pass2plus.length} pending OCR job(s)`);
-  }
-
-  // Pass 1: Marker (high concurrency, CPU)
-  const markerOk = await markerAvailable();
-  if (pass1.length) {
-    if (markerOk) {
-      pass1.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
-      const batch = pass1.slice(0, MARKER_CONCURRENCY);
-      log(`Pass 1 (Marker): ${batch.length} docs`);
-      await Promise.all(batch.map(({ db, domain, row, siteConfig }) =>
-        upgradeDocumentMarker(db, domain, row, allDomains, siteConfig)));
-    } else {
-      log('Marker unavailable — escalating all pass-1 to pass-2');
-      for (const { db, row } of pass1) {
-        db.prepare("UPDATE pdf_upgrade_queue SET pass=2 WHERE url=? AND (pass IS NULL OR pass<=1)").run(row.url);
-        pass2plus.push({ ...pass1.find(p => p.row.url === row.url) });
+  const openDbs = [];
+  try {
+    for (const site of validSites) {
+      const domain = safeHostname(site.url);
+      try {
+        openDbs.push({ db: openDb(domain), domain });
+      } catch (err) {
+        log(`Failed to open DB for ${domain}: ${err.message}`);
       }
     }
-  }
 
-  // Pass 2+: Boss/Claude vision OCR
-  if (pass2plus.length > 0) {
-    const ocrBackend = await ocrAvailableBackend();
-    if (!ocrBackend) {
-      log('No OCR backend available (boss unreachable, no API key) — skipping pass-2+');
-    } else {
-      if (ocrBackend === 'claude') log('Boss unreachable — falling back to Claude Haiku for OCR');
-      pass2plus.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
-      const batch = pass2plus.slice(0, OCR_DOC_CONCURRENCY);
-      log(`Pass 2+ (${ocrBackend}): ${batch.length} docs`);
-      await Promise.all(batch.map(({ db, domain, row, siteConfig }) =>
-        upgradeDocumentOcr(db, domain, row, allDomains, ocrBackend, siteConfig)));
+    for (const { db, domain } of openDbs) {
+      try { await backfillHostsFromMirror(db, domain); } catch {}
+      try { await detectLanguageForImagePdfs(db, domain); } catch {}
     }
-  }
 
-  if (!pass1.length && !pass2plus.length) log('No pending items');
-  for (const { db } of openDbs) { try { db.close(); } catch {} }
+    const allDomains = openDbs.map(o => o.domain);
+    const pass1 = [], pass2plus = [];
+
+    for (const { db, domain } of openDbs) {
+      const sc = validSites.find(s => safeHostname(s.url) === domain) || null;
+      const p1 = db.prepare(`
+        SELECT q.*, pq.composite_score as before_score
+        FROM pdf_upgrade_queue q LEFT JOIN pdf_quality pq ON q.url=pq.url
+        WHERE q.status='pending' AND (q.pass IS NULL OR q.pass=1)
+        ORDER BY q.priority DESC LIMIT ?`).all(MARKER_CONCURRENCY);
+      const p2 = db.prepare(`
+        SELECT q.*, pq.composite_score as before_score
+        FROM pdf_upgrade_queue q LEFT JOIN pdf_quality pq ON q.url=pq.url
+        WHERE q.status='pending' AND q.pass>=2
+        ORDER BY q.priority DESC LIMIT ?`).all(OCR_DOC_CONCURRENCY);
+      for (const row of p1) pass1.push({ db, domain, row, siteConfig: sc });
+      for (const row of p2) pass2plus.push({ db, domain, row, siteConfig: sc });
+    }
+
+    // Pre-warm boss if pass-2+ work is queued — non-blocking, fire and forget
+    if (pass2plus.length > 0) {
+      bossPrewarm().catch(() => {});
+      log(`Pre-warming boss for ${pass2plus.length} pending OCR job(s)`);
+    }
+
+    // Pass 1: Marker (high concurrency, CPU)
+    const markerOk = await markerAvailable();
+    if (pass1.length) {
+      if (markerOk) {
+        pass1.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
+        const batch = pass1.slice(0, MARKER_CONCURRENCY);
+        log(`Pass 1 (Marker): ${batch.length} docs`);
+        await Promise.all(batch.map(({ db, domain, row, siteConfig }) =>
+          upgradeDocumentMarker(db, domain, row, allDomains, siteConfig)));
+      } else {
+        log('Marker unavailable — escalating all pass-1 to pass-2');
+        for (const { db, row } of pass1) {
+          db.prepare("UPDATE pdf_upgrade_queue SET pass=2 WHERE url=? AND (pass IS NULL OR pass<=1)").run(row.url);
+          pass2plus.push({ ...pass1.find(p => p.row.url === row.url) });
+        }
+      }
+    }
+
+    // Pass 2+: Boss/Claude vision OCR
+    if (pass2plus.length > 0) {
+      const ocrBackend = await ocrAvailableBackend();
+      if (!ocrBackend) {
+        log('No OCR backend available (boss unreachable, no API key) — skipping pass-2+');
+      } else {
+        if (ocrBackend === 'claude') log('Boss unreachable — falling back to Claude Haiku for OCR');
+        pass2plus.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
+        const batch = pass2plus.slice(0, OCR_DOC_CONCURRENCY);
+        log(`Pass 2+ (${ocrBackend}): ${batch.length} docs`);
+        await Promise.all(batch.map(({ db, domain, row, siteConfig }) =>
+          upgradeDocumentOcr(db, domain, row, allDomains, ocrBackend, siteConfig)));
+      }
+    }
+
+    if (!pass1.length && !pass2plus.length) log('No pending items');
+  } finally {
+    for (const { db } of openDbs) { try { db.close(); } catch {} }
+  }
 };
 
 const resetStuckProcessing = () => {
   try {
     const { sites } = loadConfig();
     for (const site of sites) {
-      const domain = new URL(site.url).hostname;
-      const db = openDb(domain);
-      const n = db.prepare("UPDATE pdf_upgrade_queue SET status='pending', started_at=NULL WHERE status='processing'").run().changes;
-      if (n) log(`Reset ${n} stuck docs to pending`);
-      db.close();
+      const domain = safeHostname(site.url);
+      if (!domain) continue;
+      let db;
+      try {
+        db = openDb(domain);
+        const n = db.prepare("UPDATE pdf_upgrade_queue SET status='pending', started_at=NULL WHERE status='processing'").run().changes;
+        if (n) log(`Reset ${n} stuck docs to pending`);
+      } catch {} finally { try { db?.close(); } catch {} }
     }
   } catch {}
 };
@@ -279,16 +308,30 @@ const resetStuckProcessing = () => {
 resetStuckProcessing();
 log('PDF upgrade worker started (multi-pass: Marker → boss → Claude)');
 
-const run = async () => { await tick(); setTimeout(run, TICK_INTERVAL_MS); };
+// Global error handlers — log and continue, never crash the daemon
+process.on('unhandledRejection', (reason) => {
+  log(`Unhandled rejection: ${reason?.message ?? reason}`);
+});
+process.on('uncaughtException', (err) => {
+  log(`Uncaught exception: ${err.message}`);
+});
+
+const run = async () => {
+  try { await tick(); } catch (err) { log(`Tick error: ${err.message}`); }
+  setTimeout(run, TICK_INTERVAL_MS);
+};
 
 const summarizeLoop = async () => {
   try {
     const { sites } = loadConfig();
     for (const site of sites) {
-      const domain = new URL(site.url).hostname;
-      const db = openDb(domain);
-      await summarizeTopPending(db, domain);
-      db.close();
+      const domain = safeHostname(site.url);
+      if (!domain) continue;
+      let db;
+      try {
+        db = openDb(domain);
+        await summarizeTopPending(db, domain);
+      } catch {} finally { try { db?.close(); } catch {} }
     }
   } catch {}
   setTimeout(summarizeLoop, SUMMARIZE_INTERVAL_MS);
