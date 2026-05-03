@@ -1,7 +1,7 @@
 // Crawl orchestration: queue setup, concurrent fetch loop, inline MD export. Exports: runMirror. Re-exports: urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks. Deps: mirror-crawl, db, rules, pdf-upgrade/score, export-html, export-doc
 import { fetch } from 'undici';
 import { createHash } from 'crypto';
-import { mkdirSync, writeFileSync } from 'fs';
+import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { dirname, join, extname } from 'path';
 import * as cheerio from 'cheerio';
 import { upsertPage, markGoneUrls } from './db.js';
@@ -103,6 +103,18 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     }
     if (res.status === 304) {
       db.prepare('UPDATE pages SET last_seen_at=? WHERE url=?').run(new Date().toISOString(), canonical);
+      // Extract links from cached file so new-site crawls discover pages even when root returns 304
+      if (existing?.local_path && existing.mime_type?.includes('text/html') && depth < maxDepth) {
+        try {
+          const cached = readFileSync(existing.local_path, 'utf8');
+          const $304 = cheerio.load(cached);
+          for (const link of extractLinks($304, canonical)) {
+            if (!visited.has(link) && inScope(link, siteConfig, seedHost)) {
+              discoverQueue.push({ url: link, depth: depth + 1, fromSitemap: false });
+            }
+          }
+        } catch {}
+      }
       return;
     }
     if (!res.ok) return;
