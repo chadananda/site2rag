@@ -84,6 +84,8 @@ const runSite = async (siteConfig) => {
   db._siteCheckDays = siteConfig.check_every_days ?? 3;
   const runId = startRun(db);
   const runStats = { status: 'running', sitemap: null, mirror: null, assets: null, classify: null, exportHtml: null, exportDoc: null, archive: null, retain: null, error: null };
+  // Record check time at start so restarts don't immediately re-trigger this site
+  setMeta(db, 'last_check_at', new Date().toISOString());
   try {
     // Sitemap
     const sitemapStats = await runSitemap(db, siteConfig);
