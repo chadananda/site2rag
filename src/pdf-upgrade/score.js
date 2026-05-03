@@ -1,54 +1,8 @@
-// PDF quality scoring -- heuristics only, no AI. Composite score 0.0 (unreadable) to 1.0 (clean).
+// PDF quality scoring -- heuristics only, no AI. Exports: scorePdf, saveQualityScore, maybeQueue, extractBadSample. Re-exports: detectLanguage, LANG_COST, LANG_PRIORITY. Deps: pdf-parse, language
 import pdfParse from 'pdf-parse';
 import { readFileSync } from 'fs';
-
-/**
- * Detect primary language from Unicode composition. Returns a language key.
- * Used for cost estimation and queue prioritization (English is cheapest to OCR).
- */
-export const detectLanguage = (text) => {
-  if (!text || text.length < 15) return 'unknown';
-  const len = text.length;
-  if ((text.match(/[\u0600-\u06FF]/g) || []).length / len > 0.07)
-    return (text.match(/[\u067E\u0686\u0698\u06AF]/g) || []).length > 0 ? 'persian' : 'arabic';
-  if ((text.match(/[\u0590-\u05FF]/g) || []).length / len > 0.07) return 'hebrew';
-  if ((text.match(/[\u3040-\u30FF]/g) || []).length / len > 0.05) return 'japanese';
-  if ((text.match(/[\u4E00-\u9FFF]/g) || []).length / len > 0.07) return 'chinese';
-  if ((text.match(/[\u0400-\u04FF]/g) || []).length / len > 0.07) return 'russian';
-  if ((text.match(/[a-zA-Z]/g) || []).length / len > 0.3) return 'english';
-  return 'unknown';
-};
-
-/**
- * Language cost multiplier for OCR processing. English is 1.0 (baseline).
- * Non-Latin scripts require more model tokens and processing time.
- */
-export const LANG_COST = {
-  english: 1.0,
-  russian: 1.15,
-  unknown: 1.2,
-  arabic:  1.35,
-  persian: 1.35,
-  hebrew:  1.35,
-  japanese: 1.5,
-  chinese:  1.5,
-};
-
-/**
- * Priority multiplier for queue ordering. English docs are processed first.
- * Unknown language is heavily deprioritized — we can't estimate cost and
- * cheap OCR scanning must happen before full upgrade.
- */
-export const LANG_PRIORITY = {
-  english:  1.00,
-  russian:  0.85,
-  arabic:   0.70,
-  persian:  0.70,
-  hebrew:   0.70,
-  japanese: 0.55,
-  chinese:  0.55,
-  unknown:  0.30,  // deprioritized until language is identified via cheap scan
-};
+import { detectLanguage, LANG_COST, LANG_PRIORITY } from '../language.js';
+export { detectLanguage, LANG_COST, LANG_PRIORITY };
 // Common English function words for word quality estimation
 const COMMON_WORDS = new Set(['the','of','and','to','a','in','is','it','you','that','he','was','for','on','are','as','with','his','they','at','be','this','from','or','had','by','not','but','have','an','were','we','their','one','all','would','there','what','so','up','out','if','about','who','get','which','go','me','when','make','can','like','time','no','just','him','know','take','into','year','your','good','some','could','them','see','other','than','then','now','look','only','come','its','over','think','also','back','after','use','two','how','our','first','well','way','even','new','want','because','any','these','give','day','most','us']);
 /** Estimate word quality from a text sample. Returns 0-1. */

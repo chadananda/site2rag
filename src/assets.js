@@ -1,4 +1,4 @@
-// Assets stage -- downloads images and documents from mirrored HTML pages; sha256 dedup.
+// Assets stage: downloads images and documents from mirrored HTML pages; sha256 dedup. Exports: runAssets. Deps: undici, cheerio, config, db, constants
 import { fetch } from 'undici';
 import { createHash } from 'crypto';
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from 'fs';
@@ -6,11 +6,8 @@ import { join, extname } from 'path';
 import * as cheerio from 'cheerio';
 import { assetsDir, mirrorDir } from './config.js';
 import { upsertAsset, addAssetRef } from './db.js';
+import { DOC_EXTS, DOC_MIMES, IMAGE_MIMES } from './constants.js';
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
-// Document extensions treated as downloadable documents
-const DOC_EXTS = new Set(['.pdf', '.doc', '.docx', '.odt', '.epub', '.txt']);
-const IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml', 'image/avif']);
-const DOC_MIMES = new Set(['application/pdf', 'application/msword', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'application/vnd.oasis.opendocument.text', 'application/epub+zip', 'text/plain']);
 /** Resolve URL relative to page URL. */
 const resolveUrl = (href, pageUrl) => { try { return new URL(href, pageUrl).toString().split('#')[0]; } catch { return null; } };
 /** Return asset type based on URL and MIME. */

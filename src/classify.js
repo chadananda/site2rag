@@ -1,10 +1,10 @@
-// Classify stage -- rules-first 4-role classifier. No runtime LLM.
+// Classify stage -- rules-first 4-role classifier. Exports: runClassify. Deps: cheerio, jsdom, readability, rules, constants
 import { readFileSync, existsSync } from 'fs';
 import * as cheerio from 'cheerio';
 import { Readability } from '@mozilla/readability';
 import { JSDOM } from 'jsdom';
 import { compileRules, applyClassifyOverride } from './rules.js';
-const DOC_EXTS = new Set(['.pdf', '.doc', '.docx', '.odt', '.epub', '.txt']);
+import { DOC_EXTS } from './constants.js';
 /** Strip HTML to plain text. */
 const toText = (html) => cheerio.load(html).text().replace(/\s+/g, ' ').trim();
 /** Count words in text. */

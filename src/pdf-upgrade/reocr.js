@@ -1,4 +1,4 @@
-// Re-OCR via local AI (boss) or Claude vision fallback. Page-by-page OCR with caching.
+// Re-OCR via local AI (boss) or Claude vision fallback. Exports: reocrDocument, bossAvailable, ocrAvailableBackend. Deps: Anthropic, db, fs
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join, basename } from 'path';
 import { execFileSync } from 'child_process';

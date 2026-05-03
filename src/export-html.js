@@ -1,4 +1,4 @@
-// HTML export -- converts HTML pages to MD with rich frontmatter. Skips unchanged source.
+// HTML export: converts HTML pages to MD with rich frontmatter. Exports: exportHtmlPage, runExportHtml. Deps: cheerio, readability, jsdom, turndown, config, db, metadata, rules
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';

@@ -1,5 +1,5 @@
-// Document (PDF) export -- text extraction, rasterization, OCR pipeline, paragraph backlinks.
-import { readFileSync, writeFileSync, mkdirSync, existsSync, createWriteStream } from 'fs';
+// PDF export: text extraction, rasterization, OCR pipeline, MD output. Exports: exportTextPdf, runExportDoc. Re-exports: addBacklink, assembleDocMd. Deps: export-doc-utils, db, ocr/engines, ocr/reconcile, rules, pdf-upgrade/score
+import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
 import { mdDir, metaDir } from './config.js';
@@ -8,77 +8,55 @@ import { runAllEngines } from './ocr/engines.js';
 import { reconcilePage, computeAgreement } from './ocr/reconcile.js';
 import { compileRules, applyOcrOverride } from './rules.js';
 import { scorePdf, saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
+export { addBacklink, assembleDocMd } from './export-doc-utils.js';
+import { addBacklink, assembleDocMd } from './export-doc-utils.js';
+
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
-/** Build YAML frontmatter block. */
+const OCR_TIMEOUT_MS = 30000;
+const RASTER_TIMEOUT_MS = 60000;
+const PAGE_RENDER_TIMEOUT_MS = 30000;
+
 const buildFrontmatter = (obj) => {
   const yaml = Object.entries(obj).filter(([, v]) => v !== null && v !== undefined)
     .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join('\n');
   return `---\n${yaml}\n---\n\n`;
 };
-/** Append backlink + data attributes to paragraph text per config. */
-export const addBacklink = (text, sourceUrl, pageNo, paraNo, format, granularity) => {
-  if (granularity === 'page') return text; // page-level headers added separately
-  const anchor = `${sourceUrl}#page=${pageNo}`;
-  const visibleLink = ` [↗ p.${pageNo}](${anchor})`;
-  const dataSpan = `\n<span data-pdf-page="${pageNo}" data-pdf-para="${paraNo}" data-pdf-src="${anchor}"></span>`;
-  if (format === 'visible') return text + visibleLink;
-  if (format === 'comment') return text + dataSpan;
-  return text + visibleLink + dataSpan;
-};
-/** Try to parse PDF with pdf-parse. Returns { text, numpages } or null. */
+
 const withTimeout = (promise, ms, label) =>
   Promise.race([promise, new Promise((_, r) => setTimeout(() => r(new Error(`${label} timed out after ${ms}ms`)), ms))]);
 
 const tryPdfParse = async (buf) => {
   try {
     const pdfParse = (await import('pdf-parse')).default;
-    const data = await withTimeout(pdfParse(buf), 30000, 'pdf-parse');
+    const data = await withTimeout(pdfParse(buf), OCR_TIMEOUT_MS, 'pdf-parse');
     return { text: data.text, numpages: data.numpages };
   } catch { return null; }
 };
-/** Rasterize PDF pages to PNGs using pdfjs-dist. Returns array of png paths. */
+
 const rasterizePdf = async (buf, docHash, domain) => {
   const rasterDir = join(metaDir(domain), 'raster', docHash);
   mkdirSync(rasterDir, { recursive: true });
   const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs');
   const loadingTask = pdfjs.getDocument({ data: new Uint8Array(buf) });
-  const pdf = await withTimeout(loadingTask.promise, 60000, 'pdfjs.getDocument');
+  const pdf = await withTimeout(loadingTask.promise, RASTER_TIMEOUT_MS, 'pdfjs.getDocument');
   const pngPaths = [];
   for (let i = 1; i <= pdf.numPages; i++) {
     const pngPath = join(rasterDir, `page-${String(i).padStart(3, '0')}.png`);
     pngPaths.push(pngPath);
-    if (existsSync(pngPath)) continue; // use cache
+    if (existsSync(pngPath)) continue;
     const page = await pdf.getPage(i);
     const viewport = page.getViewport({ scale: 2.0 });
-    // pdfjs-dist in Node requires canvas -- use node-canvas if available, else skip
     try {
       const { createCanvas } = await import('canvas');
       const canvas = createCanvas(viewport.width, viewport.height);
       const ctx = canvas.getContext('2d');
-      await withTimeout(page.render({ canvasContext: ctx, viewport }).promise, 30000, 'page.render');
+      await withTimeout(page.render({ canvasContext: ctx, viewport }).promise, PAGE_RENDER_TIMEOUT_MS, 'page.render');
       writeFileSync(pngPath, canvas.toBuffer('image/png'));
-    } catch { writeFileSync(pngPath, Buffer.alloc(0)); } // placeholder if canvas unavailable
+    } catch { writeFileSync(pngPath, Buffer.alloc(0)); }
   }
   return { pngPaths, numPages: pdf.numPages };
 };
-/** Build page-level header for page granularity. */
-const pageHeader = (sourceUrl, pageNo) => `## Page ${pageNo} [↗](${sourceUrl}#page=${pageNo})\n\n`;
-/** Assemble full MD from per-page reconcile results. */
-export const assembleDocMd = (pageResults, sourceUrl, backlinkFormat, backlinkGranularity) => {
-  return pageResults.map(({ pageNo, text_md }) => {
-    const paragraphs = text_md.split(/\n{2,}/);
-    if (backlinkGranularity === 'page') {
-      return pageHeader(sourceUrl, pageNo) + paragraphs.join('\n\n');
-    }
-    return paragraphs.map((p, idx) => p.trim() ? addBacklink(p, sourceUrl, pageNo, idx + 1, backlinkFormat, backlinkGranularity) : p).join('\n\n');
-  }).join('\n\n');
-};
-/**
- * Run document (PDF) export for a single document URL.
- * @param {object} db - Site SQLite db
- * @param {object} siteConfig - Merged site config
- * @param {object} page - DB page row
- */
+
 const exportDoc = async (db, siteConfig, page) => {
   const domain = siteConfig.domain;
   const ocrCfg = siteConfig.ocr || {};
@@ -92,7 +70,6 @@ const exportDoc = async (db, siteConfig, page) => {
   const minCharsPerPage = ocrCfg.min_text_chars_per_page ?? 50;
   const buf = readFileSync(page.local_path);
   const docHash = sha256(buf);
-  // Try text extraction first
   const pdfData = await tryPdfParse(buf);
   let pageResults = [];
   let ocrUsed = false;
@@ -102,14 +79,10 @@ const exportDoc = async (db, siteConfig, page) => {
   let agreementScores = [];
   let flaggedPages = [];
   if (pdfData && pdfData.text && pdfData.text.length / (pdfData.numpages || 1) >= minCharsPerPage) {
-    // Text PDF -- split by page markers
     totalPages = pdfData.numpages;
     const pageTexts = pdfData.text.split(/\f/).filter(t => t.trim());
-    for (let i = 0; i < totalPages; i++) {
-      pageResults.push({ pageNo: i + 1, text_md: pageTexts[i] || '' });
-    }
+    for (let i = 0; i < totalPages; i++) pageResults.push({ pageNo: i + 1, text_md: pageTexts[i] || '' });
   } else {
-    // Image PDF -- rasterize and OCR
     ocrUsed = true;
     ocrEnginesUsed = engines;
     const { pngPaths, numPages } = await rasterizePdf(buf, docHash, domain);
@@ -126,7 +99,6 @@ const exportDoc = async (db, siteConfig, page) => {
     }
   }
   const docMd = assembleDocMd(pageResults, page.url, backlinkFormat, backlinkGranularity);
-  // Cross-link: find host page for this doc
   const hostRow = db.prepare('SELECT h.*, e.md_path FROM hosts h LEFT JOIN exports e ON h.host_url=e.url WHERE h.hosted_url=?').get(page.url);
   const agreementAvg = agreementScores.length ? agreementScores.reduce((a, b) => a + b, 0) / agreementScores.length : null;
   const frontmatter = {
@@ -161,12 +133,10 @@ const exportDoc = async (db, siteConfig, page) => {
   writeFileSync(mdPath, fullMd, 'utf8');
   return { mdPath, totalPages, ocrUsed, ocrEnginesUsed, reconcilerUsed, agreementAvg, flaggedPages };
 };
+
 /**
- * Export a text-layer PDF to MD immediately (no OCR). Returns true if exported.
- * Used for inline export during mirror and after PDF upgrade completes.
- * @param {object} db - Site SQLite db
- * @param {object} siteConfig - Merged site config
- * @param {object} page - Page row (url, local_path, content_hash, path_slug, last_seen_at)
+ * Export a text-layer PDF to MD immediately (no OCR). Skips if already exported at same hash.
+ * Used inline during mirror and after PDF upgrade.
  */
 export const exportTextPdf = async (db, siteConfig, page) => {
   const domain = siteConfig.domain;
@@ -176,7 +146,6 @@ export const exportTextPdf = async (db, siteConfig, page) => {
   const backlinkFormat = docCfg.backlink_format || 'both';
   const backlinkGranularity = docCfg.backlink_granularity || 'paragraph';
   if (!existsSync(page.local_path)) return false;
-  // Skip if already exported with this exact content hash
   const existing = db.prepare('SELECT source_hash FROM exports WHERE url=?').get(page.url);
   if (existing?.source_hash === page.content_hash) return false;
   let buf;
@@ -215,12 +184,7 @@ export const exportTextPdf = async (db, siteConfig, page) => {
   return true;
 };
 
-/**
- * Run document export stage for all PDF pages in site.
- * @param {object} db - Site SQLite db
- * @param {object} siteConfig - Merged site config
- * @returns {object} Stats: { written, skipped, failed, ocr_pages, flagged }
- */
+/** Run document export for all PDF pages in site. */
 export const runExportDoc = async (db, siteConfig) => {
   const stats = { written: 0, skipped: 0, failed: 0, ocr_pages: 0, flagged: 0 };
   const pages = db.prepare("SELECT p.*, e.source_hash as exp_hash FROM pages p LEFT JOIN exports e ON p.url=e.url WHERE p.gone=0 AND p.mime_type='application/pdf' AND p.local_path IS NOT NULL").all();
@@ -230,8 +194,7 @@ export const runExportDoc = async (db, siteConfig) => {
     try {
       const result = await exportDoc(db, siteConfig, page);
       upsertExport(db, { url: page.url, md_path: result.mdPath, source_hash: page.content_hash, md_hash: null, exported_at: new Date().toISOString(), conversion_method: result.ocrUsed ? 'ocr' : 'pdf-text', word_count: null, ocr_used: result.ocrUsed ? 1 : 0, ocr_engines: result.ocrEnginesUsed?.join(',') || null, reconciler: result.reconcilerUsed, pages: result.totalPages, agreement_avg: result.agreementAvg, flagged_pages: result.flaggedPages?.join(',') || null, host_page_url: null, status: 'ok', error: null });
-      // Score PDF quality and queue for upgrade if below threshold
-      const qualityMetrics = await withTimeout(scorePdf(page.local_path), 30000, 'scorePdf');
+      const qualityMetrics = await withTimeout(scorePdf(page.local_path), OCR_TIMEOUT_MS, 'scorePdf');
       saveQualityScore(db, page.url, page.content_hash, qualityMetrics);
       const upgradeThreshold = siteConfig.pdf_upgrade?.score_threshold ?? 0.7;
       maybeQueue(db, page.url, page.content_hash, qualityMetrics.composite_score, upgradeThreshold, qualityMetrics.language);

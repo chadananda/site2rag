@@ -1,4 +1,4 @@
-// Multi-stage identification pipeline for image PDFs (no text layer).
+// Multi-stage identification pipeline for image PDFs (no text layer). Exports: identifyDocument. Deps: tesseract, Anthropic, reocr, fs
 // Stage 1: pdftoppm rasterize + Tesseract OSD (script detection) + OCR rough text
 // Stage 2: Claude Haiku interprets text + metadata → language, title, author, summary
 // Stage 3: Boss vision LLM escalation when Haiku cannot identify from text alone

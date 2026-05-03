@@ -1,23 +1,12 @@
-// Summarize unsummarized image PDFs with Claude Haiku. Runs after scoring, time-budgeted.
+// Summarize unsummarized image PDFs with Claude Haiku. Exports: runSummarizePdfs. Deps: Anthropic, db, language
 import Anthropic from '@anthropic-ai/sdk';
 import { cpus } from 'os';
 import { logLlmCall, llmCost } from './db.js';
+import { detectLanguage } from './language.js';
 
 const CONCURRENCY = Math.max(4, Math.floor(cpus().length / 4));
-const BUDGET_MS = 10 * 60 * 1000; // 10 min max per run
-
-const detectLanguage = (text) => {
-  if (!text || text.length < 15) return 'unknown';
-  const len = text.length;
-  if ((text.match(/[\u0600-\u06FF]/g) || []).length / len > 0.07)
-    return (text.match(/[\u067E\u0686\u0698\u06AF]/g) || []).length > 0 ? 'persian' : 'arabic';
-  if ((text.match(/[\u0590-\u05FF]/g) || []).length / len > 0.07) return 'hebrew';
-  if ((text.match(/[\u3040-\u30FF]/g) || []).length / len > 0.05) return 'japanese';
-  if ((text.match(/[\u4E00-\u9FFF]/g) || []).length / len > 0.07) return 'chinese';
-  if ((text.match(/[\u0400-\u04FF]/g) || []).length / len > 0.07) return 'russian';
-  if ((text.match(/[a-zA-Z]/g) || []).length / len > 0.3) return 'english';
-  return 'unknown';
-};
+const BUDGET_MS = 10 * 60 * 1000;
+const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
 const buildPrompt = (row) => {
   const slug = (row.url || '').split('/').pop().replace(/\.pdf$/i, '').replace(/[-_]/g, ' ').trim();
@@ -65,10 +54,10 @@ export const runSummarizePdfs = async (db, siteConfig) => {
     if (!prompt) { skipped++; return; }
     try {
       const msg = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001', max_tokens: 120,
+        model: HAIKU_MODEL, max_tokens: 120,
         messages: [{ role: 'user', content: prompt }]
       });
-      logLlmCall(db, { stage: 'summarize', url: row.url, page_no: null, provider: 'claude', model: 'claude-haiku-4-5-20251001', tokens_in: msg.usage?.input_tokens || 0, tokens_out: msg.usage?.output_tokens || 0, cost_usd: llmCost('claude-haiku-4-5-20251001', msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0), ok: 1 });
+      logLlmCall(db, { stage: 'summarize', url: row.url, page_no: null, provider: 'claude', model: HAIKU_MODEL, tokens_in: msg.usage?.input_tokens || 0, tokens_out: msg.usage?.output_tokens || 0, cost_usd: llmCost(HAIKU_MODEL, msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0), ok: 1 });
       const text = msg.content[0]?.text || '';
       const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
       const summary = lines[0] || null;
