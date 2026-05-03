@@ -1,5 +1,6 @@
-// Crawl orchestration: queue setup, concurrent fetch loop. Exports: runMirror. Re-exports: urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks. Deps: mirror-crawl, db, rules, pdf-upgrade/score, export-doc
+// Crawl orchestration: queue setup, concurrent fetch loop. Exports: runMirror. Re-exports: urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks. Deps: mirror-crawl, db, rules, pdf-upgrade/score, export-doc, playwright-fetch
 import { fetch } from 'undici';
+import { createPlaywrightPool, isHtmlShell, isWorthRendering } from './playwright-fetch.js';
 import { createHash } from 'crypto';
 import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { dirname, join, extname } from 'path';
@@ -80,6 +81,11 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   const concurrency = siteConfig.crawl_concurrency ?? 4;
   const inFlight = new Set();
 
+  const playwrightEnabled = siteConfig.playwright?.enabled !== false;
+  const playwrightPool = playwrightEnabled ? await createPlaywrightPool(siteConfig.playwright ?? {}).catch(() => null) : null;
+  // null = undecided, true = use playwright for all HTML, false = skip playwright
+  let playwrightNeeded = null;
+
   const fetchAndExportPage = async (canonical, depth, fromSitemap) => {
     const existing = db.prepare('SELECT * FROM pages WHERE url=?').get(canonical);
     const headers = { 'User-Agent': ua };
@@ -124,8 +130,30 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       console.warn(`[mirror] body read error ${canonical}: ${bodyErr.message}`);
       return;
     }
+    let mimeType = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
+    // Playwright auto-detection: if static HTML is a JS shell, try rendering
+    if (mimeType.includes('text/html') && playwrightPool && playwrightNeeded !== false) {
+      const staticHtml = buf.toString('utf8');
+      if (isHtmlShell(staticHtml) || playwrightNeeded === true) {
+        try {
+          const rendered = await playwrightPool.render(canonical);
+          if (playwrightNeeded === null) {
+            if (isWorthRendering(staticHtml, rendered)) {
+              playwrightNeeded = true;
+              buf = Buffer.from(rendered, 'utf8');
+              console.log(`[mirror] playwright mode enabled for ${domain}`);
+            } else {
+              playwrightNeeded = false;
+            }
+          } else {
+            buf = Buffer.from(rendered, 'utf8');
+          }
+        } catch (e) {
+          console.warn(`[mirror] playwright render failed ${canonical}: ${e.message}`);
+        }
+      }
+    }
     const contentHash = `sha256:${sha256(buf)}`;
-    const mimeType = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
     const mirrorPath = urlToMirrorPath(domain, canonical);
     const pathSlug = urlPathToSlug(new URL(canonical).pathname);
     const isNew = !existing;
@@ -227,6 +255,7 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     if (requestDelay > 0) await new Promise(r => setTimeout(r, requestDelay));
   }
 
+  if (playwrightPool) await playwrightPool.close();
   const ranToCompletion = discoverQueue.length === 0 && recheckQueue.length === 0;
   if (ranToCompletion) {
     // Safe gone detection: only mark pages gone if absent for 3× check interval.
