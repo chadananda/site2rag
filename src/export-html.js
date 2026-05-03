@@ -15,8 +15,15 @@ const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 const mkTurndown = () => { const td = new TurndownService({ codeBlockStyle: 'fenced', linkStyle: 'inlined' }); td.use(gfm); return td; };
 /** Build YAML frontmatter block from object. */
 const buildFrontmatter = (obj) => {
+  const yamlVal = (v) => {
+    if (typeof v === 'object') return JSON.stringify(v);
+    const s = String(v);
+    // Quote strings that would create invalid YAML (contain ': ', start with special chars)
+    if (typeof v === 'string' && (s.includes(': ') || s.startsWith('"') || s.startsWith("'"))) return JSON.stringify(s);
+    return s;
+  };
   const yaml = Object.entries(obj).filter(([, v]) => v !== null && v !== undefined)
-    .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join('\n');
+    .map(([k, v]) => `${k}: ${yamlVal(v)}`).join('\n');
   return `---\n${yaml}\n---\n\n`;
 };
 /** Rewrite asset URLs in MD to local relative paths; preserve original URL in comment. */

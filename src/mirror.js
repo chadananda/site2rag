@@ -51,7 +51,7 @@ export const urlToMirrorPath = (domain, urlStr) => {
  */
 export const urlPathToSlug = (urlPath) => urlPath.replace(/^\//, '').replace(/\//g, '-').replace(/\.\w+$/, '') || 'index';
 /** Check if URL is in scope for crawling. */
-const inScope = (url, siteConfig, seedHost) => {
+export const inScope = (url, siteConfig, seedHost) => {
   const { include = [], exclude = [], same_domain_only: sameDomain = true, max_depth: maxDepth = 8 } = siteConfig;
   let u;
   try { u = new URL(url); } catch { return false; }
@@ -62,7 +62,7 @@ const inScope = (url, siteConfig, seedHost) => {
   return true;
 };
 /** Parse robots.txt rules for a host. Returns Set of disallowed path prefixes for our UA. */
-const parseRobots = (text, ua) => {
+export const parseRobots = (text, ua) => {
   const disallowed = new Set();
   if (!text) return disallowed;
   let active = false;
@@ -80,12 +80,12 @@ const parseRobots = (text, ua) => {
   return disallowed;
 };
 /** Extract links from HTML, returning absolute URL strings. */
-const extractLinks = ($, baseUrl) => {
+export const extractLinks = ($, baseUrl) => {
   const links = [];
   $('a[href]').each((_, el) => {
     try {
       const href = $(el).attr('href');
-      if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('javascript:')) return;
+      if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('javascript:') || href.startsWith('data:')) return;
       const resolved = new URL(href, baseUrl).toString().split('#')[0];
       links.push(resolved);
     } catch {}

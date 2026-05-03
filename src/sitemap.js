@@ -13,8 +13,9 @@ const fetchText = async (url, ua) => {
   } catch { return null; }
 };
 /** Parse sitemap XML into array of { url, lastmod } entries. */
-const parseSitemapXml = (xml) => {
-  const parsed = parser.parse(xml);
+export const parseSitemapXml = (xml) => {
+  let parsed;
+  try { parsed = parser.parse(xml); } catch { return { type: 'empty', urls: [] }; }
   const sitemapIndex = parsed.sitemapindex?.sitemap;
   if (sitemapIndex) {
     const items = Array.isArray(sitemapIndex) ? sitemapIndex : [sitemapIndex];

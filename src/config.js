@@ -27,7 +27,7 @@ export const loadYaml = () => {
   return yaml.load(readFileSync(yamlPath, 'utf8'));
 };
 /** Deep merge: target keys win over source (defaults). Arrays replace, not concat. */
-const deepMerge = (source, target) => {
+export const deepMerge = (source, target) => {
   if (!target || typeof target !== 'object') return target ?? source;
   if (!source || typeof source !== 'object') return target;
   const result = { ...source };

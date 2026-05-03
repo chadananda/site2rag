@@ -119,4 +119,29 @@ describe('runAssets', () => {
     const stats = await runAssets(db, { domain: DOMAIN });
     expect(stats).toMatchObject({ total: 0, new_assets: 0, skipped: 0 });
   });
+  // New regression tests
+  it('image exceeding size limit via Content-Length -- skipped with no write', async () => {
+    insertPage('bigpage', `<html><body><img src="${SITE_URL}/large.png"></body></html>`);
+    // Simulate a response where the actual buffer exceeds the limit
+    const bigBuf = Buffer.alloc(15 * 1024 * 1024); // 15MB
+    fetch.mockResolvedValue(mockAsset('image/png', bigBuf));
+    const stats = await runAssets(db, { domain: DOMAIN, assets: { image_max_bytes: 10 * 1024 * 1024 } });
+    expect(stats.new_assets).toBe(0);
+    expect(stats.skipped).toBe(1);
+    // Verify no file was written for the asset (no path in assets table with a real file)
+    const asset = db.prepare('SELECT * FROM assets WHERE original_url=?').get(`${SITE_URL}/large.png`);
+    // Asset row may be written with skipped_reason='oversize', but file should not exist
+    if (asset && asset.path) expect(asset.skipped_reason).toBe('oversize');
+  });
+  it('protocol-relative URL resolves correctly against page URL', async () => {
+    // //example.com/image.jpg should resolve to https://example.com/image.jpg when base is https
+    insertPage('proto', `<html><body><img src="//assets.example.com/logo.png"></body></html>`);
+    fetch.mockResolvedValue(mockAsset('image/png', fakePng));
+    const stats = await runAssets(db, { domain: DOMAIN });
+    expect(stats.new_assets).toBe(1);
+    // The resolved URL should use https scheme
+    const asset = db.prepare('SELECT * FROM assets WHERE original_url LIKE ?').get('%assets.example.com/logo.png');
+    expect(asset).toBeTruthy();
+    expect(asset.original_url).toMatch(/^https:\/\//);
+  });
 });

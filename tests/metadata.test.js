@@ -41,4 +41,41 @@ describe('extractMetadata', () => {
     const meta = extractMetadata(page, 'https://example.com/test');
     expect(meta.date_published).toMatch(/^2024-01-15/);
   });
+  // New regression tests
+  it('malformed JSON in ld+json block returns null title_source json_ld, no throw', () => {
+    const page = html('<script type="application/ld+json">{not valid json}</script>');
+    let meta;
+    expect(() => { meta = extractMetadata(page, 'https://example.com/test'); }).not.toThrow();
+    // Falls back past JSON-LD since it failed to parse
+    expect(meta.title_source).not.toBe('json_ld');
+    expect(meta.title).toBeTruthy(); // still has a title from fallback chain
+  });
+  it('multiple JSON-LD blocks -- first matching Article type wins', () => {
+    const page = html(`
+      <script type="application/ld+json">{"@type":"BreadcrumbList","name":"ignored"}</script>
+      <script type="application/ld+json">{"@type":"Article","headline":"Real Article"}</script>
+    `);
+    const meta = extractMetadata(page, 'https://example.com/test');
+    expect(meta.title).toBe('Real Article');
+    expect(meta.title_source).toBe('json_ld');
+  });
+  it('date_published with invalid date string returns null, no throw', () => {
+    const page = html('<script type="application/ld+json">{"@type":"Article","headline":"X","datePublished":"not-a-date"}</script>');
+    let meta;
+    expect(() => { meta = extractMetadata(page, 'https://example.com/test'); }).not.toThrow();
+    expect(meta.date_published).toBeNull();
+  });
+  it('lang="en-US" returns "en" (split on hyphen)', () => {
+    const page = `<!DOCTYPE html><html lang="en-US"><head></head><body><h1>Title</h1></body></html>`;
+    const meta = extractMetadata(page, 'https://example.com/test');
+    expect(meta.language).toBe('en');
+  });
+  it('canonical link wins over og:url', () => {
+    const page = html(`
+      <link rel="canonical" href="https://example.com/canonical-path">
+      <meta property="og:url" content="https://example.com/og-path">
+    `);
+    const meta = extractMetadata(page, 'https://example.com/test');
+    expect(meta.canonical_url).toBe('https://example.com/canonical-path');
+  });
 });

@@ -16,7 +16,7 @@ const buildFrontmatter = (obj) => {
   return `---\n${yaml}\n---\n\n`;
 };
 /** Append backlink + data attributes to paragraph text per config. */
-const addBacklink = (text, sourceUrl, pageNo, paraNo, format, granularity) => {
+export const addBacklink = (text, sourceUrl, pageNo, paraNo, format, granularity) => {
   if (granularity === 'page') return text; // page-level headers added separately
   const anchor = `${sourceUrl}#page=${pageNo}`;
   const visibleLink = ` [↗ p.${pageNo}](${anchor})`;
@@ -64,7 +64,7 @@ const rasterizePdf = async (buf, docHash, domain) => {
 /** Build page-level header for page granularity. */
 const pageHeader = (sourceUrl, pageNo) => `## Page ${pageNo} [↗](${sourceUrl}#page=${pageNo})\n\n`;
 /** Assemble full MD from per-page reconcile results. */
-const assembleDocMd = (pageResults, sourceUrl, backlinkFormat, backlinkGranularity) => {
+export const assembleDocMd = (pageResults, sourceUrl, backlinkFormat, backlinkGranularity) => {
   return pageResults.map(({ pageNo, text_md }) => {
     const paragraphs = text_md.split(/\n{2,}/);
     if (backlinkGranularity === 'page') {
