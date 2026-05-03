@@ -64,6 +64,22 @@ createServer(async (req, res) => {
   try { cfg = loadConfig(); } catch (e) { return err(res, 500, `Config error: ${e.message}`); }
   const sites = cfg.sites.map(s => ({ domain: new URL(s.url).hostname, url: s.url }));
 
+  if (path === '/api/health') {
+    const checks = sites.map(s => {
+      const db = safeOpenDb(s.domain);
+      if (!db) return { domain: s.domain, ok: false, error: 'db unavailable' };
+      try {
+        const pageCount = db.prepare('SELECT COUNT(*) as n FROM pages').get().n;
+        const recentErr = db.prepare("SELECT message FROM runs WHERE status='failed' ORDER BY id DESC LIMIT 1").get();
+        return { domain: s.domain, ok: true, pages: pageCount, last_error: recentErr?.message || null };
+      } catch (e) { return { domain: s.domain, ok: false, error: e.message }; }
+      finally { db.close(); }
+    });
+    const serverUptime = Math.floor(process.uptime());
+    const mem = process.memoryUsage();
+    return json(res, { ok: checks.every(c => c.ok), uptime_seconds: serverUptime, mem_mb: Math.round(mem.rss / 1024 / 1024), sites: checks });
+  }
+
   if (path === '/api/sites') {
     return json(res, { sites: sites.map(s => siteSummary(s.domain, s.url)) });
   }
@@ -169,7 +185,7 @@ createServer(async (req, res) => {
           AND (q.has_text_layer=0 OR q.has_text_layer IS NULL OR q.readable_pages_pct < 0.4)
         ORDER BY COALESCE(q.composite_score, 1) ASC
         LIMIT ?`).all(limit);
-    } finally { db.close(); }
+    } catch (e) { db.close(); return err(res, 500, e.message); } finally { db.close(); }
 
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', ...corsHeaders });
     const client = new Anthropic({ apiKey });
@@ -245,7 +261,7 @@ createServer(async (req, res) => {
         LEFT JOIN pages hp ON h.host_url=hp.url
         WHERE q.url=?`).get(docUrl);
       ocrText = db.prepare(`SELECT text_md FROM ocr_pages WHERE doc_url=? AND page_no=1 ORDER BY COALESCE(confidence,0) DESC LIMIT 1`).get(docUrl)?.text_md || null;
-    } finally { db.close(); }
+    } catch (e) { db.close(); return err(res, 500, e.message); } finally { db.close(); }
 
     if (!row) return err(res, 404, 'doc not found in pdf_quality');
     if (row.summary_tier === 'haiku' && row.ai_summarized_at) {
