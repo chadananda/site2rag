@@ -14,14 +14,17 @@ const CLAUDE_OCR_MODEL = 'claude-haiku-4-5-20251001';
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 
-/** Check if boss is reachable. Returns true if available. */
+/** Check if boss router is reachable AND the target model is loaded. */
 export const bossAvailable = async () => {
   try {
     const ctrl = new AbortController();
     const tid = setTimeout(() => ctrl.abort(), 5000);
     const res = await fetch(`${LOCAL_LLM}/models`, { signal: ctrl.signal });
     clearTimeout(tid);
-    return res.ok;
+    if (!res.ok) return false;
+    const data = await res.json();
+    // Check if the specific model alias or ID is available
+    return data.data?.some(m => m._alias === LOCAL_LLM_MODEL || m.id === LOCAL_LLM_MODEL) ?? false;
   } catch { return false; }
 };
 
