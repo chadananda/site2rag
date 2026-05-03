@@ -1,4 +1,4 @@
-// Classify stage -- rules-first 4-role classifier. Exports: runClassify. Deps: cheerio, jsdom, readability, rules, constants
+// Classify stage -- rules-first 4-role classifier. Exports: classifyPage, runClassify. Deps: cheerio, jsdom, readability, rules, constants
 import { readFileSync, existsSync } from 'fs';
 import * as cheerio from 'cheerio';
 import { Readability } from '@mozilla/readability';
@@ -60,54 +60,63 @@ const heuristicRole = (features, wordThreshold) => {
   if (ttr < 5 && outbound_link_count > 10) return 'index';
   return 'content';
 };
+/** Populate the hosts table for a host_page. */
+const populateHosts = ($, pageUrl, db) => {
+  $('a[href]').each((_, el) => {
+    const href = $(el).attr('href') || '';
+    const ext = href.split('.').pop().toLowerCase().split('?')[0];
+    if (!DOC_EXTS.has(`.${ext}`)) return;
+    let hosted_url;
+    try { hosted_url = new URL(href, pageUrl).toString().split('#')[0]; } catch { return; }
+    const hosted_title = $(el).text().trim() || href.split('/').pop();
+    db.prepare('INSERT OR REPLACE INTO hosts (host_url, hosted_url, hosted_title, detected_at) VALUES (?, ?, ?, ?)').run(pageUrl, hosted_url, hosted_title, new Date().toISOString());
+  });
+};
 /**
- * Classify all unclassified pages for a site.
- * @param {object} db - SQLite db for domain
- * @param {object} siteConfig - Merged site config
- * @returns {object} Stats: { classified, host_pages, rule_overrides }
+ * Classify a single HTML page given its content. Called inline during crawl and as backfill.
+ * @param {string} html - HTML content string
+ * @param {string} url - Page URL (for host population and rule matching)
+ * @param {object} compiled - Compiled rules from compileRules()
+ * @param {number} wordThreshold - Min words for content role
+ * @param {object} db - SQLite db (for hosts table population)
+ * @returns {{ role, classify_method, word_count_clean }}
+ */
+export const classifyPage = (html, url, compiled, wordThreshold, db) => {
+  const overrideRole = applyClassifyOverride(compiled, url);
+  if (overrideRole) {
+    if (overrideRole === 'host_page' && db) {
+      const $ = cheerio.load(html);
+      populateHosts($, url, db);
+    }
+    return { role: overrideRole, classify_method: 'rules', word_count_clean: null };
+  }
+  const $ = cheerio.load(html);
+  const title = $('title').text().trim() || $('h1').first().text().trim() || '';
+  const cleanText = extractCleanText($, html, compiled);
+  const wc = wordCount(cleanText);
+  const { doc_link_count, title_doc_overlap } = computeDocFeatures($, title);
+  const outbound_link_count = $('a[href]').length;
+  const ttr = textToLinkRatio($, cleanText);
+  const role = heuristicRole({ wc, doc_link_count, title_doc_overlap, outbound_link_count, ttr }, wordThreshold);
+  if (role === 'host_page' && db) populateHosts($, url, db);
+  return { role, classify_method: 'heuristic', word_count_clean: wc };
+};
+/**
+ * Backfill: classify all unclassified HTML pages from disk. Used for pages mirrored
+ * before inline classification was wired up.
  */
 export const runClassify = (db, siteConfig) => {
   const wordThreshold = siteConfig.classify?.word_threshold ?? 200;
   const compiled = compileRules(siteConfig.rules);
-  const pages = db.prepare("SELECT * FROM pages WHERE gone=0 AND mime_type LIKE 'text/html%' AND local_path IS NOT NULL AND (page_role IS NULL OR classify_method != 'heuristic')").all();
+  const pages = db.prepare("SELECT * FROM pages WHERE gone=0 AND mime_type LIKE 'text/html%' AND local_path IS NOT NULL AND (page_role IS NULL OR COALESCE(classify_method,'') != 'heuristic')").all();
   const stats = { classified: 0, host_pages: 0, rule_overrides: 0 };
   for (const page of pages) {
-    // Rules-first: check classify_overrides (cheap — no file I/O)
-    const overrideRole = applyClassifyOverride(compiled, page.url);
-    if (overrideRole) {
-      db.prepare('UPDATE pages SET page_role=?, classify_method=? WHERE url=?').run(overrideRole, 'rules', page.url);
-      stats.classified++;
-      stats.rule_overrides++;
-      if (overrideRole === 'host_page') stats.host_pages++;
-      continue;
-    }
-    // Skip already-classified pages (heuristic result won't change without file changes)
-    if (page.page_role && page.classify_method === 'heuristic') continue;
     if (!existsSync(page.local_path)) continue;
     const html = readFileSync(page.local_path, 'utf8');
-    // Compute features
-    const $ = cheerio.load(html);
-    const title = $('title').text().trim() || $('h1').first().text().trim() || '';
-    const cleanText = extractCleanText($, html, compiled);
-    const wc = wordCount(cleanText);
-    const { doc_link_count, title_doc_overlap } = computeDocFeatures($, title);
-    const outbound_link_count = $('a[href]').length;
-    const ttr = textToLinkRatio($, cleanText);
-    const role = heuristicRole({ wc, doc_link_count, title_doc_overlap, outbound_link_count, ttr }, wordThreshold);
-    db.prepare('UPDATE pages SET page_role=?, classify_method=?, word_count_clean=? WHERE url=?').run(role, 'heuristic', wc, page.url);
-    // Populate hosts table for host_page role
-    if (role === 'host_page') {
-      $('a[href]').each((_, el) => {
-        const href = $(el).attr('href') || '';
-        const ext = href.split('.').pop().toLowerCase().split('?')[0];
-        if (!DOC_EXTS.has(`.${ext}`)) return;
-        let hosted_url;
-        try { hosted_url = new URL(href, page.url).toString().split('#')[0]; } catch { return; }
-        const hosted_title = $(el).text().trim() || href.split('/').pop();
-        db.prepare('INSERT OR REPLACE INTO hosts (host_url, hosted_url, hosted_title, detected_at) VALUES (?, ?, ?, ?)').run(page.url, hosted_url, hosted_title, new Date().toISOString());
-      });
-      stats.host_pages++;
-    }
+    const { role, classify_method, word_count_clean } = classifyPage(html, page.url, compiled, wordThreshold, db);
+    db.prepare('UPDATE pages SET page_role=?, classify_method=?, word_count_clean=? WHERE url=?').run(role, classify_method, word_count_clean, page.url);
+    if (role === 'host_page') stats.host_pages++;
+    if (classify_method === 'rules') stats.rule_overrides++;
     stats.classified++;
   }
   return stats;

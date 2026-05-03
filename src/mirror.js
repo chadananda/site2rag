@@ -7,6 +7,7 @@ import * as cheerio from 'cheerio';
 import { upsertPage, markGoneUrls } from './db.js';
 import { compileRules, applyFollowOverride, stripQueryParams } from './rules.js';
 import { scorePdf, saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
+import { classifyPage } from './classify.js';
 import { exportHtmlPage } from './export-html.js';
 import { exportTextPdf } from './export-doc.js';
 export { urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks } from './mirror-crawl.js';
@@ -155,17 +156,28 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
         }
       }
     }
+    // Classify HTML inline — we have the content in memory, no disk re-read needed
+    let page_role = null, word_count_clean = null, classify_method = null;
+    if ((isNew || isChanged) && mimeType.includes('text/html') && siteConfig.classify?.enabled !== false) {
+      try {
+        const wordThreshold = siteConfig.classify?.word_threshold ?? 200;
+        ({ role: page_role, classify_method, word_count_clean } = classifyPage(buf.toString('utf8'), canonical, compiled, wordThreshold, db));
+      } catch (e) { console.warn(`[mirror] classify ${canonical}: ${e.message}`); }
+    }
     upsertPage(db, {
       url: canonical, path_slug: pathSlug, local_path: savedPath,
       from_sitemap: fromSitemap ? 1 : 0,
       etag: res.headers.get('etag'), last_modified: res.headers.get('last-modified'),
       content_hash: contentHash, mime_type: mimeType, status_code: res.status,
-      depth, page_role: null, word_count_clean: null
+      depth, page_role, word_count_clean
     });
+    if (classify_method) {
+      db.prepare('UPDATE pages SET classify_method=? WHERE url=?').run(classify_method, canonical);
+    }
     if (isNew || isChanged) {
       const pageRow = { url: canonical, path_slug: pathSlug, local_path: savedPath,
         content_hash: contentHash, mime_type: mimeType, depth, from_sitemap: fromSitemap ? 1 : 0,
-        page_role: null, last_seen_at: new Date().toISOString(), backup_url: null,
+        page_role, last_seen_at: new Date().toISOString(), backup_url: null,
         backup_archived_at: null, archive_only: 0, last_changed_at: null };
       if (mimeType.includes('text/html')) {
         try { exportHtmlPage(db, siteConfig, pageRow, buf.toString('utf8')); }

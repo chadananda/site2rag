@@ -89,14 +89,14 @@ const runSite = async (siteConfig) => {
     const sitemapStats = await runSitemap(db, siteConfig);
     runStats.sitemap = sitemapStats;
     const priorityQueue = [...(sitemapStats.added || []), ...(sitemapStats.changed || [])];
-    // Classify + export pages that were mirrored but not yet classified (from prior incomplete runs)
+    // Backfill: classify+export any pages left unclassified from prior runs
     if (siteConfig.classify?.enabled !== false) {
       runStats.classify = runClassify(db, siteConfig);
     }
     if (siteConfig.export_md) {
       runStats.exportHtml = runExportHtml(db, siteConfig);
     }
-    // Mirror
+    // Mirror — classifies and exports each page inline as it's fetched
     const mirrorStats = await runMirror(db, siteConfig, priorityQueue);
     runStats.mirror = mirrorStats;
     // Assets
@@ -107,11 +107,6 @@ const runSite = async (siteConfig) => {
     runStats.scorePdfs = await runScorePdfs(db, siteConfig);
     // Summarize image PDFs with Haiku (time-budgeted, 10 min max per run)
     runStats.summarize = await runSummarizePdfs(db, siteConfig);
-    // Classify + export newly mirrored pages
-    if (siteConfig.classify?.enabled !== false) {
-      const classifyPost = runClassify(db, siteConfig);
-      runStats.classify = { ...runStats.classify, post_mirror: classifyPost };
-    }
     // Export
     if (siteConfig.export_md) {
       runStats.exportHtml = runExportHtml(db, siteConfig);

@@ -208,7 +208,7 @@ export const upsertPage = (db, page) => {
       .run({ sitemap_lastmod: null, etag: null, last_modified: null, content_hash: null, mime_type: null, status_code: null, depth: 0, path_slug: null, local_path: null, from_sitemap: 0, page_role: null, word_count_clean: null, first_seen_at: now, last_seen_at: now, last_changed_at: now, gone: 0, ...page });
   } else {
     const changed = page.content_hash && page.content_hash !== existing.content_hash;
-    db.prepare(`UPDATE pages SET path_slug=@path_slug, local_path=@local_path, from_sitemap=@from_sitemap, sitemap_lastmod=@sitemap_lastmod, etag=@etag, last_modified=@last_modified, content_hash=@content_hash, mime_type=@mime_type, status_code=@status_code, depth=@depth, last_seen_at=@last_seen_at, last_changed_at=@last_changed_at, gone=0, gone_since=NULL, page_role=@page_role, word_count_clean=@word_count_clean WHERE url=@url`)
+    db.prepare(`UPDATE pages SET path_slug=@path_slug, local_path=@local_path, from_sitemap=@from_sitemap, sitemap_lastmod=@sitemap_lastmod, etag=@etag, last_modified=@last_modified, content_hash=@content_hash, mime_type=@mime_type, status_code=@status_code, depth=@depth, last_seen_at=@last_seen_at, last_changed_at=@last_changed_at, gone=0, gone_since=NULL, page_role=COALESCE(@page_role, page_role), word_count_clean=COALESCE(@word_count_clean, word_count_clean) WHERE url=@url`)
       .run({ sitemap_lastmod: null, etag: null, last_modified: null, content_hash: null, mime_type: null, status_code: null, depth: 0, path_slug: null, local_path: null, from_sitemap: 0, page_role: null, word_count_clean: null, ...page, last_seen_at: now, last_changed_at: changed ? now : existing.last_changed_at });
   }
 };
