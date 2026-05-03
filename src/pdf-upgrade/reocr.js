@@ -111,20 +111,16 @@ const ocrPageViaClaude = async (pngPath, db, docUrl, pageNo) => {
  * Rasterize one page of a PDF to PNG using pdftoppm (poppler).
  * More reliable than pdfjs for server-side rendering.
  */
-const rasterizePage = (pdfPath, pageNo, outDir) => {
+const rasterizePage = (pdfPath, pageNo, outDir, dpi = 200) => {
   const pngPath = join(outDir, `reocr-page-${String(pageNo).padStart(3, '0')}.png`);
   if (existsSync(pngPath)) return pngPath;
-  // pdftoppm outputs: outDir/reocr-page-NNN-PPP.ppm  (first arg is output prefix)
-  const prefix = join(outDir, 'reocr-page');
   execFileSync('pdftoppm', [
-    '-png', '-r', '200',
+    '-png', '-r', String(dpi),
     '-f', String(pageNo), '-l', String(pageNo),
     '-singlefile',
     pdfPath, join(outDir, `reocr-page-${String(pageNo).padStart(3, '0')}`)
-  ], { timeout: 30000 });
-  // pdftoppm with -singlefile writes: prefix.png
-  const out = join(outDir, `reocr-page-${String(pageNo).padStart(3, '0')}.png`);
-  return out;
+  ], { timeout: 120000 });
+  return pngPath;
 };
 
 /**
@@ -211,7 +207,9 @@ export const reocrDocument = async (pdfPath, domain, docHash, numPages, onProgre
       onProgress?.(i, numPages);
       return;
     }
-    const pngPath = rasterizePage(pdfPath, i, cacheDir);
+    // Claude has a 5MB image limit — use 150 DPI; boss handles full 200 DPI
+    const dpi = backend === 'claude' ? 150 : 200;
+    const pngPath = rasterizePage(pdfPath, i, cacheDir, dpi);
     const { text_md, confidence } = backend === 'claude'
       ? await ocrPageViaClaude(pngPath, db, docUrl, i)
       : await ocrPageViaBoss(pngPath);
