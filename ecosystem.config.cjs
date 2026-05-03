@@ -72,8 +72,9 @@ module.exports = {
         NODE_ENV: 'production',
         SITE2RAG_ROOT,
         ANTHROPIC_API_KEY,
-        LOCAL_LLM: process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:8000/v1',
-        LOCAL_LLM_MODEL: process.env.LOCAL_LLM_MODEL || 'llava'
+        LOCAL_LLM: process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:49800/v1',
+        LOCAL_LLM_MODEL: process.env.LOCAL_LLM_MODEL || 'vision',
+        MARKER_URL: process.env.MARKER_URL || 'http://localhost:7842'
       },
       autorestart: true,
       watch: false,
@@ -82,6 +83,26 @@ module.exports = {
       max_memory_restart: '512M',
       out_file: '../logs/pdf-upgrade.out.log',
       error_file: '../logs/pdf-upgrade.err.log',
+      merge_logs: true
+    },
+    {
+      name: 'marker-service',
+      script: './bin/marker-service.py',
+      cwd: __dirname,
+      interpreter: '/tank/site2rag/marker-venv/bin/python',
+      env: {
+        NODE_ENV: 'production',
+        SITE2RAG_ROOT,
+        MARKER_PORT: '7842',
+        MARKER_WORKERS: '8'
+      },
+      autorestart: true,
+      watch: false,
+      min_uptime: '60s',
+      restart_delay: 30000,
+      max_memory_restart: '4G',
+      out_file: '../logs/marker-service.out.log',
+      error_file: '../logs/marker-service.err.log',
       merge_logs: true
     },
     {

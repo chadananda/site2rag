@@ -1,11 +1,12 @@
-// Re-OCR via local AI (boss) or Claude vision fallback. Exports: reocrDocument, bossAvailable, ocrAvailableBackend. Deps: Anthropic, db, fs
+// Re-OCR via boss vision LLM (router) or Claude vision fallback. Exports: reocrDocument, bossAvailable, ocrAvailableBackend, bossPrewarm. Deps: Anthropic, db, fs
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join, basename } from 'path';
 import { execFileSync } from 'child_process';
 import { metaDir } from '../config.js';
 
-const LOCAL_LLM = process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:8000/v1';
-const LOCAL_LLM_MODEL = process.env.LOCAL_LLM_MODEL || 'llava';
+// Use boss router (49800) — supports on-demand model start, model aliases, /v1/prepare
+const LOCAL_LLM = process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:49800/v1';
+const LOCAL_LLM_MODEL = process.env.LOCAL_LLM_MODEL || 'vision';
 const TIMEOUT_MS = 120_000;
 const PAGE_CONCURRENCY = 8; // parallel page OCR calls per document
 // Claude Haiku for OCR fallback — cheap vision model, good at text transcription
@@ -29,6 +30,23 @@ export const ocrAvailableBackend = async () => {
   if (await bossAvailable()) return 'boss';
   if (process.env.ANTHROPIC_API_KEY) return 'claude';
   return null;
+};
+
+/**
+ * Ask the boss router to pre-warm an on-demand model (non-blocking).
+ * Call before queuing a batch of OCR jobs so the model is ready when needed.
+ */
+export const bossPrewarm = async (model = LOCAL_LLM_MODEL) => {
+  try {
+    const base = LOCAL_LLM.replace(/\/v1\/?$/, '');
+    const res = await fetch(`${base}/v1/prepare`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model }),
+      signal: AbortSignal.timeout(5000)
+    });
+    return res.ok || res.status === 202;
+  } catch { return false; }
 };
 
 /** OCR a single PNG page via boss vision model. Returns { text_md, confidence }. */

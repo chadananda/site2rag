@@ -161,6 +161,9 @@ const migrate = (db) => {
   addCol('pdf_quality', 'thumbnail_path', 'TEXT');
   addCol('pdf_quality', 'summary_tier', 'TEXT');   // 'free' | 'haiku'
   addCol('pdf_quality', 'ai_language', 'TEXT');
+  // Multi-pass upgrade tracking
+  addCol('pdf_upgrade_queue', 'pass', 'INT DEFAULT 1');
+  addCol('pdf_upgrade_queue', 'marker_md_path', 'TEXT');
   // Fix readable_pages_pct stored as 0-100 instead of 0-1; recompute composite_score
   db.exec(`
     UPDATE pdf_quality

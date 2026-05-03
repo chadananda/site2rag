@@ -822,11 +822,12 @@ function app() {
 
     upgradeSegPct(s, type) {
       const total = s.total_pdfs || 1;
-      const okPct = Math.round((s.already_ok||0) / total * 100);
-      const donePct = Math.round((s.upgraded||0) / total * 100);
-      if (type === 'ok') return okPct;
-      if (type === 'done') return donePct;
-      if (type === 'needs') return Math.max(0, 100 - okPct - donePct);
+      const okPct = (s.already_ok||0) / total * 100;
+      // Ensure upgraded segment is always visible (min 1.5%) when any PDFs are upgraded
+      const rawDone = (s.upgraded||0) / total * 100;
+      const donePct = s.upgraded > 0 ? Math.max(1.5, rawDone) : 0;
+      if (type === 'ok') return Math.min(okPct, 100 - donePct).toFixed(2);
+      if (type === 'done') return donePct.toFixed(2);
       return 0;
     },
 
