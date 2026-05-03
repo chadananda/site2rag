@@ -105,12 +105,13 @@ export const classifyPage = (html, url, compiled, wordThreshold, db) => {
  * Backfill: classify all unclassified HTML pages from disk. Used for pages mirrored
  * before inline classification was wired up.
  */
-export const runClassify = (db, siteConfig) => {
+export const runClassify = async (db, siteConfig) => {
   const wordThreshold = siteConfig.classify?.word_threshold ?? 200;
   const compiled = compileRules(siteConfig.rules);
   const pages = db.prepare("SELECT * FROM pages WHERE gone=0 AND mime_type LIKE 'text/html%' AND local_path IS NOT NULL AND (page_role IS NULL OR COALESCE(classify_method,'') != 'heuristic') LIMIT 500").all();
   const stats = { classified: 0, host_pages: 0, rule_overrides: 0 };
-  for (const page of pages) {
+  for (let i = 0; i < pages.length; i++) {
+    const page = pages[i];
     if (!existsSync(page.local_path)) continue;
     const html = readFileSync(page.local_path, 'utf8');
     const { role, classify_method, word_count_clean } = classifyPage(html, page.url, compiled, wordThreshold, db);
@@ -118,6 +119,8 @@ export const runClassify = (db, siteConfig) => {
     if (role === 'host_page') stats.host_pages++;
     if (classify_method === 'rules') stats.rule_overrides++;
     stats.classified++;
+    // Yield every 10 pages so GC can reclaim JSDOM memory before the next batch
+    if (i % 10 === 9) await new Promise(r => setImmediate(r));
   }
   return stats;
 };

@@ -21,14 +21,14 @@ const DOMAIN = 'regression.example.com';
 // ── Config invariants ──────────────────────────────────────────────────────────
 
 describe('config path helpers are functions (not constants)', () => {
-  it('getSiteRoot reads SITE2RAG_ROOT at call time', () => {
+  it('getSiteRoot reads SITE2RAG_ROOT at call time', async () => {
     const original = process.env.SITE2RAG_ROOT;
     process.env.SITE2RAG_ROOT = '/tmp/test-root-override';
     expect(getSiteRoot()).toBe('/tmp/test-root-override');
     process.env.SITE2RAG_ROOT = original;
   });
 
-  it('getMirrorRoot reflects updated SITE2RAG_ROOT', () => {
+  it('getMirrorRoot reflects updated SITE2RAG_ROOT', async () => {
     const original = process.env.SITE2RAG_ROOT;
     process.env.SITE2RAG_ROOT = '/tmp/test-root-2';
     expect(getMirrorRoot()).toContain('/tmp/test-root-2');
@@ -42,7 +42,7 @@ describe('openDb always migrates pdf_quality columns', () => {
   let db;
   afterEach(() => { db?.close(); rmSync(testRoot, { recursive: true, force: true }); });
 
-  it('fresh DB has all migration columns', () => {
+  it('fresh DB has all migration columns', async () => {
     db = openDb(DOMAIN);
     const cols = db.pragma('table_info(pdf_quality)').map(r => r.name);
     // Base DDL columns
@@ -55,7 +55,7 @@ describe('openDb always migrates pdf_quality columns', () => {
     );
   });
 
-  it('old DB without migration columns gets them added by openDb', () => {
+  it('old DB without migration columns gets them added by openDb', async () => {
     const dir = join(testRoot, DOMAIN, '_meta');
     mkdirSync(dir, { recursive: true });
     // Create old schema without migration columns
@@ -153,7 +153,7 @@ describe('runClassify host_page detection', () => {
   let db;
   afterEach(() => { db?.close(); rmSync(testRoot, { recursive: true, force: true }); });
 
-  it('classifies page with many PDF links as host_page', () => {
+  it('classifies page with many PDF links as host_page', async () => {
     db = openDb(DOMAIN);
     const dir = join(testRoot, 'html');
     mkdirSync(dir, { recursive: true });
@@ -164,7 +164,7 @@ describe('runClassify host_page detection', () => {
     const path = join(dir, 'host.html');
     writeFileSync(path, html);
     db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone) VALUES (?,?,?,?,?)').run(`https://${DOMAIN}/papers`, 'papers', path, 'text/html', 0);
-    runClassify(db, { domain: DOMAIN });
+    await runClassify(db, { domain: DOMAIN });
     const row = db.prepare('SELECT page_role FROM pages WHERE url=?').get(`https://${DOMAIN}/papers`);
     expect(row.page_role).toBe('host_page');
     // Should also populate hosts table
@@ -172,7 +172,7 @@ describe('runClassify host_page detection', () => {
     expect(hosted.length).toBeGreaterThan(0);
   });
 
-  it('rule overrides apply even to already-classified pages (no file I/O needed)', () => {
+  it('rule overrides apply even to already-classified pages (no file I/O needed)', async () => {
     // classify always re-runs so updated rules in websites.yaml apply immediately
     db = openDb(DOMAIN);
     const dir = join(testRoot, 'html2');
@@ -181,7 +181,7 @@ describe('runClassify host_page detection', () => {
     writeFileSync(path, '<html><body><p>content</p></body></html>');
     db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone, page_role) VALUES (?,?,?,?,?,?)').run(`https://${DOMAIN}/page`, 'page', path, 'text/html', 0, 'index');
     // Override via rules — should win over existing page_role
-    runClassify(db, { domain: DOMAIN, rules: { classify_overrides: [{ pattern: '/page', role: 'content' }] } });
+    await runClassify(db, { domain: DOMAIN, rules: { classify_overrides: [{ pattern: '/page', role: 'content' }] } });
     const row = db.prepare('SELECT page_role, classify_method FROM pages WHERE url=?').get(`https://${DOMAIN}/page`);
     expect(row.page_role).toBe('content');
     expect(row.classify_method).toBe('rules');

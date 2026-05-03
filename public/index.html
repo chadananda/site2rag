@@ -16,7 +16,7 @@ if ('serviceWorker' in navigator) {
         if (this.state === 'activated') location.reload();
       });
     });
-    setInterval(() => reg.update(), 30000);
+    setInterval(() => reg.update().catch(() => {}), 30000);
   });
 }
 </script>

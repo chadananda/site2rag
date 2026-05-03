@@ -91,7 +91,7 @@ const runSite = async (siteConfig) => {
     const priorityQueue = [...(sitemapStats.added || []), ...(sitemapStats.changed || [])];
     // Backfill: classify+export any pages left unclassified from prior runs
     if (siteConfig.classify?.enabled !== false) {
-      runStats.classify = runClassify(db, siteConfig);
+      runStats.classify = await runClassify(db, siteConfig);
     }
     if (siteConfig.export_md) {
       runStats.exportHtml = runExportHtml(db, siteConfig);

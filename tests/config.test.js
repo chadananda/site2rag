@@ -57,7 +57,7 @@ describe('deepMerge', () => {
   });
 });
 describe('compileRules invalid regex', () => {
-  it('compileRules with invalid regex pattern does not throw', () => {
+  it('compileRules with invalid regex pattern does not throw', async () => {
     // If the caller passes a bad regex pattern, compileRules must not blow up the whole process.
     // The current implementation calls new RegExp(o.pattern) directly, which throws for invalid patterns.
     // This test documents current behavior: it does throw. If that changes, the test will alert us.

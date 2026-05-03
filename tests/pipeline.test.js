@@ -66,24 +66,24 @@ describe('classify → export pipeline', () => {
     rmSync(testRoot, { recursive: true, force: true });
   });
 
-  it('classifies content page correctly', () => {
+  it('classifies content page correctly', async () => {
     setupPage(db, mDir, 'https://pipeline.example.com/deep-sea-corals', 'deep-sea-corals', CONTENT_HTML);
-    const stats = runClassify(db, { domain: DOMAIN });
+    const stats = await runClassify(db, { domain: DOMAIN });
     expect(stats.classified).toBeGreaterThanOrEqual(1);
     const row = db.prepare('SELECT page_role FROM pages WHERE url=?').get('https://pipeline.example.com/deep-sea-corals');
     expect(row.page_role).toBe('content');
   });
 
-  it('classifies index page correctly', () => {
+  it('classifies index page correctly', async () => {
     setupPage(db, mDir, 'https://pipeline.example.com/index', 'index', INDEX_HTML);
-    runClassify(db, { domain: DOMAIN });
+    await runClassify(db, { domain: DOMAIN });
     const row = db.prepare('SELECT page_role FROM pages WHERE url=?').get('https://pipeline.example.com/index');
     expect(row.page_role).toBe('index');
   });
 
-  it('classifies host_page with PDF links and populates hosts table', () => {
+  it('classifies host_page with PDF links and populates hosts table', async () => {
     setupPage(db, mDir, 'https://pipeline.example.com/resources', 'resources', HOST_PAGE_HTML);
-    runClassify(db, { domain: DOMAIN });
+    await runClassify(db, { domain: DOMAIN });
     const row = db.prepare('SELECT page_role FROM pages WHERE url=?').get('https://pipeline.example.com/resources');
     expect(row.page_role).toBe('host_page');
     const hosts = db.prepare('SELECT * FROM hosts WHERE host_url=?').all('https://pipeline.example.com/resources');
@@ -91,7 +91,7 @@ describe('classify → export pipeline', () => {
     expect(hosts.map(h => h.hosted_url)).toContain('https://pipeline.example.com/report.pdf');
   });
 
-  it('exports content page to MD with correct frontmatter', () => {
+  it('exports content page to MD with correct frontmatter', async () => {
     setupPage(db, mDir, 'https://pipeline.example.com/deep-sea-corals', 'deep-sea-corals', CONTENT_HTML, { page_role: 'content' });
     const stats = runExportHtml(db, { domain: DOMAIN });
     expect(stats.written).toBe(1);
@@ -103,14 +103,14 @@ describe('classify → export pipeline', () => {
     expect(md).toContain('Deep Sea Corals');
   });
 
-  it('does not export pages without page_role (runExportHtml skips unclassified)', () => {
+  it('does not export pages without page_role (runExportHtml skips unclassified)', async () => {
     setupPage(db, mDir, 'https://pipeline.example.com/unclassified', 'unclassified', CONTENT_HTML);
     // page_role is null — runExportHtml only processes pages with page_role set
     const stats = runExportHtml(db, { domain: DOMAIN });
     expect(stats.written).toBe(0);
   });
 
-  it('skips re-export when content unchanged', () => {
+  it('skips re-export when content unchanged', async () => {
     setupPage(db, mDir, 'https://pipeline.example.com/deep-sea-corals', 'deep-sea-corals', CONTENT_HTML, { page_role: 'content' });
     const first = runExportHtml(db, { domain: DOMAIN });
     expect(first.written).toBe(1);
@@ -121,7 +121,7 @@ describe('classify → export pipeline', () => {
     expect(second.written).toBe(0);
   });
 
-  it('re-exports preliminary export (source_hash=null) after classify sets page_role', () => {
+  it('re-exports preliminary export (source_hash=null) after classify sets page_role', async () => {
     // Simulate inline mirror export: exportHtmlPage with page_role=null produces source_hash=null
     setupPage(db, mDir, 'https://pipeline.example.com/corals2', 'corals2', CONTENT_HTML);
     const pageRow = db.prepare('SELECT * FROM pages WHERE url=?').get('https://pipeline.example.com/corals2');
@@ -138,12 +138,12 @@ describe('classify → export pipeline', () => {
     expect(exp2.source_hash).toBe('sha256:test');
   });
 
-  it('full classify→export sequence produces correct MD for multiple page types', () => {
+  it('full classify→export sequence produces correct MD for multiple page types', async () => {
     setupPage(db, mDir, 'https://pipeline.example.com/corals', 'corals', CONTENT_HTML);
     setupPage(db, mDir, 'https://pipeline.example.com/nav', 'nav', INDEX_HTML);
     setupPage(db, mDir, 'https://pipeline.example.com/docs', 'docs', HOST_PAGE_HTML);
 
-    const classifyStats = runClassify(db, { domain: DOMAIN });
+    const classifyStats = await runClassify(db, { domain: DOMAIN });
     expect(classifyStats.classified).toBe(3);
 
     const exportStats = runExportHtml(db, { domain: DOMAIN });
