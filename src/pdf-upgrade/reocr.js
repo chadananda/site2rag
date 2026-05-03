@@ -7,8 +7,10 @@ import { metaDir } from '../config.js';
 // Use boss router (49800) — supports on-demand model start, model aliases, /v1/prepare
 const LOCAL_LLM = process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:49800/v1';
 const LOCAL_LLM_MODEL = process.env.LOCAL_LLM_MODEL || 'vision';
-const TIMEOUT_MS = 120_000;
-const PAGE_CONCURRENCY = 8; // parallel page OCR calls per document
+const TIMEOUT_MS = 180_000;
+// Boss vision has max_num_seqs=2; exceed that and queued pages timeout. Claude handles 8 fine.
+const BOSS_PAGE_CONCURRENCY = 2;
+const CLAUDE_PAGE_CONCURRENCY = 8;
 // Claude Haiku for OCR fallback — cheap vision model, good at text transcription
 const CLAUDE_OCR_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -222,9 +224,9 @@ export const reocrDocument = async (pdfPath, domain, docHash, numPages, onProgre
     onProgress?.(i, numPages);
   };
 
-  // Process pages in parallel batches
-  for (let i = 1; i <= numPages; i += PAGE_CONCURRENCY) {
-    const batch = Array.from({ length: Math.min(PAGE_CONCURRENCY, numPages - i + 1) }, (_, k) => i + k);
+  const concurrency = backend === 'boss' ? BOSS_PAGE_CONCURRENCY : CLAUDE_PAGE_CONCURRENCY;
+  for (let i = 1; i <= numPages; i += concurrency) {
+    const batch = Array.from({ length: Math.min(concurrency, numPages - i + 1) }, (_, k) => i + k);
     await Promise.all(batch.map(processPage));
   }
   return results.slice(1).filter(Boolean); // remove index-0 gap
