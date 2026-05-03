@@ -1,6 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-const SITE2RAG_ROOT = process.env.SITE2RAG_ROOT || __dirname;
+const SITE2RAG_ROOT = process.env.SITE2RAG_ROOT || path.join(__dirname, '..');
 // Load .env from SITE2RAG_ROOT so PM2 picks up secrets without shell sourcing
 const envVars = {};
 const envFile = path.join(SITE2RAG_ROOT, '.env');
