@@ -96,8 +96,15 @@ const runSite = async (siteConfig) => {
     if (siteConfig.export_md) {
       runStats.exportHtml = runExportHtml(db, siteConfig);
     }
+    // Skip mirror entirely if sitemap reported no changes and we have a prior complete crawl
+    const lastComplete = getMeta(db, 'last_complete_crawl_at');
+    const sitemapUnchanged = sitemapStats.unchanged && lastComplete;
+    if (sitemapUnchanged) {
+      console.log(`[site2rag] ${domain} sitemap unchanged, skipping mirror`);
+      runStats.mirror = { checked: 0, new_pages: 0, changed: 0, gone: 0, skipped: true };
+    }
     // Mirror — classifies and exports each page inline as it's fetched
-    const mirrorStats = await runMirror(db, siteConfig, priorityQueue);
+    const mirrorStats = sitemapUnchanged ? runStats.mirror : await runMirror(db, siteConfig, priorityQueue);
     runStats.mirror = mirrorStats;
     // Assets
     if (siteConfig.assets?.enabled !== false) {
