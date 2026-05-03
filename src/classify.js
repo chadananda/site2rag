@@ -108,7 +108,7 @@ export const classifyPage = (html, url, compiled, wordThreshold, db) => {
 export const runClassify = (db, siteConfig) => {
   const wordThreshold = siteConfig.classify?.word_threshold ?? 200;
   const compiled = compileRules(siteConfig.rules);
-  const pages = db.prepare("SELECT * FROM pages WHERE gone=0 AND mime_type LIKE 'text/html%' AND local_path IS NOT NULL AND (page_role IS NULL OR COALESCE(classify_method,'') != 'heuristic')").all();
+  const pages = db.prepare("SELECT * FROM pages WHERE gone=0 AND mime_type LIKE 'text/html%' AND local_path IS NOT NULL AND (page_role IS NULL OR COALESCE(classify_method,'') != 'heuristic') LIMIT 500").all();
   const stats = { classified: 0, host_pages: 0, rule_overrides: 0 };
   for (const page of pages) {
     if (!existsSync(page.local_path)) continue;
