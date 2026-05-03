@@ -1,4 +1,4 @@
-// Crawl orchestration: queue setup, concurrent fetch loop, inline MD export. Exports: runMirror. Re-exports: urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks. Deps: mirror-crawl, db, rules, pdf-upgrade/score, export-html, export-doc
+// Crawl orchestration: queue setup, concurrent fetch loop. Exports: runMirror. Re-exports: urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks. Deps: mirror-crawl, db, rules, pdf-upgrade/score, export-doc
 import { fetch } from 'undici';
 import { createHash } from 'crypto';
 import { mkdirSync, writeFileSync, readFileSync } from 'fs';
@@ -8,7 +8,6 @@ import { upsertPage, markGoneUrls } from './db.js';
 import { compileRules, applyFollowOverride, stripQueryParams } from './rules.js';
 import { scorePdf, saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
 import { classifyPage } from './classify.js';
-import { exportHtmlPage } from './export-html.js';
 import { exportTextPdf } from './export-doc.js';
 export { urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks } from './mirror-crawl.js';
 import { urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks } from './mirror-crawl.js';
@@ -187,18 +186,16 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       db.prepare('UPDATE pages SET classify_method=? WHERE url=?').run(classify_method, canonical);
     }
     if (isNew || isChanged) {
-      const pageRow = { url: canonical, path_slug: pathSlug, local_path: savedPath,
-        content_hash: contentHash, mime_type: mimeType, depth, from_sitemap: fromSitemap ? 1 : 0,
-        page_role, last_seen_at: new Date().toISOString(), backup_url: null,
-        backup_archived_at: null, archive_only: 0, last_changed_at: null };
-      if (mimeType.includes('text/html')) {
-        try { exportHtmlPage(db, siteConfig, pageRow, buf.toString('utf8')); }
-        catch (e) { console.warn(`[mirror] html export ${canonical}: ${e.message}`); }
-      } else if (mimeType === 'application/pdf') {
+      if (mimeType === 'application/pdf') {
+        const pageRow = { url: canonical, path_slug: pathSlug, local_path: savedPath,
+          content_hash: contentHash, mime_type: mimeType, depth, from_sitemap: fromSitemap ? 1 : 0,
+          page_role, last_seen_at: new Date().toISOString(), backup_url: null,
+          backup_archived_at: null, archive_only: 0, last_changed_at: null };
         exportTextPdf(db, siteConfig, pageRow).catch(e =>
           console.warn(`[mirror] pdf export ${canonical}: ${e.message}`)
         );
       }
+      // HTML export deferred to post-mirror runExportHtml batch to avoid OOM on large pages
     }
     if (mimeType.includes('text/html') && depth < maxDepth) {
       const $ = cheerio.load(buf.toString('utf8'));
