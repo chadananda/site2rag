@@ -100,7 +100,7 @@ module.exports = {
       watch: false,
       min_uptime: '60s',
       restart_delay: 30000,
-      max_memory_restart: '4G',
+      max_memory_restart: '20G',
       out_file: '../logs/marker-service.out.log',
       error_file: '../logs/marker-service.err.log',
       merge_logs: true
