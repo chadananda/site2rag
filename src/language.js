@@ -29,14 +29,14 @@ export const LANG_COST = {
 // Language key → display name (null = no display)
 export const LANG_DISPLAY = { english: 'English', russian: 'Russian', arabic: 'Arabic', persian: 'Persian', hebrew: 'Hebrew', japanese: 'Japanese', chinese: 'Chinese', unknown: null };
 
-// Queue priority multiplier; unknown deprioritized until cheap scan identifies language
+// Queue priority multiplier. Non-Latin scripts deeply deprioritized — vision OCR quality unverified.
 export const LANG_PRIORITY = {
   english:  1.00,
   russian:  0.85,
-  arabic:   0.70,
-  persian:  0.70,
-  hebrew:   0.70,
-  japanese: 0.55,
-  chinese:  0.55,
+  arabic:   0.02,
+  persian:  0.02,
+  hebrew:   0.02,
+  japanese: 0.02,
+  chinese:  0.02,
   unknown:  0.30,
 };
