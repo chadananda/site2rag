@@ -263,6 +263,20 @@ export const logLlmCall = (db, call) => {
   db.prepare('INSERT INTO llm_calls (stage, url, page_no, provider, model, tokens_in, tokens_out, cost_usd, ok, called_at) VALUES (@stage, @url, @page_no, @provider, @model, @tokens_in, @tokens_out, @cost_usd, @ok, @called_at)')
     .run({ called_at: new Date().toISOString(), ...call });
 };
+const MODEL_RATES = {
+  'claude-haiku-4-5-20251001': [0.80, 4.00],
+  'claude-haiku-3-5-20241022': [0.80, 4.00],
+  'claude-sonnet-4-5': [3.00, 15.00],
+  'claude-sonnet-4-5-20251001': [3.00, 15.00],
+  'claude-opus-4-7': [15.00, 75.00],
+  'claude-opus-4-5': [15.00, 75.00],
+  'mistral-ocr-latest': [1.00, 1.00],
+};
+/** Compute API cost in USD from token counts and model name. */
+export const llmCost = (model, tokensIn, tokensOut) => {
+  const [inRate, outRate] = MODEL_RATES[model] || [3.00, 15.00];
+  return (tokensIn || 0) / 1e6 * inRate + (tokensOut || 0) / 1e6 * outRate;
+};
 /** Upsert asset row. */
 export const upsertAsset = (db, asset) => {
   const now = new Date().toISOString();

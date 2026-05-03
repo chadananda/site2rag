@@ -234,20 +234,8 @@ const siteSummary = (domain, siteUrl) => {
       : 300;
     const mirrorProgressRaw = db.prepare(`SELECT value FROM site_meta WHERE key='mirror_progress'`).get()?.value;
     const mirror_progress = mirrorProgressRaw ? JSON.parse(mirrorProgressRaw) : null;
-    // Token cost: compute from token counts × per-model rate since cost_usd is stored as 0
-    const MODEL_COST = {
-      'claude-haiku-4-5-20251001': [0.80, 4.00],
-      'claude-haiku-3-5-20241022': [0.80, 4.00],
-      'claude-sonnet-4-5': [3.00, 15.00],
-      'claude-sonnet-4-5-20251001': [3.00, 15.00],
-      'claude-opus-4-7': [15.00, 75.00],
-      'mistral-ocr-latest': [1.00, 1.00],
-    };
-    const tokenRows = db.prepare('SELECT model, SUM(tokens_in) as tin, SUM(tokens_out) as tout FROM llm_calls GROUP BY model').all();
-    const total_cost_usd = tokenRows.reduce((sum, r) => {
-      const [inRate, outRate] = MODEL_COST[r.model] || [3.00, 15.00];
-      return sum + (r.tin || 0) / 1e6 * inRate + (r.tout || 0) / 1e6 * outRate;
-    }, 0);
+    const costRow = db.prepare('SELECT SUM(cost_usd) as total FROM llm_calls').get();
+    const total_cost_usd = costRow?.total || 0;
     return {
       domain, url: siteUrl, available: true,
       total_pages: totals.total_pages || 0, total_html: totals.total_html || 0, total_pdfs: totals.total_pdfs || 0,
@@ -516,8 +504,11 @@ createServer(async (req, res) => {
         const lang = detectLanguage([row.excerpt, row.pdf_title, row.hosted_title].filter(Boolean).join(' '));
         const db2 = safeOpenDb(domain);
         if (db2) {
-          try { db2.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_language=?, summary_tier=?, ai_summarized_at=? WHERE url=?').run(summary, author, lang, 'haiku', new Date().toISOString(), row.url); }
-          finally { db2.close(); }
+          try {
+            db2.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_language=?, summary_tier=?, ai_summarized_at=? WHERE url=?').run(summary, author, lang, 'haiku', new Date().toISOString(), row.url);
+            const { logLlmCall, llmCost } = await import('../src/db.js');
+            logLlmCall(db2, { stage: 'summarize', url: row.url, page_no: null, provider: 'claude', model: 'claude-haiku-4-5-20251001', tokens_in: msg.usage?.input_tokens || 0, tokens_out: msg.usage?.output_tokens || 0, cost_usd: llmCost('claude-haiku-4-5-20251001', msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0), ok: 1 });
+          } finally { db2.close(); }
         }
       } catch (e) {
         console.error(`[batch-summarize] ${row.url}: ${e.message}`);
@@ -668,6 +659,8 @@ createServer(async (req, res) => {
         try {
           db2.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_language=?, summary_tier=?, ai_summarized_at=? WHERE url=?')
             .run(summary, author, detectedLang, 'haiku', new Date().toISOString(), docUrl);
+          const { logLlmCall, llmCost } = await import('../src/db.js');
+          logLlmCall(db2, { stage: 'summarize', url: docUrl, page_no: null, provider: 'claude', model: 'claude-haiku-4-5-20251001', tokens_in: msg.usage?.input_tokens || 0, tokens_out: msg.usage?.output_tokens || 0, cost_usd: llmCost('claude-haiku-4-5-20251001', msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0), ok: 1 });
         } finally { db2.close(); }
       }
       return json(res, { summary, author, language: detectedLang, tier: 'haiku' });

@@ -1,6 +1,7 @@
 // Summarize unsummarized image PDFs with Claude Haiku. Runs after scoring, time-budgeted.
 import Anthropic from '@anthropic-ai/sdk';
 import { cpus } from 'os';
+import { logLlmCall, llmCost } from './db.js';
 
 const CONCURRENCY = Math.max(4, Math.floor(cpus().length / 4));
 const BUDGET_MS = 10 * 60 * 1000; // 10 min max per run
@@ -67,6 +68,7 @@ export const runSummarizePdfs = async (db, siteConfig) => {
         model: 'claude-haiku-4-5-20251001', max_tokens: 120,
         messages: [{ role: 'user', content: prompt }]
       });
+      logLlmCall(db, { stage: 'summarize', url: row.url, page_no: null, provider: 'claude', model: 'claude-haiku-4-5-20251001', tokens_in: msg.usage?.input_tokens || 0, tokens_out: msg.usage?.output_tokens || 0, cost_usd: llmCost('claude-haiku-4-5-20251001', msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0), ok: 1 });
       const text = msg.content[0]?.text || '';
       const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
       const summary = lines[0] || null;

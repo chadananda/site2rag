@@ -65,7 +65,7 @@ const ocrPageViaBoss = async (pngPath) => {
 };
 
 /** OCR a single PNG page via Claude vision. Returns { text_md, confidence }. */
-const ocrPageViaClaude = async (pngPath) => {
+const ocrPageViaClaude = async (pngPath, db, docUrl, pageNo) => {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
   const imgBuf = readFileSync(pngPath);
@@ -82,6 +82,10 @@ const ocrPageViaClaude = async (pngPath) => {
     }]
   });
   const text_md = msg.content[0]?.text?.trim() || '';
+  if (db && docUrl) {
+    const { logLlmCall, llmCost } = await import('../db.js');
+    logLlmCall(db, { stage: 'reocr', url: docUrl, page_no: pageNo || null, provider: 'claude', model: CLAUDE_OCR_MODEL, tokens_in: msg.usage?.input_tokens || 0, tokens_out: msg.usage?.output_tokens || 0, cost_usd: llmCost(CLAUDE_OCR_MODEL, msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0), ok: 1 });
+  }
   return { text_md, confidence: text_md.length > 20 ? 0.9 : 0.3 };
 };
 
@@ -109,7 +113,7 @@ const rasterizePage = (pdfPath, pageNo, outDir) => {
  * Cheap single-page identification scan. Returns { language, topic }.
  * Used for image PDFs with unknown language to classify before expensive full OCR.
  */
-export const identifyPage = async (pdfPath, backend = 'boss') => {
+export const identifyPage = async (pdfPath, backend = 'boss', db, docUrl) => {
   // Rasterize first page to a temp file
   const { mkdtempSync } = await import('fs');
   const { tmpdir } = await import('os');
@@ -134,6 +138,10 @@ export const identifyPage = async (pdfPath, backend = 'boss') => {
       ]}]
     });
     text = msg.content[0]?.text?.trim() || '';
+    if (db && docUrl) {
+      const { logLlmCall, llmCost } = await import('../db.js');
+      logLlmCall(db, { stage: 'identify', url: docUrl, page_no: null, provider: 'claude', model: CLAUDE_OCR_MODEL, tokens_in: msg.usage?.input_tokens || 0, tokens_out: msg.usage?.output_tokens || 0, cost_usd: llmCost(CLAUDE_OCR_MODEL, msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0), ok: 1 });
+    }
   } else {
     const body = {
       model: LOCAL_LLM_MODEL,
@@ -173,7 +181,7 @@ export const identifyPage = async (pdfPath, backend = 'boss') => {
  * @param {function} onProgress - called with (pageNo, total) after each page
  * @param {string} backend - 'boss' | 'claude' (default 'boss')
  */
-export const reocrDocument = async (pdfPath, domain, docHash, numPages, onProgress, backend = 'boss') => {
+export const reocrDocument = async (pdfPath, domain, docHash, numPages, onProgress, backend = 'boss', db, docUrl) => {
   const cacheDir = join(metaDir(domain), 'reocr', docHash);
   mkdirSync(cacheDir, { recursive: true });
   const results = new Array(numPages + 1); // 1-indexed
@@ -187,7 +195,7 @@ export const reocrDocument = async (pdfPath, domain, docHash, numPages, onProgre
     }
     const pngPath = rasterizePage(pdfPath, i, cacheDir);
     const { text_md, confidence } = backend === 'claude'
-      ? await ocrPageViaClaude(pngPath)
+      ? await ocrPageViaClaude(pngPath, db, docUrl, i)
       : await ocrPageViaBoss(pngPath);
     const entry = { pageNo: i, text_md, confidence };
     writeFileSync(cacheFile, JSON.stringify(entry), 'utf8');

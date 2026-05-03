@@ -2,7 +2,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { fetch } from 'undici';
 import { readFileSync } from 'fs';
-import { getOcrPage, saveOcrPage, logLlmCall } from '../db.js';
+import { getOcrPage, saveOcrPage, logLlmCall, llmCost } from '../db.js';
 /** Build Anthropic client from env key. */
 const mkClaude = (cfg) => new Anthropic({ apiKey: process.env[cfg?.api_key_env || 'ANTHROPIC_API_KEY'] });
 /** Call Mistral OCR API. Returns { text_md, confidence, bboxes_json }. */
@@ -80,7 +80,7 @@ export const runEngine = async (db, docUrl, pageNo, engine, pngPath, llmProvider
   saveOcrPage(db, { docUrl, pageNo, engine, text_md: result.text_md, confidence: result.confidence, bboxes_json: result.bboxes_json, bytes: result.text_md.length });
   // Log LLM call if applicable
   if (providerKey && result.tokens_in !== undefined) {
-    logLlmCall(db, { stage: 'ocr_engine', url: docUrl, page_no: pageNo, provider: providerKey, model: model || 'unknown', tokens_in: result.tokens_in || 0, tokens_out: result.tokens_out || 0, cost_usd: 0, ok });
+    logLlmCall(db, { stage: 'ocr_engine', url: docUrl, page_no: pageNo, provider: providerKey, model: model || 'unknown', tokens_in: result.tokens_in || 0, tokens_out: result.tokens_out || 0, cost_usd: llmCost(model || 'unknown', result.tokens_in || 0, result.tokens_out || 0), ok });
   }
   return { text_md: result.text_md, confidence: result.confidence, bboxes_json: result.bboxes_json, fromCache: false };
 };

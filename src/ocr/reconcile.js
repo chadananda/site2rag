@@ -1,7 +1,7 @@
 // OCR reconciler -- confidence-aware merge, Levenshtein agreement, Claude reconciler calls.
 import Anthropic from '@anthropic-ai/sdk';
 import { readFileSync } from 'fs';
-import { logLlmCall } from '../db.js';
+import { logLlmCall, llmCost } from '../db.js';
 /** Normalized Levenshtein distance between two strings (0=identical, 1=completely different). */
 const levenshtein = (a, b) => {
   const la = a.length, lb = b.length;
@@ -106,7 +106,7 @@ export const reconcilePage = async (db, docUrl, pageNo, pngPath, engineResults, 
     const best = pickBestEngine(valid);
     return { text_md: best.text_md, agreement_score: agreement, conversion_method: 'ocr+vote-fallback', unresolved_spans: [] };
   }
-  logLlmCall(db, { stage: 'ocr_reconcile', url: docUrl, page_no: pageNo, provider: reconcilerName, model, tokens_in, tokens_out, cost_usd: 0, ok });
+  logLlmCall(db, { stage: 'ocr_reconcile', url: docUrl, page_no: pageNo, provider: reconcilerName, model, tokens_in, tokens_out, cost_usd: llmCost(model, tokens_in, tokens_out), ok });
   return {
     text_md: result.markdown || '',
     agreement_score: result.agreement_score ?? agreement,

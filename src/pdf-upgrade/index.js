@@ -6,7 +6,7 @@ import { join, dirname } from 'path';
 import { createHash } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { loadConfig, getMirrorRoot, mirrorDir, metaDir } from '../config.js';
-import { openDb } from '../db.js';
+import { openDb, logLlmCall, llmCost } from '../db.js';
 import { ocrAvailableBackend, reocrDocument } from './reocr.js';
 import { identifyDocument } from './identify.js';
 import { rebuildPdf } from './rebuild.js';
@@ -278,6 +278,7 @@ const summarizeTopPending = async (db, domain) => {
         model: 'claude-haiku-4-5-20251001', max_tokens: 150,
         messages: [{ role: 'user', content: prompt }]
       });
+      logLlmCall(db, { stage: 'summarize', url: row.url, page_no: null, provider: 'claude', model: 'claude-haiku-4-5-20251001', tokens_in: msg.usage?.input_tokens || 0, tokens_out: msg.usage?.output_tokens || 0, cost_usd: llmCost('claude-haiku-4-5-20251001', msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0), ok: 1 });
       const text = msg.content[0]?.text || '';
       const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
       const summary = lines[0] || null;
@@ -369,7 +370,7 @@ const processOne = async (db, domain, row, allDomains = [], ocrBackend = 'boss',
     try {
       ocrResults = await reocrDocument(page.local_path, domain, contentHash, numPages, (n, total) => {
         if (n % 5 === 0 || n === total) log(`  page ${n}/${total}`);
-      }, ocrBackend);
+      }, ocrBackend, db, page.url);
     } catch (err) {
       throw new Error(`reocr failed: ${err.message}`);
     }

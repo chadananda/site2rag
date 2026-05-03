@@ -11,6 +11,7 @@ import { tmpdir } from 'os';
 import { randomBytes } from 'crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { identifyPage, ocrAvailableBackend } from './reocr.js';
+import { logLlmCall, llmCost } from '../db.js';
 
 const execFileAsync = promisify(execFile);
 const execAsync = promisify(exec);
@@ -108,7 +109,7 @@ const tesseractSample = async (pdfPath) => {
  * Stage 2: Claude Haiku identifies document from OCR text + anchor metadata.
  * Returns { language, title, author, summary } or null on API failure / all-Unknown.
  */
-const haikuIdentify = async (ocrText, script, metadata, apiKey) => {
+const haikuIdentify = async (ocrText, script, metadata, apiKey, db, url) => {
   const { hostedTitle, pdfTitle, excerpt, hostPageSnippet } = metadata;
   const context = [
     hostedTitle && `Link text: "${hostedTitle}"`,
@@ -138,6 +139,7 @@ Summary: [one sentence describing what this document is about]`;
       max_tokens: 150,
       messages: [{ role: 'user', content: prompt }]
     });
+    if (db && url) logLlmCall(db, { stage: 'identify', url, page_no: null, provider: 'claude', model: HAIKU_MODEL, tokens_in: msg.usage?.input_tokens || 0, tokens_out: msg.usage?.output_tokens || 0, cost_usd: llmCost(HAIKU_MODEL, msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0), ok: 1 });
     const text = msg.content[0]?.text?.trim() || '';
     const get = (key) => {
       const m = text.match(new RegExp(`^${key}:\\s*(.+)`, 'im'));
@@ -190,7 +192,7 @@ export const identifyDocument = async (pdfPath, metadata, db, docUrl, apiKey) =>
 
   // Stage 2: Haiku (if API key and we have anything to interpret)
   if (apiKey && (ocrText.length > 20 || metadata.hostedTitle || metadata.pdfTitle)) {
-    result = await haikuIdentify(ocrText, script, metadata, apiKey);
+    result = await haikuIdentify(ocrText, script, metadata, apiKey, db, docUrl);
     if (result) {
       const normalized = normalizeLanguageKey(result.language);
       langKey = normalized !== 'unknown' ? normalized : langKey;
@@ -204,7 +206,7 @@ export const identifyDocument = async (pdfPath, metadata, db, docUrl, apiKey) =>
     try {
       const backend = await ocrAvailableBackend();
       if (backend) {
-        const { language, topic } = await identifyPage(pdfPath, backend);
+        const { language, topic } = await identifyPage(pdfPath, backend, db, docUrl);
         if (language || topic) {
           const normalized = normalizeLanguageKey(language);
           langKey = normalized !== 'unknown' ? normalized : langKey;
