@@ -58,8 +58,8 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
 
   // discoverQueue: seed + sitemap + newly found links (drained first)
   // recheckQueue: stale existing pages (processed after discoverQueue is empty)
-  // On resume: skip re-seeding to avoid re-fetching top-level pages on every PM2 reload
-  const discoverQueue = isResume ? [] : [
+  // On resume: still include seed URL so link discovery re-runs from root (304 path extracts links from cache)
+  const discoverQueue = isResume ? [{ url: seedUrl, depth: 0, fromSitemap: false }] : [
     ...priorityQueue.filter(u => inScope(u, siteConfig, seedHost)).map(u => ({ url: u, depth: 0, fromSitemap: true })),
     { url: seedUrl, depth: 0, fromSitemap: false }
   ];
