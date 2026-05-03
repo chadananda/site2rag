@@ -1,4 +1,4 @@
-// Playwright browser pool for JS-rendered pages. Exports: createPlaywrightPool, isHtmlShell. Deps: playwright
+// Playwright browser pool for JS-rendered pages. Exports: createPlaywrightPool, isHtmlShell, isWorthRendering. Deps: playwright (npm dep + `npx playwright install chromium`)
 import { chromium } from 'playwright';
 
 const SHELL_WORD_THRESHOLD = 100;

@@ -4,6 +4,7 @@
 - **language.js** — detectLanguage(), LANG_COST, LANG_DISPLAY, LANG_PRIORITY
 - **mirror.js** — runMirror() crawl loop; re-exports crawl utilities from mirror-crawl.js
 - **mirror-crawl.js** — pure crawl utilities: urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks
+- **playwright-fetch.js** — Playwright pool for JS-rendered pages; auto-detects SPA shells; requires `npx playwright install chromium` on deploy
 - **export-html.js** — exportHtmlPage(), runExportHtml()
 - **export-doc.js** — exportTextPdf(), runExportDoc(); re-exports from export-doc-utils.js
 - **export-doc-utils.js** — addBacklink(), assembleDocMd()
