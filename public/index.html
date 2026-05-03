@@ -52,7 +52,12 @@ if ('serviceWorker' in navigator) {
   .seg-fill{height:100%;transition:width .4s;flex-shrink:0}
   .seg-fill-rest{height:100%;transition:flex .4s;flex:1}
 
-  /* Tabs */
+  /* Site tabs */
+  .site-tab{display:flex;flex-direction:column;padding:12px 18px;border-bottom:3px solid transparent;color:#6b7280;transition:all .15s;border-radius:0;min-width:200px;text-align:left;background:transparent}
+  .site-tab.active{color:#111827;border-bottom-color:#111827;background:#fff}
+  .site-tab:hover:not(.active){color:#374151;border-bottom-color:#d1d5db;background:#f9fafb}
+
+  /* PDF tabs */
   .tab-btn{padding:6px 14px;font-size:.8rem;font-weight:600;border-bottom:2px solid transparent;color:#6b7280;transition:all .15s}
   .tab-btn.active{color:#111827;border-bottom-color:#111827}
   .tab-btn:hover:not(.active){color:#374151;border-bottom-color:#d1d5db}
@@ -86,106 +91,124 @@ if ('serviceWorker' in navigator) {
     </div>
   </template>
 
-  <!-- Site cards -->
+  <!-- Site tabs — domain + status + key counts + spidering bar -->
   <template x-if="sites.length">
-    <div class="flex gap-3 mb-5 flex-wrap">
-      <template x-for="s in sites" :key="s.domain">
-        <button @click="selectSite(s)"
-          :class="activeSite?.domain===s.domain ? 'ring-2 ring-gray-800 bg-white' : 'bg-white hover:ring-1 hover:ring-gray-300'"
-          class="text-left rounded-xl border border-gray-200 shadow-sm px-4 py-3 min-w-80 transition-all">
+    <div class="bg-gray-50 border border-b-0 border-gray-200 rounded-t-xl shadow-sm overflow-x-auto mb-0">
+      <div class="flex divide-x divide-gray-200">
+        <template x-for="s in sites" :key="s.domain">
+          <button @click="selectSite(s)" class="site-tab flex-1"
+            :class="activeSite?.domain===s.domain ? 'active' : ''">
 
-          <!-- Domain + status row -->
-          <div class="flex items-center gap-2 mb-1">
-            <span class="font-bold mono text-sm" x-text="s.domain"></span>
-            <span class="text-xs px-2 py-0.5 rounded-full font-semibold" :class="runBadgeCls(s)" x-text="runBadge(s)"></span>
-            <template x-if="s.recent_fails > 0 && s.last_run?.status !== 'running'">
-              <span class="text-xs px-1.5 py-0.5 rounded-full bg-red-100 text-red-600 font-semibold"
-                    :title="s.last_run?.message ? 'Last error: '+s.last_run.message : ''"
-                    x-text="s.recent_fails+' fail'+(s.recent_fails!==1?'s':'')+' today'"></span>
-            </template>
-            <span class="ml-auto text-xs text-gray-400 mono" x-text="lastRunAgo(s)"></span>
+            <!-- Domain + status + run badge -->
+            <div class="flex items-center gap-2 mb-1.5">
+              <span class="status-dot flex-shrink-0"
+                :class="s.last_run?.status==='running'?'bg-blue-400 processing-pulse':s.last_run?.status==='failed'?'bg-red-400':'bg-gray-300'"></span>
+              <span class="mono font-bold text-sm" x-text="s.domain"></span>
+              <span class="text-xs px-1.5 py-0.5 rounded-full font-semibold ml-auto shrink-0" :class="runBadgeCls(s)" x-text="runBadge(s)"></span>
+            </div>
+
+            <!-- Key counts -->
+            <div class="flex gap-3 text-xs mb-2">
+              <span><span class="font-bold mono" x-text="fmt(s.total_pages)"></span><span class="text-gray-400 ml-0.5">pg</span></span>
+              <span><span class="font-bold mono" x-text="fmt(s.total_pdfs)"></span><span class="text-gray-400 ml-0.5">PDF</span></span>
+              <span><span class="font-bold mono text-green-600" x-text="fmt(s.upgraded)"></span><span class="text-gray-400 ml-0.5">↑</span></span>
+              <template x-if="s.processing">
+                <span><span class="font-bold mono text-blue-500 processing-pulse inline-block" x-text="fmt(s.processing)"></span><span class="text-gray-400 ml-0.5">ocr</span></span>
+              </template>
+            </div>
+
+            <!-- Spidering progress bar -->
+            <div class="flex justify-between text-xs mb-0.5">
+              <span :class="s.mirror_progress ? 'text-blue-500 font-medium' : 'text-gray-400'">spidering</span>
+              <span class="mono" :class="s.mirror_progress ? 'text-blue-500' : 'text-gray-400'"
+                x-text="s.mirror_progress ? fmt(crawlDisplay[s.domain]||s.mirror_progress.checked)+'/'+fmt(s.total_pages) : (s.total_pages ? 'done' : '—')"></span>
+            </div>
+            <div class="prog-bar" style="height:4px">
+              <div class="prog-fill"
+                :style="'width:'+(s.mirror_progress ? Math.round((crawlDisplay[s.domain]||s.mirror_progress.checked)/Math.max(s.total_pages,1)*100) : siteProgressPct(s,'pages'))+'%'"
+                :class="s.mirror_progress ? 'bg-blue-400 processing-pulse' : 'bg-gray-400'"></div>
+            </div>
+
+          </button>
+        </template>
+      </div>
+    </div>
+  </template>
+
+  <!-- Active site detail panel -->
+  <template x-if="activeSite">
+    <div class="bg-white border border-gray-200 shadow-sm px-5 py-4 mb-4 rounded-b-xl">
+      <div class="flex items-start gap-6 flex-wrap">
+
+        <!-- Left: domain link + stats row -->
+        <div class="min-w-52">
+          <div class="flex items-center gap-2 mb-2">
+            <a :href="activeSite.url" target="_blank" rel="noopener"
+               class="font-bold mono text-base hover:text-blue-600 hover:underline" x-text="activeSite.domain"></a>
+            <span class="text-xs text-gray-400 mono" x-text="lastRunAgo(activeSite)"></span>
           </div>
-          <template x-if="s.last_run?.status==='failed' && s.last_run?.message">
-            <div class="text-xs text-red-500 mb-1 truncate" :title="s.last_run.message" x-text="'⚠ '+s.last_run.message"></div>
+          <template x-if="activeSite.last_run?.status==='failed' && activeSite.last_run?.message">
+            <div class="text-xs text-red-500 mb-2 truncate" :title="activeSite.last_run.message" x-text="'⚠ '+activeSite.last_run.message"></div>
           </template>
-
-          <!-- Stats row -->
-          <div class="flex gap-4 text-xs mb-3 flex-wrap">
-            <div><span class="font-bold mono text-gray-800" x-text="fmt(s.total_pages)"></span><span class="text-gray-400 ml-1">pages</span></div>
-            <div><span class="font-bold mono text-gray-700" x-text="fmt(s.total_pdfs)"></span><span class="text-gray-400 ml-1">PDFs</span></div>
-            <div><span class="font-bold mono text-amber-600" x-text="fmt(s.pending)"></span><span class="text-gray-400 ml-1">queued</span></div>
-            <template x-if="s.processing">
-              <div><span class="font-bold mono text-blue-500 processing-pulse inline-block" x-text="fmt(s.processing)"></span><span class="text-gray-400 ml-1">processing</span></div>
+          <div class="flex gap-4 text-xs flex-wrap">
+            <div><span class="font-bold mono text-gray-800" x-text="fmt(activeSite.total_pages)"></span><span class="text-gray-400 ml-1">pages</span></div>
+            <div><span class="font-bold mono text-gray-700" x-text="fmt(activeSite.total_pdfs)"></span><span class="text-gray-400 ml-1">PDFs</span></div>
+            <div><span class="font-bold mono text-amber-600" x-text="fmt(activeSite.pending)"></span><span class="text-gray-400 ml-1">queued</span></div>
+            <template x-if="activeSite.processing">
+              <div><span class="font-bold mono text-blue-500 processing-pulse inline-block" x-text="fmt(activeSite.processing)"></span><span class="text-gray-400 ml-1">processing</span></div>
             </template>
-            <div><span class="font-bold mono text-green-600" x-text="fmt(s.upgraded)"></span><span class="text-gray-400 ml-1">upgraded</span></div>
+            <div><span class="font-bold mono text-green-600" x-text="fmt(activeSite.upgraded)"></span><span class="text-gray-400 ml-1">upgraded</span></div>
+            <div class="pl-2 border-l border-gray-100">
+              <span class="mono font-medium" :class="(activeSite.total_cost_usd||0) > 10 ? 'text-amber-600' : 'text-gray-500'"
+                    x-text="activeSite.total_cost_usd ? '$'+(activeSite.total_cost_usd < 0.01 ? activeSite.total_cost_usd.toFixed(4) : activeSite.total_cost_usd.toFixed(2)) : '$0'"></span>
+              <span class="text-gray-400 ml-1">API</span>
+            </div>
           </div>
+        </div>
 
-          <!-- Spider progress (full width, main task) -->
-          <div class="mb-3">
+        <!-- Right: full progress bars -->
+        <div class="flex-1 min-w-64 space-y-2.5">
+          <div>
             <div class="flex justify-between text-xs mb-1">
               <span class="text-gray-500 font-medium">spidering</span>
-              <span class="mono text-gray-600" x-text="fmt(s.total_pages)+' pages · '+fmt(s.total_pdfs)+' PDFs'"></span>
+              <span class="mono text-gray-500" x-text="activeSite.mirror_progress ? fmt(crawlDisplay[activeSite.domain]||activeSite.mirror_progress.checked)+' / '+fmt(activeSite.total_pages)+' pages' : (activeSite.total_pages ? fmt(activeSite.total_pages)+' pages complete' : 'not started')"></span>
             </div>
-            <div class="prog-bar" style="height:8px">
-              <div class="prog-fill" :style="'width:'+(s.mirror_progress ? Math.round((crawlDisplay[s.domain]||s.mirror_progress.checked)/Math.max(s.total_pages,1)*100) : siteProgressPct(s,'pages'))+'%'"
-                   :class="s.mirror_progress ? 'bg-blue-400 processing-pulse' : 'bg-gray-500'"></div>
+            <div class="prog-bar" style="height:7px">
+              <div class="prog-fill" :style="'width:'+(activeSite.mirror_progress ? Math.round((crawlDisplay[activeSite.domain]||activeSite.mirror_progress.checked)/Math.max(activeSite.total_pages,1)*100) : siteProgressPct(activeSite,'pages'))+'%'"
+                   :class="activeSite.mirror_progress ? 'bg-blue-400 processing-pulse' : 'bg-gray-400'"></div>
             </div>
-            <div class="text-xs mt-0.5"
-                 :class="s.mirror_progress ? 'text-blue-500' : 'text-gray-400'"
-                 x-text="s.mirror_progress ? fmt(crawlDisplay[s.domain]||s.mirror_progress.checked)+' crawled · '+fmt(Math.max(0,s.total_pages-(crawlDisplay[s.domain]||s.mirror_progress.checked)))+' remaining' : (s.last_run?.status==='running' ? 'crawling…' : (s.total_pages ? 'complete' : 'not started'))"></div>
           </div>
-
-          <!-- Summarizing progress bar -->
-          <template x-if="s.scored > 0">
-            <div class="mb-3">
+          <template x-if="activeSite.scored > 0">
+            <div>
               <div class="flex justify-between text-xs mb-1">
                 <span class="text-gray-500 font-medium">summarizing</span>
-                <span class="mono text-gray-600" x-text="fmt(sumDisplay[s.domain]||s.image_pdfs_summarized||0)+' / '+fmt(s.image_pdfs)+' image PDFs summarized'"></span>
+                <span class="mono text-gray-500" x-text="fmt(sumDisplay[activeSite.domain]||activeSite.image_pdfs_summarized||0)+' / '+fmt(activeSite.image_pdfs)+' image PDFs'"></span>
               </div>
-              <div class="prog-bar" style="height:6px">
-                <div class="prog-fill bg-violet-400"
-                     :style="'width:'+Math.round(((sumDisplay[s.domain]||s.image_pdfs_summarized||0)/Math.max(s.image_pdfs,1))*100)+'%'"
-                     :title="fmt(sumDisplay[s.domain]||s.image_pdfs_summarized||0)+' of '+fmt(s.image_pdfs)+' image PDFs summarized'"></div>
+              <div class="prog-bar" style="height:5px">
+                <div class="prog-fill bg-violet-400" :style="'width:'+Math.round(((sumDisplay[activeSite.domain]||activeSite.image_pdfs_summarized||0)/Math.max(activeSite.image_pdfs,1))*100)+'%'"></div>
               </div>
-              <div class="text-xs text-gray-400 mt-0.5" x-text="s.image_pdfs_summarized ? fmt(s.image_pdfs_summarized)+' summarized · '+fmt((s.image_pdfs||0)-(s.image_pdfs_summarized||0))+' remaining' : 'no summaries yet'"></div>
             </div>
           </template>
-
-          <!-- Upgrade progress segmented bar: 3 segments filling 100% -->
           <div>
             <div class="flex justify-between text-xs mb-1">
               <span class="text-gray-500 font-medium">PDF upgrade</span>
-              <span class="mono text-gray-600" x-text="upgradeProgressLabel(s)"></span>
+              <span class="mono text-gray-500" x-text="upgradeProgressLabel(activeSite)"></span>
             </div>
-            <div class="seg-bar" style="height:10px">
-              <!-- Light blue: already readable, no upgrade needed -->
-              <div class="seg-fill bg-blue-200" :style="'width:'+upgradeSegPct(s,'ok')+'%'" :title="fmt(s.already_ok||0)+' already readable'"></div>
-              <!-- Green: upgraded/done -->
-              <div class="seg-fill bg-green-400" :style="'width:'+upgradeSegPct(s,'done')+'%'" :title="fmt(s.upgraded)+' upgraded'"></div>
-              <!-- Muted red: fills all remaining space so no gray gap -->
-              <div class="seg-fill-rest bg-red-300" :title="fmt((s.pending||0)+(s.failed||0)+(s.processing||0))+' need upgrade'"></div>
+            <div class="seg-bar" style="height:7px">
+              <div class="seg-fill bg-blue-200" :style="'width:'+upgradeSegPct(activeSite,'ok')+'%'" :title="fmt(activeSite.already_ok||0)+' already readable'"></div>
+              <div class="seg-fill bg-green-400" :style="'width:'+upgradeSegPct(activeSite,'done')+'%'" :title="fmt(activeSite.upgraded)+' upgraded'"></div>
+              <div class="seg-fill-rest bg-red-300" :title="fmt((activeSite.pending||0)+(activeSite.failed||0)+(activeSite.processing||0))+' need upgrade'"></div>
             </div>
             <div class="flex justify-between text-xs mt-1">
-              <span class="text-blue-400" x-text="fmt(s.already_ok||0)+' OK'"></span>
-              <span class="text-green-600 font-medium" x-text="fmt(s.upgraded||0)+' upgraded'"></span>
-              <span class="text-red-400 font-medium" x-text="fmt((s.pending||0)+(s.failed||0)+(s.processing||0))+' need upgrade'"></span>
+              <span class="text-blue-400" x-text="fmt(activeSite.already_ok||0)+' OK'"></span>
+              <span class="text-green-600 font-medium" x-text="fmt(activeSite.upgraded||0)+' upgraded'"></span>
+              <span class="text-red-400 font-medium" x-text="fmt((activeSite.pending||0)+(activeSite.failed||0)+(activeSite.processing||0))+' need upgrade'"></span>
             </div>
           </div>
+          <div class="text-xs text-gray-400 mono pt-1 border-t border-gray-100 truncate" x-text="'MD: '+(activeSite.md_dir||'—')"></div>
+        </div>
 
-          <!-- MD folder + total cost -->
-          <div class="mt-3 pt-3 border-t border-gray-100 space-y-1">
-            <div class="flex items-center gap-1 text-xs text-gray-500">
-              <span class="text-gray-400">MD:</span>
-              <span class="mono text-gray-600 truncate select-all" x-text="s.md_dir || '—'"></span>
-            </div>
-            <div class="flex justify-between text-xs text-gray-500">
-              <span class="text-gray-400">API cost to date</span>
-              <span class="mono font-medium" :class="(s.total_cost_usd||0) > 10 ? 'text-amber-600' : 'text-gray-600'"
-                    x-text="s.total_cost_usd ? '$'+(s.total_cost_usd < 0.01 ? s.total_cost_usd.toFixed(4) : s.total_cost_usd.toFixed(2)) : '$0.00'"></span>
-            </div>
-          </div>
-        </button>
-      </template>
+      </div>
     </div>
   </template>
 
@@ -193,11 +216,7 @@ if ('serviceWorker' in navigator) {
   <template x-if="activeSite">
     <div>
       <!-- Section header -->
-      <h3 class="text-base font-semibold text-gray-700 mb-3">
-        <a :href="activeSite.url" target="_blank" rel="noopener"
-           class="hover:text-blue-600 hover:underline" x-text="activeSite.domain"></a>
-        <span class="text-gray-400 font-normal"> PDF Assets</span>
-      </h3>
+      <h3 class="text-sm font-semibold text-gray-500 mb-3">PDF Assets</h3>
 
       <!-- Tabs -->
       <div class="flex items-end border-b border-gray-200 mb-4 gap-0">

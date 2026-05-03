@@ -137,12 +137,14 @@ const runSite = async (siteConfig) => {
   console.log(`[site2rag] finished site: ${domain} (${runStats.status})`);
 };
 const runningDomains = new Set();
-/** Main tick -- runs all due sites sequentially. Skips domains already running. */
+/** Main tick -- starts all due sites up to max_concurrent_sites. Each runs in parallel. */
 const tick = async () => {
   let config;
   try { config = loadConfig(); } catch (err) { console.error(`[site2rag] config load failed: ${err.message}`); return; }
   const enabledSites = config.sites.filter(s => s.enabled !== false);
+  const maxConcurrent = config.defaults?.max_concurrent_sites ?? 4;
   for (const site of enabledSites) {
+    if (runningDomains.size >= maxConcurrent) { console.log(`[site2rag] max concurrent sites (${maxConcurrent}) reached, deferring remaining`); break; }
     if (runningDomains.has(site.domain)) { console.log(`[site2rag] ${site.domain} already running, skipping tick`); continue; }
     let db;
     try {
@@ -153,6 +155,7 @@ const tick = async () => {
       if (!due) { console.log(`[site2rag] ${site.domain} not due, skipping`); continue; }
     } catch { continue; }
     runningDomains.add(site.domain);
+    console.log(`[site2rag] starting ${site.domain} (${runningDomains.size}/${maxConcurrent} running)`);
     runSite(site).catch(err => console.error(`[site2rag] unhandled error for ${site.domain}: ${err.message}`)).finally(() => runningDomains.delete(site.domain));
   }
 };
