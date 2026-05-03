@@ -69,7 +69,7 @@ const heuristicRole = (features, wordThreshold) => {
 export const runClassify = (db, siteConfig) => {
   const wordThreshold = siteConfig.classify?.word_threshold ?? 200;
   const compiled = compileRules(siteConfig.rules);
-  const pages = db.prepare("SELECT * FROM pages WHERE gone=0 AND mime_type LIKE 'text/html%' AND local_path IS NOT NULL").all();
+  const pages = db.prepare("SELECT * FROM pages WHERE gone=0 AND mime_type LIKE 'text/html%' AND local_path IS NOT NULL AND (page_role IS NULL OR classify_method != 'heuristic')").all();
   const stats = { classified: 0, host_pages: 0, rule_overrides: 0 };
   for (const page of pages) {
     // Rules-first: check classify_overrides (cheap — no file I/O)
