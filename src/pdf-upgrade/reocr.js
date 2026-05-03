@@ -65,7 +65,7 @@ const ocrPageViaBoss = async (pngPath) => {
         { type: 'text', text: 'Transcribe all text from this page exactly as it appears. Output only the transcribed text in clean Markdown. Preserve headings, paragraphs, lists, and tables. Do not add commentary.' }
       ]
     }],
-    max_tokens: 4096,
+    max_tokens: 2048,
     temperature: 0
   };
   const ctrl = new AbortController();
