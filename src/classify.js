@@ -23,12 +23,13 @@ const extractCleanText = ($, html, compiled) => {
     compiled.exclude_selectors.forEach(sel => $content.find(sel).remove());
     return $content.text().replace(/\s+/g, ' ').trim();
   }
+  let dom;
   try {
-    const dom = new JSDOM(html, { url: 'https://example.com' });
+    dom = new JSDOM(html, { url: 'https://example.com' });
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
     return article ? article.textContent.replace(/\s+/g, ' ').trim() : toText(html);
-  } catch { return toText(html); }
+  } catch { return toText(html); } finally { dom?.window.close(); }
 };
 /** Compute doc_link_count and title_doc_overlap for host_page detection. */
 const computeDocFeatures = ($, pageTitle) => {
@@ -119,8 +120,8 @@ export const runClassify = async (db, siteConfig) => {
     if (role === 'host_page') stats.host_pages++;
     if (classify_method === 'rules') stats.rule_overrides++;
     stats.classified++;
-    // Yield every 10 pages so GC can reclaim JSDOM memory before the next batch
-    if (i % 10 === 9) await new Promise(r => setImmediate(r));
+    // Yield every page so GC can reclaim JSDOM memory
+    await new Promise(r => setImmediate(r));
   }
   return stats;
 };

@@ -23,7 +23,7 @@ module.exports = {
       watch: false,
       min_uptime: '30s',
       restart_delay: 30000,
-      max_memory_restart: '2G',
+      max_memory_restart: '6G',
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
       out_file: '../logs/site2rag.out.log',
       error_file: '../logs/site2rag.err.log',
