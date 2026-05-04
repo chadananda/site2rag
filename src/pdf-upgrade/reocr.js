@@ -1,16 +1,27 @@
 // Re-OCR via boss vision LLM (router) or Claude vision fallback. Exports: reocrDocument, bossAvailable, ocrAvailableBackend, bossPrewarm. Deps: Anthropic, db, fs
 import { readFileSync, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join, basename } from 'path';
-import { execFileSync } from 'child_process';
+import { execFile } from 'child_process';
 import { metaDir } from '../config.js';
 
 // Use boss router (49800) — supports on-demand model start, model aliases, /v1/prepare
 const LOCAL_LLM = process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:49800/v1';
 const LOCAL_LLM_MODEL = process.env.LOCAL_LLM_MODEL || 'vision';
 const TIMEOUT_MS = 180_000;
-// Boss vision has max_num_seqs=8; Claude handles 8 fine.
-const BOSS_PAGE_CONCURRENCY = 8;
-const CLAUDE_PAGE_CONCURRENCY = 8;
+// Global page semaphore: boss max_num_seqs=8, keep total in-flight pages ≤ 8 across all concurrent docs
+const BOSS_PAGE_CONCURRENCY = 1;   // per-doc serial; global semaphore enforces the real limit
+const CLAUDE_PAGE_CONCURRENCY = 4; // Claude handles more gracefully
+const BOSS_GLOBAL_PAGE_SLOTS = 8;  // matches vllm max_num_seqs
+let _bossActivePages = 0;
+const _bossWaiters = [];
+const acquireBossSlot = () => new Promise(resolve => {
+  if (_bossActivePages < BOSS_GLOBAL_PAGE_SLOTS) { _bossActivePages++; resolve(); return; }
+  _bossWaiters.push(resolve);
+});
+const releaseBossSlot = () => {
+  const next = _bossWaiters.shift();
+  if (next) { next(); } else { _bossActivePages--; }
+};
 // Claude Haiku for OCR fallback — cheap vision model, good at text transcription
 const CLAUDE_OCR_MODEL = 'claude-haiku-4-5-20251001';
 
@@ -114,18 +125,21 @@ const ocrPageViaClaude = async (pngPath, db, docUrl, pageNo) => {
 
 /**
  * Rasterize one page of a PDF to PNG using pdftoppm (poppler).
- * More reliable than pdfjs for server-side rendering.
+ * Async to avoid blocking the Node.js event loop during long rasterization.
  */
 const rasterizePage = (pdfPath, pageNo, outDir, dpi = 200) => {
   const pngPath = join(outDir, `reocr-page-${String(pageNo).padStart(3, '0')}.png`);
-  if (existsSync(pngPath)) return pngPath;
-  execFileSync('pdftoppm', [
-    '-png', '-r', String(dpi),
-    '-f', String(pageNo), '-l', String(pageNo),
-    '-singlefile',
-    pdfPath, join(outDir, `reocr-page-${String(pageNo).padStart(3, '0')}`)
-  ], { timeout: 120000 });
-  return pngPath;
+  if (existsSync(pngPath)) return Promise.resolve(pngPath);
+  return new Promise((resolve, reject) => {
+    execFile('pdftoppm', [
+      '-png', '-r', String(dpi),
+      '-f', String(pageNo), '-l', String(pageNo),
+      '-singlefile',
+      pdfPath, join(outDir, `reocr-page-${String(pageNo).padStart(3, '0')}`)
+    ], { timeout: 120000 }, (err) => {
+      if (err) reject(err); else resolve(pngPath);
+    });
+  });
 };
 
 /**
@@ -139,7 +153,7 @@ export const identifyPage = async (pdfPath, backend = 'boss', db, docUrl) => {
   const tmpDir = mkdtempSync(join(tmpdir(), 'reocr-id-'));
   let pngPath;
   try {
-    pngPath = rasterizePage(pdfPath, 1, tmpDir);
+    pngPath = await rasterizePage(pdfPath, 1, tmpDir);
   } catch { return { language: null, topic: null }; }
   const imgBuf = readFileSync(pngPath);
   const b64 = imgBuf.toString('base64');
@@ -214,13 +228,18 @@ export const reocrDocument = async (pdfPath, domain, docHash, numPages, onProgre
     }
     // Claude has a 5MB image limit — use 150 DPI; boss handles full 200 DPI
     const dpi = backend === 'claude' ? 150 : 200;
-    const pngPath = rasterizePage(pdfPath, i, cacheDir, dpi);
-    const { text_md, confidence } = backend === 'claude'
-      ? await ocrPageViaClaude(pngPath, db, docUrl, i)
-      : await ocrPageViaBoss(pngPath);
-    const entry = { pageNo: i, text_md, confidence };
-    writeFileSync(cacheFile, JSON.stringify(entry), 'utf8');
-    results[i] = entry;
+    const pngPath = await rasterizePage(pdfPath, i, cacheDir, dpi);
+    if (backend === 'boss') await acquireBossSlot();
+    try {
+      const { text_md, confidence } = backend === 'claude'
+        ? await ocrPageViaClaude(pngPath, db, docUrl, i)
+        : await ocrPageViaBoss(pngPath);
+      const entry = { pageNo: i, text_md, confidence };
+      writeFileSync(cacheFile, JSON.stringify(entry), 'utf8');
+      results[i] = entry;
+    } finally {
+      if (backend === 'boss') releaseBossSlot();
+    }
     onProgress?.(i, numPages);
   };
 
