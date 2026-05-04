@@ -8,8 +8,8 @@ import { metaDir } from '../config.js';
 const LOCAL_LLM = process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:49800/v1';
 const LOCAL_LLM_MODEL = process.env.LOCAL_LLM_MODEL || 'vision';
 const TIMEOUT_MS = 180_000;
-// Boss vision has max_num_seqs=2; exceed that and queued pages timeout. Claude handles 8 fine.
-const BOSS_PAGE_CONCURRENCY = 2;
+// Boss vision has max_num_seqs=8; Claude handles 8 fine.
+const BOSS_PAGE_CONCURRENCY = 8;
 const CLAUDE_PAGE_CONCURRENCY = 8;
 // Claude Haiku for OCR fallback — cheap vision model, good at text transcription
 const CLAUDE_OCR_MODEL = 'claude-haiku-4-5-20251001';

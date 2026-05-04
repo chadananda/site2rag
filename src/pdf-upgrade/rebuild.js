@@ -29,7 +29,7 @@ export const rebuildPdf = async (inputPdfPath, outputPdfPath, ocrResults, meta =
       '--rotate-pages',
       '--deskew',
       '--clean',
-      '--jobs', '2',
+      '--jobs', '8',
       '--quiet'
     ];
     if (meta.title)   args.push('--title',   meta.title);
@@ -39,6 +39,10 @@ export const rebuildPdf = async (inputPdfPath, outputPdfPath, ocrResults, meta =
     await execFileAsync('ocrmypdf', args, { timeout: 300_000 });
     return { success: true, method: 'ocrmypdf-pdfa3' };
   } catch (err) {
+    // Encrypted PDFs can't be processed by either method — fail immediately
+    if (err.message?.includes('EncryptedPdfError') || err.message?.includes('Input PDF is encrypted')) {
+      return { success: false, method: null, error: 'EncryptedPdf: cannot OCR encrypted PDF' };
+    }
     try {
       const result = await injectTextLayer(inputPdfPath, outputPdfPath, ocrResults, meta);
       return { success: true, method: 'pdf-lib-overlay', ...result };

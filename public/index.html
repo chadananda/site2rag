@@ -233,7 +233,7 @@ if ('serviceWorker' in navigator) {
       <!-- Tabs -->
       <div class="flex items-end border-b border-gray-200 mb-4 gap-0">
         <button class="tab-btn" :class="activeTab==='failed'?'active':''" @click="switchTab('failed')">
-          Failed
+          Poor Quality
           <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='failed'?'text-red-400':'text-gray-400'"
             x-text="'('+fmt(tabTotals.failed ?? ((selectedSiteData()?.total_pdfs||0)-(selectedSiteData()?.already_ok||0)-(selectedSiteData()?.upgraded||0)))+')'"></span>
         </button>
@@ -1019,12 +1019,14 @@ function app() {
       if (!s.last_run) return 'no runs';
       if (s.last_run.status === 'running') return '⟳ running';
       if (s.last_run.status === 'success') return '✓ ok';
+      if (s.last_run.status === 'interrupted') return '⊘ stopped';
       return '✗ failed';
     },
     runBadgeCls(s) {
       if (!s.last_run) return 'bg-gray-100 text-gray-400';
       if (s.last_run.status === 'running') return 'bg-blue-100 text-blue-700';
       if (s.last_run.status === 'success') return 'bg-green-100 text-green-700';
+      if (s.last_run.status === 'interrupted') return 'bg-gray-100 text-gray-500';
       return 'bg-red-100 text-red-600';
     },
     lastRunAgo(s) {

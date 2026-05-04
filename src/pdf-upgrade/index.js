@@ -15,7 +15,7 @@ import { markerAvailable, convertPdfWithMarker, scoreMarkdown } from './marker-c
 const TICK_INTERVAL_MS = 60 * 1000;
 const SUMMARIZE_INTERVAL_MS = 15 * 1000;
 const MARKER_CONCURRENCY = 16;   // CPU-bound, tower-nas has 80 cores
-const OCR_DOC_CONCURRENCY = 4;   // GPU-bound on boss
+const OCR_DOC_CONCURRENCY = 8;   // GPU-bound on boss (max_num_seqs=8)
 const MARKER_SCORE_THRESHOLD = 0.55; // md quality to mark pass-1 done
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const sha256file = (path) => sha256(readFileSync(path));
@@ -114,85 +114,90 @@ const upgradeDocumentMarker = async (db, domain, row, allDomains, siteConfig) =>
   }
 };
 
-/** Run pass-2+ (boss/Claude vision OCR) for one document. */
-const upgradeDocumentOcr = async (db, domain, row, allDomains, ocrBackend, siteConfig) => {
-  const page = db.prepare('SELECT * FROM pages WHERE url=?').get(row.url);
-  if (!page?.local_path || !existsSync(page.local_path)) {
-    db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
-      .run(now(), 'local_path missing', row.url);
-    return;
-  }
-  db.prepare("UPDATE pdf_upgrade_queue SET status='processing', started_at=? WHERE url=?").run(now(), row.url);
-  log(`Pass ${row.pass||2} (${ocrBackend}): ${row.url}`);
-
+/** Run pass-2+ (boss/Claude vision OCR) for one document. Opens its own DB so it can run fire-and-forget across ticks. */
+const upgradeDocumentOcr = async (domain, row, allDomains, ocrBackend, siteConfig) => {
+  const db = openDb(domain);
   try {
-    const contentHash = sha256file(page.local_path);
-    const dup = findUpgradedDuplicate(contentHash, allDomains, domain);
-    if (dup) {
+    const page = db.prepare('SELECT * FROM pages WHERE url=?').get(row.url);
+    if (!page?.local_path || !existsSync(page.local_path)) {
+      db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
+        .run(now(), 'local_path missing', row.url);
+      return;
+    }
+    db.prepare("UPDATE pdf_upgrade_queue SET status='processing', started_at=? WHERE url=?").run(now(), row.url);
+    log(`Pass ${row.pass||2} (${ocrBackend}): ${row.url}`);
+
+    try {
+      const contentHash = sha256file(page.local_path);
+      const dup = findUpgradedDuplicate(contentHash, allDomains, domain);
+      if (dup) {
+        const hash = sha256(page.url).slice(0, 16);
+        const upgradedDir = join(mirrorDir(domain), '.upgraded');
+        mkdirSync(upgradedDir, { recursive: true });
+        const outputPath = join(upgradedDir, `x${hash}.pdf`);
+        copyFileSync(dup.upgraded_pdf_path, outputPath);
+        const improvement = (dup.after_score||0) - (row.before_score||0);
+        db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
+          .run(now(), outputPath, dup.after_score, improvement, dup.pages_processed, `${dup.method}+dedup`, row.url);
+        log(`Dedup hit: ${row.url}`);
+        if (siteConfig) {
+          try {
+            const { exportTextPdf } = await import('../export-doc.js');
+            await exportTextPdf(db, siteConfig, { ...page, local_path: outputPath, content_hash: sha256file(outputPath) });
+          } catch {}
+        }
+        return;
+      }
+
+      db.prepare('UPDATE pdf_quality SET content_hash=? WHERE url=?').run(contentHash, row.url);
+      const quality = db.prepare(`
+        SELECT pq.pages, pq.pdf_title, pq.ai_summary, pq.ai_author, h.hosted_title, h.host_url as source_url
+        FROM pdf_quality pq LEFT JOIN hosts h ON pq.url=h.hosted_url WHERE pq.url=?`).get(row.url);
+      const numPages = quality?.pages || 1;
+      const slug = row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
+      const meta = {
+        title:    quality?.hosted_title || quality?.pdf_title || (slug.length > 3 ? slug : undefined),
+        author:   quality?.ai_author && quality.ai_author !== 'Unknown' ? quality.ai_author : undefined,
+        subject:  quality?.ai_summary || undefined,
+        keywords: ['site2rag', domain, ...(quality?.source_url ? [quality.source_url] : []), row.url]
+      };
+
+      // Per-document timeout: 30 min max (large PDFs with many pages)
+      const ocrResults = await Promise.race([
+        reocrDocument(page.local_path, domain, contentHash, numPages,
+          (n, total) => { if (n % 5 === 0 || n === total) log(`  page ${n}/${total}`); },
+          ocrBackend, db, page.url),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('OCR timeout after 30min')), 30 * 60 * 1000))
+      ]);
+
       const hash = sha256(page.url).slice(0, 16);
       const upgradedDir = join(mirrorDir(domain), '.upgraded');
       mkdirSync(upgradedDir, { recursive: true });
       const outputPath = join(upgradedDir, `x${hash}.pdf`);
-      copyFileSync(dup.upgraded_pdf_path, outputPath);
-      const improvement = (dup.after_score||0) - (row.before_score||0);
-      db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
-        .run(now(), outputPath, dup.after_score, improvement, dup.pages_processed, `${dup.method}+dedup`, row.url);
-      log(`Dedup hit: ${row.url}`);
+      const { success, method, error } = await rebuildPdf(page.local_path, outputPath, ocrResults, meta);
+      if (!success) throw new Error(error);
+
+      const afterMetrics = await scorePdf(outputPath);
+      const improvement = afterMetrics.composite_score - (row.before_score||0);
+      db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, before_score=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
+        .run(now(), outputPath, row.before_score||0, afterMetrics.composite_score, improvement, numPages, method, row.url);
+      db.prepare(`UPDATE pdf_quality SET composite_score=?, has_text_layer=?, readable_pages_pct=?, avg_chars_per_page=?, word_quality_estimate=?, excerpt=? WHERE url=?`)
+        .run(afterMetrics.composite_score, afterMetrics.has_text_layer, afterMetrics.readable_pages_pct, afterMetrics.avg_chars_per_page, afterMetrics.word_quality_estimate, afterMetrics.excerpt, row.url);
+      log(`Done (${method}): ${row.url} ${(row.before_score||0).toFixed(2)} → ${afterMetrics.composite_score.toFixed(2)}`);
+
       if (siteConfig) {
         try {
           const { exportTextPdf } = await import('../export-doc.js');
           await exportTextPdf(db, siteConfig, { ...page, local_path: outputPath, content_hash: sha256file(outputPath) });
-        } catch {}
+        } catch (e) { log(`MD export failed: ${e.message}`); }
       }
-      return;
+    } catch (err) {
+      log(`Failed pass ${row.pass||2}: ${row.url}: ${err.message}`);
+      db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
+        .run(now(), err.message, row.url);
     }
-
-    db.prepare('UPDATE pdf_quality SET content_hash=? WHERE url=?').run(contentHash, row.url);
-    const quality = db.prepare(`
-      SELECT pq.pages, pq.pdf_title, pq.ai_summary, pq.ai_author, h.hosted_title, h.host_url as source_url
-      FROM pdf_quality pq LEFT JOIN hosts h ON pq.url=h.hosted_url WHERE pq.url=?`).get(row.url);
-    const numPages = quality?.pages || 1;
-    const slug = row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
-    const meta = {
-      title:    quality?.hosted_title || quality?.pdf_title || (slug.length > 3 ? slug : undefined),
-      author:   quality?.ai_author && quality.ai_author !== 'Unknown' ? quality.ai_author : undefined,
-      subject:  quality?.ai_summary || undefined,
-      keywords: ['site2rag', domain, ...(quality?.source_url ? [quality.source_url] : []), row.url]
-    };
-
-    // Per-document timeout: 30 min max (large PDFs with many pages)
-    const ocrResults = await Promise.race([
-      reocrDocument(page.local_path, domain, contentHash, numPages,
-        (n, total) => { if (n % 5 === 0 || n === total) log(`  page ${n}/${total}`); },
-        ocrBackend, db, page.url),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('OCR timeout after 30min')), 30 * 60 * 1000))
-    ]);
-
-    const hash = sha256(page.url).slice(0, 16);
-    const upgradedDir = join(mirrorDir(domain), '.upgraded');
-    mkdirSync(upgradedDir, { recursive: true });
-    const outputPath = join(upgradedDir, `x${hash}.pdf`);
-    const { success, method, error } = await rebuildPdf(page.local_path, outputPath, ocrResults, meta);
-    if (!success) throw new Error(error);
-
-    const afterMetrics = await scorePdf(outputPath);
-    const improvement = afterMetrics.composite_score - (row.before_score||0);
-    db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, before_score=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
-      .run(now(), outputPath, row.before_score||0, afterMetrics.composite_score, improvement, numPages, method, row.url);
-    db.prepare(`UPDATE pdf_quality SET composite_score=?, has_text_layer=?, readable_pages_pct=?, avg_chars_per_page=?, word_quality_estimate=?, excerpt=? WHERE url=?`)
-      .run(afterMetrics.composite_score, afterMetrics.has_text_layer, afterMetrics.readable_pages_pct, afterMetrics.avg_chars_per_page, afterMetrics.word_quality_estimate, afterMetrics.excerpt, row.url);
-    log(`Done (${method}): ${row.url} ${(row.before_score||0).toFixed(2)} → ${afterMetrics.composite_score.toFixed(2)}`);
-
-    if (siteConfig) {
-      try {
-        const { exportTextPdf } = await import('../export-doc.js');
-        await exportTextPdf(db, siteConfig, { ...page, local_path: outputPath, content_hash: sha256file(outputPath) });
-      } catch (e) { log(`MD export failed: ${e.message}`); }
-    }
-  } catch (err) {
-    log(`Failed pass ${row.pass||2}: ${row.url}: ${err.message}`);
-    db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
-      .run(now(), err.message, row.url);
+  } finally {
+    try { db.close(); } catch {}
   }
 };
 
@@ -250,38 +255,37 @@ const tick = async () => {
       log(`Pre-warming boss for ${pass2plus.length} pending OCR job(s)`);
     }
 
-    // Pass 1: Marker (high concurrency, CPU)
-    const markerOk = await markerAvailable();
-    if (pass1.length) {
-      if (markerOk) {
-        pass1.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
-        const batch = pass1.slice(0, MARKER_CONCURRENCY);
-        log(`Pass 1 (Marker): ${batch.length} docs`);
-        await Promise.all(batch.map(({ db, domain, row, siteConfig }) =>
-          upgradeDocumentMarker(db, domain, row, allDomains, siteConfig)));
-      } else {
-        log('Marker unavailable — escalating all pass-1 to pass-2');
-        for (const { db, row } of pass1) {
-          db.prepare("UPDATE pdf_upgrade_queue SET pass=2 WHERE url=? AND (pass IS NULL OR pass<=1)").run(row.url);
-          pass2plus.push({ ...pass1.find(p => p.row.url === row.url) });
-        }
-      }
-    }
+    // Pass 1 (Marker) and Pass 2+ (boss/Claude) run concurrently — CPU and GPU are independent
+    const [markerOk, ocrBackend] = await Promise.all([markerAvailable(), ocrAvailableBackend()]);
 
-    // Pass 2+: Boss/Claude vision OCR
-    if (pass2plus.length > 0) {
-      const ocrBackend = await ocrAvailableBackend();
-      if (!ocrBackend) {
-        log('No OCR backend available (boss unreachable, no API key) — skipping pass-2+');
-      } else {
-        if (ocrBackend === 'claude') log('Boss unreachable — falling back to Claude Haiku for OCR');
-        pass2plus.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
-        const batch = pass2plus.slice(0, OCR_DOC_CONCURRENCY);
-        log(`Pass 2+ (${ocrBackend}): ${batch.length} docs`);
-        await Promise.all(batch.map(({ db, domain, row, siteConfig }) =>
-          upgradeDocumentOcr(db, domain, row, allDomains, ocrBackend, siteConfig)));
+    const runPass1 = async () => {
+      if (!pass1.length) return;
+      if (!markerOk) {
+        log('Marker unavailable — escalating all pass-1 to pass-2');
+        for (const { db, row } of pass1)
+          db.prepare("UPDATE pdf_upgrade_queue SET pass=2 WHERE url=? AND (pass IS NULL OR pass<=1)").run(row.url);
+        return;
       }
-    }
+      pass1.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
+      const batch = pass1.slice(0, MARKER_CONCURRENCY);
+      log(`Pass 1 (Marker): ${batch.length} docs`);
+      await Promise.all(batch.map(({ db, domain, row, siteConfig }) =>
+        upgradeDocumentMarker(db, domain, row, allDomains, siteConfig)));
+    };
+
+    const runPass2 = () => {
+      if (!pass2plus.length) return;
+      if (!ocrBackend) { log('No OCR backend available — skipping pass-2+'); return; }
+      if (ocrBackend === 'claude') log('Boss unreachable — falling back to Claude Haiku for OCR');
+      pass2plus.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
+      const batch = pass2plus.slice(0, OCR_DOC_CONCURRENCY);
+      log(`Pass 2+ (${ocrBackend}): ${batch.length} docs (fire-and-forget)`);
+      // Fire-and-forget: OCR jobs own their DB connections and can span multiple ticks
+      batch.forEach(({ domain, row, siteConfig }) =>
+        upgradeDocumentOcr(domain, row, allDomains, ocrBackend, siteConfig).catch(e => log(`OCR job error: ${e.message}`)));
+    };
+
+    await Promise.all([runPass1(), Promise.resolve(runPass2())]);
 
     if (!pass1.length && !pass2plus.length) log('No pending items');
   } finally {
