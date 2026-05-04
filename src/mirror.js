@@ -84,7 +84,8 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   const playwrightEnabled = siteConfig.playwright?.enabled !== false;
   const playwrightPool = playwrightEnabled ? await createPlaywrightPool(siteConfig.playwright ?? {}).catch(() => null) : null;
   // null = undecided, true = use playwright for all HTML, false = skip playwright
-  let playwrightNeeded = null;
+  // force=true: skip detection, always render (for pure SPA sites like afnanlibrary)
+  let playwrightNeeded = siteConfig.playwright?.force ? true : null;
 
   const fetchAndExportPage = async (canonical, depth, fromSitemap) => {
     const existing = db.prepare('SELECT * FROM pages WHERE url=?').get(canonical);
@@ -134,7 +135,8 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     // Playwright auto-detection: if static HTML is a JS shell, try rendering
     if (mimeType.includes('text/html') && playwrightPool && playwrightNeeded !== false) {
       const staticHtml = buf.toString('utf8');
-      if (isHtmlShell(staticHtml) || playwrightNeeded === true) {
+      const isShell = isHtmlShell(staticHtml);
+      if (isShell || playwrightNeeded === true) {
         try {
           const rendered = await playwrightPool.render(canonical);
           if (playwrightNeeded === null) {
@@ -142,6 +144,11 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
               playwrightNeeded = true;
               buf = Buffer.from(rendered, 'utf8');
               console.log(`[mirror] playwright mode enabled for ${domain}`);
+            } else if (isShell) {
+              // Page IS a shell but rendered version looks thin too (slow load, etc.)
+              // Still use the rendered version — static has no content at all
+              buf = Buffer.from(rendered, 'utf8');
+              console.log(`[mirror] shell page — using playwright despite low ratio for ${domain}`);
             } else {
               playwrightNeeded = false;
             }
