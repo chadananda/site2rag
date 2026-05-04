@@ -102,6 +102,33 @@ const filterEntries = (entries, siteConfig) => {
   });
 };
 /**
+ * Enumerate all files in a MediaWiki site via allimages API.
+ * Returns array of direct file URLs (e.g. S3 URLs for PDFs).
+ */
+const enumerateMediaWikiFiles = async (siteUrl, ua, mimeFilter = null) => {
+  const origin = new URL(siteUrl).origin;
+  const urls = [];
+  let cont = null;
+  const mimeParam = mimeFilter ? `&aimime=${encodeURIComponent(mimeFilter)}` : '';
+  while (true) {
+    const contParam = cont ? `&aicontinue=${encodeURIComponent(cont)}` : '';
+    const apiUrl = `${origin}/api.php?action=query&list=allimages&ailimit=500&format=json${mimeParam}${contParam}`;
+    try {
+      const res = await fetch(apiUrl, { headers: { 'User-Agent': ua }, signal: AbortSignal.timeout(15000) });
+      if (!res.ok) break;
+      const d = await res.json();
+      for (const img of d?.query?.allimages ?? []) {
+        if (img.url) urls.push(img.url);
+      }
+      cont = d?.continue?.aicontinue;
+      if (!cont) break;
+      await new Promise(r => setTimeout(r, 300));
+    } catch { break; }
+  }
+  return urls;
+};
+
+/**
  * Run sitemap stage for a site. Discovers, parses, diffs sitemaps.
  * Returns { added, changed, removed, total, cached } URL arrays.
  */
@@ -144,6 +171,18 @@ export const runSitemap = async (db, siteConfig) => {
   const removedCount = markSitemapRemoved(db, seenUrls);
   const removedUrls = db.prepare("SELECT url FROM sitemaps WHERE removed=1 AND removed_at >= datetime('now','-1 day')").all().map(r => r.url);
   setMeta(db, 'last_sitemap_diff_at', new Date().toISOString());
+  // For MediaWiki sites: enumerate all files (PDFs, etc.) and add new ones to the priority queue
+  if (siteConfig.fetch_adapter === 'mediawiki_api') {
+    const mimeTypes = siteConfig.mediawiki?.file_mimes ?? ['application/pdf'];
+    for (const mime of mimeTypes) {
+      const fileUrls = await enumerateMediaWikiFiles(siteConfig.url, ua, mime);
+      console.log(`[sitemap] mediawiki files (${mime}): ${fileUrls.length} found for ${siteConfig.domain}`);
+      for (const fileUrl of fileUrls) {
+        const existsInPages = db.prepare('SELECT 1 FROM pages WHERE url=? AND gone=0').get(fileUrl);
+        if (!existsInPages) added.push(fileUrl);
+      }
+    }
+  }
   return { added, changed, removed: removedUrls, total: filtered.length, cached: false };
 };
 /** Return true if site has a usable sitemap or fallback_to_crawl is enabled. */
