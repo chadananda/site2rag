@@ -1,11 +1,18 @@
 // SQL query functions for API routes: site summaries, doc lists, recent runs. Exports: siteSummary, siteDocs, recentRuns. Deps: db, config, report-utils
 import { existsSync } from 'fs';
 import { join } from 'path';
+import { execSync } from 'child_process';
 import { getMirrorRoot, mdDir } from '../src/config.js';
 import { openDb } from '../src/db.js';
 import { mapDoc } from './report-utils.js';
 
 const PER_PAGE = 50;
+
+const dirSizeBytes = (path) => {
+  if (!existsSync(path)) return 0;
+  try { return parseInt(execSync(`du -sb "${path}"`, { timeout: 10000 }).toString().split('\t')[0], 10) || 0; }
+  catch { return 0; }
+};
 
 const safeOpenDb = (domain) => {
   const dbPath = join(getMirrorRoot(), domain, '_meta', 'site.sqlite');
@@ -61,7 +68,9 @@ export const siteSummary = (domain, siteUrl) => {
       total_cost_usd,
       last_run: lastRun || null,
       recent_fails: recentFails,
-      mirror_progress
+      mirror_progress,
+      mirror_size_bytes: dirSizeBytes(join(getMirrorRoot(), domain)),
+      md_size_bytes: dirSizeBytes(mdDir(domain))
     };
   } finally { db.close(); }
 };

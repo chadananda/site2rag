@@ -220,7 +220,26 @@ if ('serviceWorker' in navigator) {
         </div>
       </div>
 
-      <div class="text-xs text-gray-400 mono pt-1 border-t border-gray-100 truncate" x-text="'MD: '+(activeSite.md_dir||'—')"></div>
+      <!-- Size legend -->
+      <div class="pt-2 border-t border-gray-100">
+        <div class="flex gap-6 text-xs text-gray-500">
+          <div class="flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-sm bg-gray-300 inline-block flex-shrink-0"></span>
+            <span>Mirror</span>
+            <span class="mono font-semibold text-gray-700" x-text="fmtBytes(activeSite.mirror_size_bytes)"></span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2.5 h-2.5 rounded-sm bg-blue-200 inline-block flex-shrink-0"></span>
+            <span>Markdown</span>
+            <span class="mono font-semibold text-gray-700" x-text="fmtBytes(activeSite.md_size_bytes)"></span>
+          </div>
+          <div class="flex items-center gap-1.5 ml-auto">
+            <span class="text-gray-400">total</span>
+            <span class="mono font-semibold text-gray-700" x-text="fmtBytes((activeSite.mirror_size_bytes||0)+(activeSite.md_size_bytes||0))"></span>
+          </div>
+        </div>
+        <div class="text-xs text-gray-400 mono mt-1 truncate" x-text="activeSite.md_dir||'—'"></div>
+      </div>
     </div>
   </template>
 
@@ -663,6 +682,14 @@ const LANG_COST_MAP = { english:1.0, russian:1.15, unknown:1.2, arabic:1.35, per
 function fmt(n) {
   if (n == null || n === '') return '0';
   return Number(n).toLocaleString();
+}
+
+function fmtBytes(b) {
+  if (!b) return '0 B';
+  const units = ['B','KB','MB','GB','TB'];
+  let i = 0; let v = b;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
 }
 
 function scorePillCls(s) {
