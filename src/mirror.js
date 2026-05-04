@@ -71,7 +71,7 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   }
 
   const stats = { checked: 0, new_pages: 0, changed: 0, gone: 0 };
-  const countPages = db.prepare('SELECT COUNT(*) as n FROM pages WHERE gone=0');
+  let totalDiscovered = discoverQueue.length + recheckQueue.length;
   const upsertMeta = db.prepare('INSERT OR REPLACE INTO site_meta (key, value) VALUES (?, ?)');
   const concurrency = siteConfig.crawl_concurrency ?? 20;
   const inFlight = new Set();
@@ -89,7 +89,7 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     }
     stats.checked++;
     if (stats.checked % 10 === 0) {
-      upsertMeta.run('mirror_progress', JSON.stringify({ checked: visited.size, total: visited.size + discoverQueue.length, new_pages: stats.new_pages, changed: stats.changed, started_at: runStartedAt }));
+      upsertMeta.run('mirror_progress', JSON.stringify({ checked: visited.size, total: totalDiscovered, new_pages: stats.new_pages, changed: stats.changed, started_at: runStartedAt }));
     }
 
     const { status, buf, mimeType } = result;
@@ -199,6 +199,7 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       for (const link of extractLinks($, canonical)) {
         if (!visited.has(link) && inScope(link, siteConfig, seedHost)) {
           discoverQueue.push({ url: link, depth: depth + 1, fromSitemap: false });
+          totalDiscovered++;
         }
       }
     }
