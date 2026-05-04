@@ -193,8 +193,17 @@ const upgradeDocumentOcr = async (domain, row, allDomains, ocrBackend, siteConfi
       }
     } catch (err) {
       log(`Failed pass ${row.pass||2}: ${row.url}: ${err.message}`);
-      db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
-        .run(now(), err.message, row.url);
+      // Permanent failures: encrypted PDFs, missing files — never retry
+      const permanent = err.message?.includes('EncryptedPdf') || err.message?.includes('local_path missing') || err.message?.includes('Data format error');
+      if (permanent) {
+        db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
+          .run(now(), err.message, row.url);
+      } else {
+        // Transient: timeout, network, OOM — reset to pending for next tick
+        db.prepare("UPDATE pdf_upgrade_queue SET status='pending', started_at=NULL, error=? WHERE url=?")
+          .run(err.message, row.url);
+        log(`  → reset to pending for retry`);
+      }
     }
   } finally {
     try { db.close(); } catch {}
