@@ -15,10 +15,19 @@ const execFileAsync = promisify(execFile);
  * @param {object} [meta] - Optional metadata: { title, author, subject, keywords[] }
  * @returns {object} { success, method, error }
  */
+// Maps canonical language key → tesseract lang code(s) for ocrmypdf -l
+const LANG_TO_TESS = {
+  arabic: 'ara+eng', persian: 'fas+ara+eng',
+  hebrew: 'heb+eng', russian: 'rus+eng',
+  chinese: 'chi_sim+eng', japanese: 'jpn+eng',
+  korean: 'kor+eng', hindi: 'hin+eng'
+};
+
 export const rebuildPdf = async (inputPdfPath, outputPdfPath, ocrResults, meta = {}) => {
   mkdirSync(dirname(outputPdfPath), { recursive: true });
 
   try {
+    const tessLang = (meta.language && LANG_TO_TESS[meta.language]) || 'eng';
     const args = [
       inputPdfPath,
       outputPdfPath,
@@ -30,7 +39,8 @@ export const rebuildPdf = async (inputPdfPath, outputPdfPath, ocrResults, meta =
       '--deskew',
       '--clean',
       '--jobs', '8',
-      '--quiet'
+      '--quiet',
+      '-l', tessLang
     ];
     if (meta.title)   args.push('--title',   meta.title);
     if (meta.author)  args.push('--author',  meta.author);

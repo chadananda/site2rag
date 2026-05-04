@@ -284,6 +284,11 @@ if ('serviceWorker' in navigator) {
           <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='upgraded'?'text-green-500':'text-gray-400'"
             x-text="'('+fmt(tabTotals.upgraded ?? (selectedSiteData()?.upgraded||0))+')'"></span>
         </button>
+        <button class="tab-btn" :class="activeTab==='all'?'active':''" @click="switchTab('all')">
+          All PDFs
+          <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='all'?'text-purple-500':'text-gray-400'"
+            x-text="'('+fmt(tabTotals.all ?? (selectedSiteData()?.total_pdfs||0))+')'"></span>
+        </button>
         </div><!-- end sticky tabs -->
       </div><!-- end sticky bar -->
 
@@ -997,7 +1002,7 @@ function app() {
     async switchTab(tab) {
       this.activeTab = tab;
       this.docsPage = 1;
-      const defaultSort = tab === 'upgraded' ? 'improved_desc' : tab === 'adequate' ? 'score_desc' : 'score_asc';
+      const defaultSort = tab === 'upgraded' ? 'improved_desc' : tab === 'adequate' ? 'score_desc' : tab === 'all' ? 'score_asc' : 'score_asc';
       this.filters = { q: '', status: '', score_max: 1, sort: defaultSort };
       await this.loadDocs();
     },

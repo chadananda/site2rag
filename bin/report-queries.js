@@ -115,6 +115,8 @@ export const siteDocs = (domain, params) => {
       wheres.push("q.composite_score >= 0.7");
       wheres.push("(q.skip IS NULL OR q.skip=0)");
       wheres.push("COALESCE(q.pages, 2) > 1");
+    } else if (tab === 'all') {
+      // No quality filter — show every PDF
     } else {
       wheres.push("(u.status IS NULL OR u.status != 'done')");
       wheres.push("(q.has_text_layer=0 OR q.has_text_layer IS NULL OR q.readable_pages_pct < 0.4)");
@@ -138,9 +140,11 @@ export const siteDocs = (domain, params) => {
       ? (orderMap[sort] || 'COALESCE(u.score_improvement, 0) DESC')
       : tab === 'adequate'
         ? (orderMap[sort] || orderMap.score_desc)
-        : (sort && orderMap[sort])
-          ? `CASE WHEN u.status='processing' THEN 0 ELSE 1 END ASC, ${orderMap[sort]}`
-          : `CASE WHEN u.status='processing' THEN 0 ELSE 1 END ASC, ${orderMap.score_asc}`;
+        : tab === 'all'
+          ? (orderMap[sort] || orderMap.score_asc)
+          : (sort && orderMap[sort])
+            ? `CASE WHEN u.status='processing' THEN 0 ELSE 1 END ASC, ${orderMap[sort]}`
+            : `CASE WHEN u.status='processing' THEN 0 ELSE 1 END ASC, ${orderMap.score_asc}`;
     const where = wheres.join(' AND ');
 
     const total = db.prepare(`SELECT COUNT(*) as n FROM pages p

@@ -155,7 +155,7 @@ const upgradeDocumentOcr = async (domain, row, allDomains, ocrBackend, siteConfi
 
       db.prepare('UPDATE pdf_quality SET content_hash=? WHERE url=?').run(contentHash, row.url);
       const quality = db.prepare(`
-        SELECT pq.pages, pq.pdf_title, pq.ai_summary, pq.ai_author, h.hosted_title, h.host_url as source_url
+        SELECT pq.pages, pq.pdf_title, pq.ai_summary, pq.ai_author, pq.ai_language, h.hosted_title, h.host_url as source_url
         FROM pdf_quality pq LEFT JOIN hosts h ON pq.url=h.hosted_url WHERE pq.url=?`).get(row.url);
       const numPages = quality?.pages || 1;
       const slug = row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
@@ -163,7 +163,8 @@ const upgradeDocumentOcr = async (domain, row, allDomains, ocrBackend, siteConfi
         title:    quality?.hosted_title || quality?.pdf_title || (slug.length > 3 ? slug : undefined),
         author:   quality?.ai_author && quality.ai_author !== 'Unknown' ? quality.ai_author : undefined,
         subject:  quality?.ai_summary || undefined,
-        keywords: ['site2rag', domain, ...(quality?.source_url ? [quality.source_url] : []), row.url]
+        keywords: ['site2rag', domain, ...(quality?.source_url ? [quality.source_url] : []), row.url],
+        language: quality?.ai_language || undefined
       };
 
       // Per-document timeout: 30 min max (large PDFs with many pages)
