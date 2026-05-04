@@ -288,9 +288,16 @@ const tick = async () => {
       if (!pass2plus.length) return;
       if (!ocrBackend) { log('No OCR backend available — skipping pass-2+'); return; }
       if (ocrBackend === 'claude') log('Boss unreachable — falling back to Claude Haiku for OCR');
+      // Count already-running fire-and-forget OCR jobs across all sites
+      let activeOcr = 0;
+      for (const { db } of openDbs) {
+        try { activeOcr += db.prepare("SELECT COUNT(*) as n FROM pdf_upgrade_queue WHERE status='processing' AND pass>=2").get().n; } catch {}
+      }
+      const available = Math.max(0, OCR_DOC_CONCURRENCY - activeOcr);
+      if (available <= 0) { log(`Pass 2+ skipped — ${activeOcr} OCR jobs already active`); return; }
       pass2plus.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
-      const batch = pass2plus.slice(0, OCR_DOC_CONCURRENCY);
-      log(`Pass 2+ (${ocrBackend}): ${batch.length} docs (fire-and-forget)`);
+      const batch = pass2plus.slice(0, available);
+      log(`Pass 2+ (${ocrBackend}): ${batch.length} docs (fire-and-forget, ${activeOcr} already active)`);
       // Fire-and-forget: OCR jobs own their DB connections and can span multiple ticks
       batch.forEach(({ domain, row, siteConfig }) =>
         upgradeDocumentOcr(domain, row, allDomains, ocrBackend, siteConfig).catch(e => log(`OCR job error: ${e.message}`)));
