@@ -68,7 +68,7 @@ export const extractLinks = ($, baseUrl) => {
     try {
       const href = $(el).attr('href');
       if (!href || href.startsWith('#') || href.startsWith('mailto:') || href.startsWith('javascript:') || href.startsWith('data:')) return;
-      links.push(new URL(href, baseUrl).toString().split('#')[0]);
+      links.push(new URL(href.replace(/ /g, '%20'), baseUrl).toString().split('#')[0]);
     } catch {}
   });
   return links;

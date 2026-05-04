@@ -21,11 +21,11 @@ const safeOpenDb = (domain) => {
 };
 
 /** Aggregate stats for one site domain. */
-export const siteSummary = (domain, siteUrl) => {
+export const siteSummary = (domain, siteUrl, description = null) => {
   const db = safeOpenDb(domain);
-  if (!db) return { domain, url: siteUrl, available: false };
+  if (!db) return { domain, url: siteUrl, description, available: false };
   try {
-    const totals = db.prepare(`SELECT COUNT(*) as total_pages, SUM(CASE WHEN mime_type='application/pdf' THEN 1 ELSE 0 END) as total_pdfs, SUM(CASE WHEN mime_type LIKE 'text/html%' THEN 1 ELSE 0 END) as total_html FROM pages WHERE gone=0`).get();
+    const totals = db.prepare(`SELECT COUNT(*) as total_pages, SUM(CASE WHEN mime_type='application/pdf' THEN 1 ELSE 0 END) as total_pdfs, SUM(CASE WHEN mime_type LIKE 'text/html%' THEN 1 ELSE 0 END) as total_html, SUM(CASE WHEN mime_type NOT LIKE 'text/html%' THEN 1 ELSE 0 END) as total_docs FROM pages WHERE gone=0`).get();
     const classify = db.prepare(`SELECT SUM(CASE WHEN page_role='content' THEN 1 ELSE 0 END) as content, SUM(CASE WHEN page_role='index' THEN 1 ELSE 0 END) as index_pages, SUM(CASE WHEN page_role='host_page' THEN 1 ELSE 0 END) as host_pages, SUM(CASE WHEN page_role IS NOT NULL THEN 1 ELSE 0 END) as classified FROM pages WHERE gone=0 AND mime_type LIKE 'text/html%'`).get();
     const pdf = db.prepare(`
       SELECT COUNT(*) as scored,
@@ -51,10 +51,11 @@ export const siteSummary = (domain, siteUrl) => {
       : 300;
     const mirrorProgressRaw = db.prepare(`SELECT value FROM site_meta WHERE key='mirror_progress'`).get()?.value;
     const mirror_progress = mirrorProgressRaw ? JSON.parse(mirrorProgressRaw) : null;
+    const current_stage = db.prepare(`SELECT value FROM site_meta WHERE key='current_stage'`).get()?.value || null;
     const total_cost_usd = db.prepare('SELECT SUM(cost_usd) as total FROM llm_calls').get()?.total || 0;
     return {
-      domain, url: siteUrl, available: true,
-      total_pages: totals.total_pages || 0, total_html: totals.total_html || 0, total_pdfs: totals.total_pdfs || 0,
+      domain, url: siteUrl, description, available: true,
+      total_pages: totals.total_pages || 0, total_html: totals.total_html || 0, total_pdfs: totals.total_pdfs || 0, total_docs: totals.total_docs || 0,
       pages_classified: classify.classified || 0, pages_content: classify.content || 0,
       pages_index: classify.index_pages || 0, pages_host: classify.host_pages || 0,
       scored: pdf.scored || 0, upgraded: pdf.upgraded || 0,
@@ -69,6 +70,7 @@ export const siteSummary = (domain, siteUrl) => {
       last_run: lastRun || null,
       recent_fails: recentFails,
       mirror_progress,
+      current_stage,
       mirror_size_bytes: dirSizeBytes(join(getMirrorRoot(), domain)),
       md_size_bytes: dirSizeBytes(mdDir(domain))
     };

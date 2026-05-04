@@ -8,7 +8,8 @@ export const compileRules = (rules = {}) => ({
   classify_overrides: (rules.classify_overrides || []).map(o => ({ pattern: new RegExp(o.pattern), role: o.role })),
   ocr_overrides: (rules.ocr_overrides || []).map(o => ({ pattern: new RegExp(o.pattern), config: o })),
   follow_overrides: (rules.follow_overrides || []).map(o => ({ pattern: new RegExp(o.pattern), follow: o.follow })),
-  canonical_strip_query: rules.canonical_strip_query || []
+  canonical_strip_query: rules.canonical_strip_query || [],
+  prefer_format: rules.prefer_format || null,
 });
 /** Apply classify_overrides to URL. Returns role string or null. */
 export const applyClassifyOverride = (compiled, url) => {

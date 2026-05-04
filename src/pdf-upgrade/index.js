@@ -81,6 +81,7 @@ const upgradeDocumentMarker = async (db, domain, row, allDomains, siteConfig) =>
       copyFileSync(dup.upgraded_pdf_path, outputPath);
       db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
         .run(now(), outputPath, dup.after_score, (dup.after_score||0) - (row.before_score||0), dup.pages_processed, `${dup.method}+dedup`, row.url);
+      db.prepare(`UPDATE pdf_quality SET ai_summarized_at=NULL WHERE url=?`).run(row.url);
       log(`Dedup hit: ${row.url}`);
       return;
     }
@@ -102,6 +103,8 @@ const upgradeDocumentMarker = async (db, domain, row, allDomains, siteConfig) =>
     if (mdScore >= MARKER_SCORE_THRESHOLD) {
       db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, after_score=?, score_improvement=?, method=? WHERE url=?`)
         .run(now(), mdScore, mdScore - (row.before_score||0), 'marker', row.url);
+      const newExcerpt = markdown.replace(/^---[\s\S]*?---\n/, '').slice(0, 800).trim();
+      db.prepare(`UPDATE pdf_quality SET excerpt=?, ai_summarized_at=NULL WHERE url=?`).run(newExcerpt, row.url);
       log(`Done (marker): ${row.url} md-score=${mdScore.toFixed(2)}`);
     } else {
       log(`Marker quality ${mdScore.toFixed(2)} < ${MARKER_SCORE_THRESHOLD} for ${row.url} → pass 2`);
@@ -139,6 +142,7 @@ const upgradeDocumentOcr = async (domain, row, allDomains, ocrBackend, siteConfi
         const improvement = (dup.after_score||0) - (row.before_score||0);
         db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
           .run(now(), outputPath, dup.after_score, improvement, dup.pages_processed, `${dup.method}+dedup`, row.url);
+        db.prepare(`UPDATE pdf_quality SET ai_summarized_at=NULL WHERE url=?`).run(row.url);
         log(`Dedup hit: ${row.url}`);
         if (siteConfig) {
           try {
@@ -181,7 +185,7 @@ const upgradeDocumentOcr = async (domain, row, allDomains, ocrBackend, siteConfi
       const improvement = afterMetrics.composite_score - (row.before_score||0);
       db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, before_score=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
         .run(now(), outputPath, row.before_score||0, afterMetrics.composite_score, improvement, numPages, method, row.url);
-      db.prepare(`UPDATE pdf_quality SET composite_score=?, has_text_layer=?, readable_pages_pct=?, avg_chars_per_page=?, word_quality_estimate=?, excerpt=? WHERE url=?`)
+      db.prepare(`UPDATE pdf_quality SET composite_score=?, has_text_layer=?, readable_pages_pct=?, avg_chars_per_page=?, word_quality_estimate=?, excerpt=?, ai_summarized_at=NULL WHERE url=?`)
         .run(afterMetrics.composite_score, afterMetrics.has_text_layer, afterMetrics.readable_pages_pct, afterMetrics.avg_chars_per_page, afterMetrics.word_quality_estimate, afterMetrics.excerpt, row.url);
       log(`Done (${method}): ${row.url} ${(row.before_score||0).toFixed(2)} → ${afterMetrics.composite_score.toFixed(2)}`);
 

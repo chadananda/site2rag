@@ -20,8 +20,9 @@ const TICK_MS = 15 * 60 * 1000; // 15 minutes
 const ensureDirs = () => {
   [getMirrorRoot(), getMdRoot(), getLogsRoot()].forEach(d => mkdirSync(d, { recursive: true }));
 };
-/** Check if a site is due for a check based on check_every_days. */
+/** Check if a site is due for a check based on check_every_days. In-progress crawls always resume. */
 const isDue = (db) => {
+  if (getMeta(db, 'mirror_run_started_at')) return true;
   const last = getMeta(db, 'last_check_at');
   if (!last) return true;
   const checkEveryMs = (db._siteCheckDays || 3) * 86400000;
@@ -86,16 +87,20 @@ const runSite = async (siteConfig) => {
   const runStats = { status: 'running', sitemap: null, mirror: null, assets: null, classify: null, exportHtml: null, exportDoc: null, archive: null, retain: null, error: null };
   // Record check time at start so restarts don't immediately re-trigger this site
   setMeta(db, 'last_check_at', new Date().toISOString());
+  const stage = (name) => setMeta(db, 'current_stage', name);
   try {
     // Sitemap
+    stage('sitemap');
     const sitemapStats = await runSitemap(db, siteConfig);
     runStats.sitemap = sitemapStats;
     const priorityQueue = [...(sitemapStats.added || []), ...(sitemapStats.changed || [])];
     // Backfill: classify+export any pages left unclassified from prior runs
     if (siteConfig.classify?.enabled !== false) {
+      stage('classify');
       runStats.classify = await runClassify(db, siteConfig);
     }
     if (siteConfig.export_md) {
+      stage('export');
       runStats.exportHtml = runExportHtml(db, siteConfig);
     }
     // Skip mirror entirely if sitemap reported no changes and we have a prior complete crawl
@@ -106,18 +111,23 @@ const runSite = async (siteConfig) => {
       runStats.mirror = { checked: 0, new_pages: 0, changed: 0, gone: 0, skipped: true };
     }
     // Mirror — classifies and exports each page inline as it's fetched
+    stage('mirror');
     const mirrorStats = sitemapUnchanged ? runStats.mirror : await runMirror(db, siteConfig, priorityQueue);
     runStats.mirror = mirrorStats;
     // Assets
     if (siteConfig.assets?.enabled !== false) {
+      stage('assets');
       runStats.assets = await runAssets(db, siteConfig);
     }
     // Score PDFs (time-budgeted, 5 min max per run)
+    stage('scoring');
     runStats.scorePdfs = await runScorePdfs(db, siteConfig);
     // Summarize image PDFs with Haiku (time-budgeted, 10 min max per run)
+    stage('summarizing');
     runStats.summarize = await runSummarizePdfs(db, siteConfig);
     // Export
     if (siteConfig.export_md) {
+      stage('export');
       runStats.exportHtml = runExportHtml(db, siteConfig);
       runStats.exportDoc = await Promise.race([
         runExportDoc(db, siteConfig),
@@ -126,17 +136,21 @@ const runSite = async (siteConfig) => {
     }
     // Archive
     if (siteConfig.archive?.enabled) {
+      stage('archive');
       runStats.archive = await runArchive(db, siteConfig);
     }
     // Retain
+    stage('cleanup');
     runStats.retain = await runRetain(db, siteConfig, domain);
     runStats.status = 'success';
     setMeta(db, 'last_check_at', new Date().toISOString());
     setMeta(db, 'last_success_at', new Date().toISOString());
+    setMeta(db, 'current_stage', null);
     finishRun(db, runId, 'success', { pages_new: mirrorStats.new_pages, pages_changed: mirrorStats.changed, pages_gone: mirrorStats.gone, pages_gc_deleted: runStats.retain?.gc_deleted || 0 });
   } catch (err) {
     runStats.status = 'failed';
     runStats.error = err.message;
+    setMeta(db, 'current_stage', null);
     console.error(`[site2rag] site ${domain} failed: ${err.message}\n${err.stack || '(no stack)'}`);
     finishRun(db, runId, 'failed', { message: err.message });
   }

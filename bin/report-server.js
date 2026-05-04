@@ -62,7 +62,7 @@ createServer(async (req, res) => {
 
   let cfg;
   try { cfg = loadConfig(); } catch (e) { return err(res, 500, `Config error: ${e.message}`); }
-  const sites = cfg.sites.map(s => ({ domain: new URL(s.url).hostname, url: s.url }));
+  const sites = cfg.sites.map(s => ({ domain: new URL(s.url).hostname, url: s.url, description: s.description || null }));
 
   if (path === '/api/health') {
     const checks = sites.map(s => {
@@ -81,7 +81,7 @@ createServer(async (req, res) => {
   }
 
   if (path === '/api/sites') {
-    return json(res, { sites: sites.map(s => siteSummary(s.domain, s.url)) });
+    return json(res, { sites: sites.map(s => siteSummary(s.domain, s.url, s.description)) });
   }
 
   if (path === '/api/docs') {

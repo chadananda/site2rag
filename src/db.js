@@ -191,8 +191,10 @@ export const openDb = (domain) => {
 };
 /** Insert a new run row, return run id. */
 export const startRun = (db) => {
-  const stmt = db.prepare('INSERT INTO runs (started_at, status) VALUES (?, ?)');
-  return stmt.run(new Date().toISOString(), 'running').lastInsertRowid;
+  const now = new Date().toISOString();
+  db.prepare(`UPDATE runs SET status='interrupted', finished_at=COALESCE(finished_at,?) WHERE status='running'`).run(now);
+  db.prepare(`DELETE FROM site_meta WHERE key IN ('mirror_progress','mirror_run_started_at','current_stage')`).run();
+  return db.prepare('INSERT INTO runs (started_at, status) VALUES (?, ?)').run(now, 'running').lastInsertRowid;
 };
 /** Finish a run row. */
 export const finishRun = (db, id, status, fields = {}) => {

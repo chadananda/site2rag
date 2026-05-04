@@ -1,6 +1,4 @@
-// Crawl orchestration: queue setup, concurrent fetch loop. Exports: runMirror. Re-exports: urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks. Deps: mirror-crawl, db, rules, pdf-upgrade/score, export-doc, playwright-fetch
-import { fetch } from 'undici';
-import { createPlaywrightPool, isHtmlShell, isWorthRendering } from './playwright-fetch.js';
+// Crawl orchestration: queue setup, concurrent fetch loop. Exports: runMirror. Re-exports: urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks. Deps: mirror-crawl, db, rules, pdf-upgrade/score, export-doc, fetch-adapters
 import { createHash } from 'crypto';
 import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { dirname, join, extname } from 'path';
@@ -9,12 +7,13 @@ import { upsertPage, markGoneUrls } from './db.js';
 import { compileRules, applyFollowOverride, stripQueryParams } from './rules.js';
 import { scorePdf, saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
 import { classifyPage } from './classify.js';
-import { exportTextPdf } from './export-doc.js';
+import { exportTextPdf, exportDocx } from './export-doc.js';
+import { getAdapter } from './fetch-adapters.js';
 export { urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks } from './mirror-crawl.js';
 import { urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks } from './mirror-crawl.js';
+import { fetch } from 'undici';
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
-const FETCH_TIMEOUT_MS = 30000;
 const SCORE_TIMEOUT_MS = 30000;
 
 /**
@@ -32,7 +31,6 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
 
   const RESUME_KEY = 'mirror_run_started_at';
   const savedStart = db.prepare('SELECT value FROM site_meta WHERE key=?').get(RESUME_KEY)?.value;
-  // Resume if prior run interrupted within 24h
   const isResume = savedStart && (Date.now() - new Date(savedStart).getTime()) < 86400000;
   const runStartedAt = isResume ? savedStart : new Date().toISOString();
   if (!isResume) db.prepare('INSERT OR REPLACE INTO site_meta (key, value) VALUES (?, ?)').run(RESUME_KEY, runStartedAt);
@@ -56,9 +54,6 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     }
   }
 
-  // discoverQueue: seed + sitemap + newly found links (drained first)
-  // recheckQueue: stale existing pages (processed after discoverQueue is empty)
-  // On resume: still include seed URL so link discovery re-runs from root (304 path extracts links from cache)
   const discoverQueue = isResume ? [{ url: seedUrl, depth: 0, fromSitemap: false }] : [
     ...priorityQueue.filter(u => inScope(u, siteConfig, seedHost)).map(u => ({ url: u, depth: 0, fromSitemap: true })),
     { url: seedUrl, depth: 0, fromSitemap: false }
@@ -78,23 +73,16 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   const stats = { checked: 0, new_pages: 0, changed: 0, gone: 0 };
   const countPages = db.prepare('SELECT COUNT(*) as n FROM pages WHERE gone=0');
   const upsertMeta = db.prepare('INSERT OR REPLACE INTO site_meta (key, value) VALUES (?, ?)');
-  const concurrency = siteConfig.crawl_concurrency ?? 4;
+  const concurrency = siteConfig.crawl_concurrency ?? 20;
   const inFlight = new Set();
 
-  const playwrightEnabled = siteConfig.playwright?.enabled !== false;
-  const playwrightPool = playwrightEnabled ? await createPlaywrightPool(siteConfig.playwright ?? {}).catch(() => null) : null;
-  // null = undecided, true = use playwright for all HTML, false = skip playwright
-  // force=true: skip detection, always render (for pure SPA sites like afnanlibrary)
-  let playwrightNeeded = siteConfig.playwright?.force ? true : null;
+  const adapter = await getAdapter(siteConfig);
 
   const fetchAndExportPage = async (canonical, depth, fromSitemap) => {
     const existing = db.prepare('SELECT * FROM pages WHERE url=?').get(canonical);
-    const headers = { 'User-Agent': ua };
-    if (existing?.etag) headers['If-None-Match'] = existing.etag;
-    if (existing?.last_modified) headers['If-Modified-Since'] = existing.last_modified;
-    let res;
+    let result;
     try {
-      res = await fetch(canonical, { headers, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS), redirect: 'follow' });
+      result = await adapter.fetch(canonical, existing);
     } catch (err) {
       console.error(`[mirror] fetch error ${canonical}: ${err.message}`);
       return;
@@ -103,13 +91,14 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     if (stats.checked % 10 === 0) {
       upsertMeta.run('mirror_progress', JSON.stringify({ checked: visited.size, total: countPages.get().n, new_pages: stats.new_pages, changed: stats.changed, started_at: runStartedAt }));
     }
-    if (res.status === 404 || res.status === 410) {
+
+    const { status, buf, mimeType } = result;
+    if (status === 404 || status === 410) {
       if (existing) db.prepare('UPDATE pages SET gone=1, gone_since=COALESCE(gone_since, ?) WHERE url=?').run(new Date().toISOString(), canonical);
       return;
     }
-    if (res.status === 304) {
+    if (status === 304) {
       db.prepare('UPDATE pages SET last_seen_at=? WHERE url=?').run(new Date().toISOString(), canonical);
-      // Extract links from cached file so new-site crawls discover pages even when root returns 304
       if (existing?.local_path && existing.mime_type?.includes('text/html') && depth < maxDepth) {
         try {
           const cached = readFileSync(existing.local_path, 'utf8');
@@ -123,43 +112,8 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
       }
       return;
     }
-    if (!res.ok) return;
-    let buf;
-    try {
-      buf = Buffer.from(await res.arrayBuffer());
-    } catch (bodyErr) {
-      console.warn(`[mirror] body read error ${canonical}: ${bodyErr.message}`);
-      return;
-    }
-    let mimeType = (res.headers.get('content-type') || 'application/octet-stream').split(';')[0].trim();
-    // Playwright auto-detection: if static HTML is a JS shell, try rendering
-    if (mimeType.includes('text/html') && playwrightPool && playwrightNeeded !== false) {
-      const staticHtml = buf.toString('utf8');
-      const isShell = isHtmlShell(staticHtml);
-      if (isShell || playwrightNeeded === true) {
-        try {
-          const rendered = await playwrightPool.render(canonical);
-          if (playwrightNeeded === null) {
-            if (isWorthRendering(staticHtml, rendered)) {
-              playwrightNeeded = true;
-              buf = Buffer.from(rendered, 'utf8');
-              console.log(`[mirror] playwright mode enabled for ${domain}`);
-            } else if (isShell) {
-              // Page IS a shell but rendered version looks thin too (slow load, etc.)
-              // Still use the rendered version — static has no content at all
-              buf = Buffer.from(rendered, 'utf8');
-              console.log(`[mirror] shell page — using playwright despite low ratio for ${domain}`);
-            } else {
-              playwrightNeeded = false;
-            }
-          } else {
-            buf = Buffer.from(rendered, 'utf8');
-          }
-        } catch (e) {
-          console.warn(`[mirror] playwright render failed ${canonical}: ${e.message}`);
-        }
-      }
-    }
+    if (!buf) return;
+
     const contentHash = `sha256:${sha256(buf)}`;
     const mirrorPath = urlToMirrorPath(domain, canonical);
     const pathSlug = urlPathToSlug(new URL(canonical).pathname);
@@ -190,21 +144,24 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
         }
       }
       if (mimeType === 'application/pdf') {
-        try {
-          const metrics = await Promise.race([
-            scorePdf(savedPath),
-            new Promise((_, rej) => setTimeout(() => rej(new Error('score timeout')), SCORE_TIMEOUT_MS))
-          ]);
-          saveQualityScore(db, canonical, contentHash, metrics);
-          maybeQueue(db, canonical, contentHash, metrics.composite_score, 0.7, metrics.language);
-        } catch (scoreErr) {
-          console.warn(`[mirror] score failed ${canonical}: ${scoreErr.message}`);
+        const docxPreferred = compiled.prefer_format === 'docx' &&
+          db.prepare('SELECT 1 FROM pages WHERE url=? AND gone=0').get(canonical.replace(/\.pdf$/i, '.docx'));
+        if (!docxPreferred && compiled.prefer_format !== 'html') {
+          try {
+            const metrics = await Promise.race([
+              scorePdf(savedPath),
+              new Promise((_, rej) => setTimeout(() => rej(new Error('score timeout')), SCORE_TIMEOUT_MS))
+            ]);
+            saveQualityScore(db, canonical, contentHash, metrics);
+            maybeQueue(db, canonical, contentHash, metrics.composite_score, 0.7, metrics.language);
+          } catch (scoreErr) {
+            console.warn(`[mirror] score failed ${canonical}: ${scoreErr.message}`);
+          }
         }
       }
     }
-    // Classify HTML inline — we have the content in memory, no disk re-read needed
     let page_role = null, word_count_clean = null, classify_method = null;
-    if ((isNew || isChanged) && mimeType.includes('text/html') && siteConfig.classify?.enabled !== false) {
+    if ((isNew || isChanged) && mimeType?.includes('text/html') && siteConfig.classify?.enabled !== false) {
       try {
         const wordThreshold = siteConfig.classify?.word_threshold ?? 200;
         ({ role: page_role, classify_method, word_count_clean } = classifyPage(buf.toString('utf8'), canonical, compiled, wordThreshold, db));
@@ -213,26 +170,31 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     upsertPage(db, {
       url: canonical, path_slug: pathSlug, local_path: savedPath,
       from_sitemap: fromSitemap ? 1 : 0,
-      etag: res.headers.get('etag'), last_modified: res.headers.get('last-modified'),
-      content_hash: contentHash, mime_type: mimeType, status_code: res.status,
+      etag: result.etag, last_modified: result.lastModified,
+      content_hash: contentHash, mime_type: mimeType, status_code: status,
       depth, page_role, word_count_clean
     });
     if (classify_method) {
       db.prepare('UPDATE pages SET classify_method=? WHERE url=?').run(classify_method, canonical);
     }
     if (isNew || isChanged) {
-      if (mimeType === 'application/pdf') {
-        const pageRow = { url: canonical, path_slug: pathSlug, local_path: savedPath,
-          content_hash: contentHash, mime_type: mimeType, depth, from_sitemap: fromSitemap ? 1 : 0,
-          page_role, last_seen_at: new Date().toISOString(), backup_url: null,
-          backup_archived_at: null, archive_only: 0, last_changed_at: null };
-        exportTextPdf(db, siteConfig, pageRow).catch(e =>
-          console.warn(`[mirror] pdf export ${canonical}: ${e.message}`)
-        );
+      const pageRow = { url: canonical, path_slug: pathSlug, local_path: savedPath,
+        content_hash: contentHash, mime_type: mimeType, depth, from_sitemap: fromSitemap ? 1 : 0,
+        page_role, last_seen_at: new Date().toISOString(), backup_url: null,
+        backup_archived_at: null, archive_only: 0, last_changed_at: null };
+      if (compiled.prefer_format !== 'html') {
+        if (mimeType === 'application/pdf') {
+          exportTextPdf(db, siteConfig, pageRow).catch(e =>
+            console.warn(`[mirror] pdf export ${canonical}: ${e.message}`)
+          );
+        } else if (mimeType?.includes('wordprocessingml') || canonical.endsWith('.docx')) {
+          exportDocx(db, siteConfig, pageRow).catch(e =>
+            console.warn(`[mirror] docx export ${canonical}: ${e.message}`)
+          );
+        }
       }
-      // HTML export deferred to post-mirror runExportHtml batch to avoid OOM on large pages
     }
-    if (mimeType.includes('text/html') && depth < maxDepth) {
+    if (mimeType?.includes('text/html') && depth < maxDepth) {
       const $ = cheerio.load(buf.toString('utf8'));
       for (const link of extractLinks($, canonical)) {
         if (!visited.has(link) && inScope(link, siteConfig, seedHost)) {
@@ -262,11 +224,9 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     if (requestDelay > 0) await new Promise(r => setTimeout(r, requestDelay));
   }
 
-  if (playwrightPool) await playwrightPool.close();
+  await adapter.close();
   const ranToCompletion = discoverQueue.length === 0 && recheckQueue.length === 0;
   if (ranToCompletion) {
-    // Safe gone detection: only mark pages gone if absent for 3× check interval.
-    // Per-URL 404/410 handles individual dead pages; this catches silent disappearances.
     const safeGoneCutoff = new Date(Date.now() - staleMs * 3).toISOString();
     stats.gone = markGoneUrls(db, safeGoneCutoff);
     db.prepare('INSERT OR REPLACE INTO site_meta (key, value) VALUES (?, ?)').run(COMPLETE_KEY, runStartedAt);

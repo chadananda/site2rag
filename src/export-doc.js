@@ -1,5 +1,5 @@
-// PDF export: text extraction, rasterization, OCR pipeline, MD output. Exports: exportTextPdf, runExportDoc. Re-exports: addBacklink, assembleDocMd. Deps: export-doc-utils, db, ocr/engines, ocr/reconcile, rules, pdf-upgrade/score
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'fs';
+// PDF/DOCX export: text extraction, rasterization, OCR pipeline, MD output. Exports: exportTextPdf, exportDocx, runExportDoc. Re-exports: addBacklink, assembleDocMd. Deps: export-doc-utils, db, ocr/engines, ocr/reconcile, rules, pdf-upgrade/score, mammoth, turndown
+import { readFileSync, writeFileSync, mkdirSync, existsSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
 import { mdDir, metaDir } from './config.js';
@@ -52,7 +52,7 @@ const rasterizePdf = async (buf, docHash, domain) => {
       const ctx = canvas.getContext('2d');
       await withTimeout(page.render({ canvasContext: ctx, viewport }).promise, PAGE_RENDER_TIMEOUT_MS, 'page.render');
       writeFileSync(pngPath, canvas.toBuffer('image/png'));
-    } catch { writeFileSync(pngPath, Buffer.alloc(0)); }
+    } catch { /* leave pngPath absent — runAllEngines skips missing files */ }
   }
   return { pngPaths, numPages: pdf.numPages };
 };
@@ -90,6 +90,10 @@ const exportDoc = async (db, siteConfig, page) => {
     for (let i = 0; i < numPages; i++) {
       const pageNo = i + 1;
       const pngPath = pngPaths[i];
+      if (!existsSync(pngPath) || statSync(pngPath).size < 100) {
+        pageResults.push({ pageNo, text_md: '' });
+        continue;
+      }
       const engineResults = await runAllEngines(db, page.url, pageNo, pngPath, engines, llmProviders);
       const { text_md, agreement_score, conversion_method, unresolved_spans } = await reconcilePage(db, page.url, pageNo, pngPath, engineResults, { ...ocrCfg, ...(ocrOverride || {}) }, llmProviders);
       if (conversion_method.includes('reconcile')) reconcilerUsed = ocrCfg.reconciler || 'claude';
@@ -184,9 +188,59 @@ export const exportTextPdf = async (db, siteConfig, page) => {
   return true;
 };
 
-/** Run document export for all PDF pages in site. */
+/** Export a DOCX file to markdown via mammoth → turndown. */
+export const exportDocx = async (db, siteConfig, page) => {
+  const domain = siteConfig.domain;
+  const mammoth = (await import('mammoth')).default;
+  const TurndownService = (await import('turndown')).default;
+  const td = new TurndownService({ headingStyle: 'atx', bulletListMarker: '-' });
+  const { value: html, messages } = await mammoth.convertToHtml({ path: page.local_path });
+  if (messages.some(m => m.type === 'error')) {
+    console.warn(`[export-docx] warnings for ${page.url}:`, messages.filter(m => m.type === 'error').map(m => m.message).join('; '));
+  }
+  const md = td.turndown(html);
+  const frontmatter = buildFrontmatter({
+    source_url: page.url, domain,
+    title: page.url.split('/').pop().replace(/\.\w+$/, ''),
+    fetched_at: page.last_seen_at, content_hash: page.content_hash,
+    mime_type: page.mime_type, mirror_path: page.local_path,
+    url_path: new URL(page.url).pathname, page_role: 'document',
+    conversion_method: 'docx-mammoth',
+  });
+  const outDir = mdDir(domain);
+  mkdirSync(outDir, { recursive: true });
+  const mdPath = join(outDir, `${page.path_slug}.md`);
+  const fullMd = frontmatter + md;
+  writeFileSync(mdPath, fullMd, 'utf8');
+  upsertExport(db, {
+    url: page.url, md_path: mdPath, source_hash: page.content_hash,
+    md_hash: `sha256:${sha256(Buffer.from(fullMd))}`, exported_at: new Date().toISOString(),
+    conversion_method: 'docx-mammoth', word_count: md.split(/\s+/).filter(Boolean).length,
+    ocr_used: 0, ocr_engines: null, reconciler: null, pages: null,
+    agreement_avg: null, flagged_pages: null, host_page_url: null,
+    status: 'ok', error: null,
+  });
+};
+
+/** Run document export for all PDF and DOCX pages in site. */
 export const runExportDoc = async (db, siteConfig) => {
   const stats = { written: 0, skipped: 0, failed: 0, ocr_pages: 0, flagged: 0 };
+  const compiled = compileRules(siteConfig.rules);
+  if (compiled.prefer_format === 'html') return stats; // HTML export covers all content
+  // Process DOCX files first (preferred format takes priority)
+  const docxPages = db.prepare("SELECT p.*, e.source_hash as exp_hash FROM pages p LEFT JOIN exports e ON p.url=e.url WHERE p.gone=0 AND p.mime_type LIKE '%wordprocessingml%' AND p.local_path IS NOT NULL").all();
+  for (const page of docxPages) {
+    if (!existsSync(page.local_path)) { stats.failed++; continue; }
+    if (page.exp_hash && page.exp_hash === page.content_hash) { stats.skipped++; continue; }
+    try {
+      await exportDocx(db, siteConfig, page);
+      stats.written++;
+    } catch (err) {
+      console.error(`[export-docx] ${page.url}: ${err.message}`);
+      upsertExport(db, { url: page.url, md_path: null, source_hash: page.content_hash, md_hash: null, exported_at: new Date().toISOString(), conversion_method: null, word_count: null, ocr_used: 0, ocr_engines: null, reconciler: null, pages: null, agreement_avg: null, flagged_pages: null, host_page_url: null, status: 'failed', error: err.message });
+      stats.failed++;
+    }
+  }
   const pages = db.prepare("SELECT p.*, e.source_hash as exp_hash FROM pages p LEFT JOIN exports e ON p.url=e.url WHERE p.gone=0 AND p.mime_type='application/pdf' AND p.local_path IS NOT NULL").all();
   for (const page of pages) {
     if (!existsSync(page.local_path)) { stats.failed++; continue; }
