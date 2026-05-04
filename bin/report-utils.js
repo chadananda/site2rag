@@ -66,6 +66,13 @@ export const mapDoc = (d, domain) => {
   const readablePct = d.readable_pages_pct ?? 0;
   const pagesNeeded = Math.round(pages * (1 - readablePct));
   const effort_mins = pagesNeeded > 0 ? Math.max(1, Math.round(pagesNeeded * 0.5 * lang_cost_mult)) : 0;
+
+  // Parse upgrade history into a score trail: [orig, after_pass1, after_pass2, ...]
+  const history = (() => { try { return JSON.parse(d.upgrade_history || 'null') || []; } catch { return []; } })();
+  const score_trail = history.length > 0
+    ? [history[0].score_before, ...history.map(h => h.score_after)].filter(x => x != null)
+    : [];
+
   return {
     ...d,
     title,
@@ -74,6 +81,7 @@ export const mapDoc = (d, domain) => {
     ai_language,
     lang_key: langKey,
     effort_mins,
+    score_trail,
     archive_url: d.status === 'done' && d.upgraded_pdf_path
       ? `https://${domain}.lnker.com/_upgraded/${d.path_slug || d.url.replace(/[^a-z0-9]/gi,'_').slice(-60)}.pdf`
       : null,

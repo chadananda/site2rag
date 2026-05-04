@@ -86,7 +86,9 @@ const DOC_SELECT = `
          q.thumbnail_path, q.summary_tier, q.ai_language,
          h.host_url as source_url,
          u.status, u.before_score, u.after_score, u.score_improvement,
-         u.upgraded_pdf_path, u.pages_processed, u.method, u.finished_at, u.error
+         u.upgraded_pdf_path, u.pages_processed, u.method, u.finished_at, u.error,
+         (SELECT json_group_array(json_object('attempt', uh.attempt, 'method', uh.method, 'score_before', uh.score_before, 'score_after', uh.score_after, 'error', uh.error))
+          FROM pdf_upgrade_history uh WHERE uh.url=p.url ORDER BY uh.attempt) as upgrade_history
   FROM pages p
   LEFT JOIN pdf_quality q ON p.url=q.url
   LEFT JOIN pdf_upgrade_queue u ON p.url=u.url

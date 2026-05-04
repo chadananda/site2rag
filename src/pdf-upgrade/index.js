@@ -22,6 +22,13 @@ const sha256file = (path) => sha256(readFileSync(path));
 const now = () => new Date().toISOString();
 const log = (msg) => console.log(`[pdf-upgrade] ${now().slice(0,19)} ${msg}`);
 
+/** Record one upgrade attempt in history. Attempt number auto-increments per URL. */
+const logUpgradeHistory = (db, url, { method, score_before, score_after, pages_processed, error }) => {
+  const attempt = (db.prepare('SELECT COUNT(*)+1 as n FROM pdf_upgrade_history WHERE url=?').get(url)?.n) || 1;
+  db.prepare(`INSERT INTO pdf_upgrade_history (url, attempt, method, score_before, score_after, pages_processed, finished_at, error) VALUES (?,?,?,?,?,?,?,?)`)
+    .run(url, attempt, method ?? null, score_before ?? null, score_after ?? null, pages_processed ?? null, now(), error ?? null);
+};
+
 /** Safely parse a URL hostname — returns null on invalid URLs instead of throwing. */
 const safeHostname = (url) => { try { return new URL(url).hostname; } catch { return null; } };
 
@@ -82,6 +89,7 @@ const upgradeDocumentMarker = async (db, domain, row, allDomains, siteConfig) =>
       db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
         .run(now(), outputPath, dup.after_score, (dup.after_score||0) - (row.before_score||0), dup.pages_processed, `${dup.method}+dedup`, row.url);
       db.prepare(`UPDATE pdf_quality SET ai_summarized_at=NULL WHERE url=?`).run(row.url);
+      logUpgradeHistory(db, row.url, { method: `${dup.method}+dedup`, score_before: row.before_score, score_after: dup.after_score, pages_processed: dup.pages_processed });
       log(`Dedup hit: ${row.url}`);
       return;
     }
@@ -105,13 +113,16 @@ const upgradeDocumentMarker = async (db, domain, row, allDomains, siteConfig) =>
         .run(now(), mdScore, mdScore - (row.before_score||0), 'marker', row.url);
       const newExcerpt = markdown.replace(/^---[\s\S]*?---\n/, '').slice(0, 800).trim();
       db.prepare(`UPDATE pdf_quality SET excerpt=?, ai_summarized_at=NULL WHERE url=?`).run(newExcerpt, row.url);
+      logUpgradeHistory(db, row.url, { method: 'marker', score_before: row.before_score, score_after: mdScore });
       log(`Done (marker): ${row.url} md-score=${mdScore.toFixed(2)}`);
     } else {
       log(`Marker quality ${mdScore.toFixed(2)} < ${MARKER_SCORE_THRESHOLD} for ${row.url} → pass 2`);
+      logUpgradeHistory(db, row.url, { method: 'marker', score_before: row.before_score, score_after: mdScore, error: `quality ${mdScore.toFixed(2)} below threshold` });
       db.prepare("UPDATE pdf_upgrade_queue SET status='pending', pass=2 WHERE url=?").run(row.url);
     }
   } catch (err) {
     log(`Failed pass 1: ${row.url}: ${err.message}`);
+    logUpgradeHistory(db, row.url, { method: 'marker', score_before: row.before_score, error: err.message });
     db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
       .run(now(), err.message, row.url);
   }
@@ -143,6 +154,7 @@ const upgradeDocumentOcr = async (domain, row, allDomains, ocrBackend, siteConfi
         db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, after_score=?, score_improvement=?, pages_processed=?, method=? WHERE url=?`)
           .run(now(), outputPath, dup.after_score, improvement, dup.pages_processed, `${dup.method}+dedup`, row.url);
         db.prepare(`UPDATE pdf_quality SET ai_summarized_at=NULL WHERE url=?`).run(row.url);
+        logUpgradeHistory(db, row.url, { method: `${dup.method}+dedup`, score_before: row.before_score, score_after: dup.after_score, pages_processed: dup.pages_processed });
         log(`Dedup hit: ${row.url}`);
         if (siteConfig) {
           try {
@@ -188,6 +200,7 @@ const upgradeDocumentOcr = async (domain, row, allDomains, ocrBackend, siteConfi
         .run(now(), outputPath, row.before_score||0, afterMetrics.composite_score, improvement, numPages, method, row.url);
       db.prepare(`UPDATE pdf_quality SET composite_score=?, has_text_layer=?, readable_pages_pct=?, avg_chars_per_page=?, word_quality_estimate=?, excerpt=?, ai_summarized_at=NULL WHERE url=?`)
         .run(afterMetrics.composite_score, afterMetrics.has_text_layer, afterMetrics.readable_pages_pct, afterMetrics.avg_chars_per_page, afterMetrics.word_quality_estimate, afterMetrics.excerpt, row.url);
+      logUpgradeHistory(db, row.url, { method, score_before: row.before_score, score_after: afterMetrics.composite_score, pages_processed: numPages });
       log(`Done (${method}): ${row.url} ${(row.before_score||0).toFixed(2)} → ${afterMetrics.composite_score.toFixed(2)}`);
 
       if (siteConfig) {
@@ -198,8 +211,8 @@ const upgradeDocumentOcr = async (domain, row, allDomains, ocrBackend, siteConfi
       }
     } catch (err) {
       log(`Failed pass ${row.pass||2}: ${row.url}: ${err.message}`);
-      // Permanent failures: encrypted PDFs, missing files — never retry
       const permanent = err.message?.includes('EncryptedPdf') || err.message?.includes('local_path missing') || err.message?.includes('Data format error');
+      logUpgradeHistory(db, row.url, { method: ocrBackend, score_before: row.before_score, error: err.message });
       if (permanent) {
         db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
           .run(now(), err.message, row.url);

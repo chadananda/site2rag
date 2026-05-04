@@ -113,6 +113,18 @@ CREATE INDEX IF NOT EXISTS idx_pages_mime_gone ON pages(mime_type, gone);
 CREATE INDEX IF NOT EXISTS idx_pages_last_seen ON pages(last_seen_at);
 CREATE INDEX IF NOT EXISTS idx_hosts_hosted_url ON hosts(hosted_url);
 CREATE INDEX IF NOT EXISTS idx_pdf_quality_score ON pdf_quality(composite_score);
+CREATE TABLE IF NOT EXISTS pdf_upgrade_history (
+  id INTEGER PRIMARY KEY,
+  url TEXT NOT NULL,
+  attempt INT NOT NULL,
+  method TEXT,
+  score_before REAL,
+  score_after REAL,
+  pages_processed INT,
+  finished_at TEXT,
+  error TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_pdf_upgrade_history_url ON pdf_upgrade_history(url, attempt);
 CREATE TABLE IF NOT EXISTS pdf_upgrade_queue (
   url TEXT PRIMARY KEY,
   content_hash TEXT,
