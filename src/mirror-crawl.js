@@ -32,10 +32,10 @@ export const urlPathToSlug = (urlPath) =>
 
 /** Return true if URL is within crawl scope (domain, include/exclude rules, depth). */
 export const inScope = (url, siteConfig, seedHost) => {
-  const { include = [], exclude = [], same_domain_only: sameDomain = true } = siteConfig;
+  const { include = [], exclude = [], same_domain_only: sameDomain = true, allow_domains = [] } = siteConfig;
   let u;
   try { u = new URL(url); } catch { return false; }
-  if (sameDomain && u.hostname !== seedHost) return false;
+  if (sameDomain && u.hostname !== seedHost && !allow_domains.includes(u.hostname)) return false;
   const path = u.pathname;
   if (exclude.some(p => path.startsWith(p))) return false;
   if (include.length && !include.some(p => path.startsWith(p))) return false;
