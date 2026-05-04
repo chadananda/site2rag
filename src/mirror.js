@@ -89,7 +89,7 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
     }
     stats.checked++;
     if (stats.checked % 10 === 0) {
-      upsertMeta.run('mirror_progress', JSON.stringify({ checked: visited.size, total: countPages.get().n, new_pages: stats.new_pages, changed: stats.changed, started_at: runStartedAt }));
+      upsertMeta.run('mirror_progress', JSON.stringify({ checked: visited.size, total: visited.size + discoverQueue.length, new_pages: stats.new_pages, changed: stats.changed, started_at: runStartedAt }));
     }
 
     const { status, buf, mimeType } = result;
