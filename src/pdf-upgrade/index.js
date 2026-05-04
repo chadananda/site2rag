@@ -249,11 +249,13 @@ const tick = async () => {
         FROM pdf_upgrade_queue q LEFT JOIN pdf_quality pq ON q.url=pq.url
         WHERE q.status='pending' AND (q.pass IS NULL OR q.pass=1)
         ORDER BY q.priority DESC LIMIT ?`).all(MARKER_CONCURRENCY);
+      // Fair share: each site gets equal slice of OCR slots; min 1, max OCR_DOC_CONCURRENCY
+      const perSite = Math.max(1, Math.ceil(OCR_DOC_CONCURRENCY / openDbs.length));
       const p2 = db.prepare(`
         SELECT q.*, pq.composite_score as before_score
         FROM pdf_upgrade_queue q LEFT JOIN pdf_quality pq ON q.url=pq.url
         WHERE q.status='pending' AND q.pass>=2
-        ORDER BY q.priority DESC LIMIT ?`).all(OCR_DOC_CONCURRENCY);
+        ORDER BY q.priority DESC LIMIT ?`).all(perSite);
       for (const row of p1) pass1.push({ db, domain, row, siteConfig: sc });
       for (const row of p2) pass2plus.push({ db, domain, row, siteConfig: sc });
     }
