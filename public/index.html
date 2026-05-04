@@ -791,7 +791,8 @@ function app() {
 
     thumbSrc(doc, w = 144, page = 1, h = 192) {
       const hParam = h ? `&h=${h}` : '';
-      return `${API_BASE}/api/thumbnail?url=${encodeURIComponent(doc.url)}&w=${w}${hParam}&page=${page}`;
+      const site = this.activeSite?.domain || '';
+      return `${API_BASE}/api/thumbnail?url=${encodeURIComponent(doc.url)}&site=${encodeURIComponent(site)}&w=${w}${hParam}&page=${page}`;
     },
     pdfSrc(doc) {
       if (doc.upgraded_pdf_path) return `${API_BASE}/api/docs/download?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}`;

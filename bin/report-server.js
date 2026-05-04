@@ -97,7 +97,8 @@ createServer(async (req, res) => {
   if (path === '/api/thumbnail') {
     const docUrl = url.searchParams.get('url');
     if (!docUrl) return err(res, 400, 'url param required');
-    const domain = sites.find(s => docUrl.startsWith(`https://${s.domain}`) || docUrl.startsWith(`http://${s.domain}`))?.domain;
+    const domain = url.searchParams.get('site') ||
+      sites.find(s => docUrl.startsWith(`https://${s.domain}`) || docUrl.startsWith(`http://${s.domain}`))?.domain;
     if (!domain) return err(res, 404, 'unknown domain');
     const db = safeOpenDb(domain);
     if (!db) return err(res, 404, 'db unavailable');
