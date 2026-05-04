@@ -42,10 +42,24 @@ export const buildFreeSummary = (row) => {
 };
 
 /** Transform a DB doc row to API response shape with language normalization + effort estimate. */
+const titleFromUrl = (url) => {
+  try {
+    const u = new URL(url);
+    const dl = u.searchParams.get('dl');
+    const raw = (dl || u.pathname.split('/').pop() || '').replace(/\.pdf$/i, '');
+    // Strip leading numeric timestamp prefix (e.g. "1770651898-history-of-aliyabad" → "history-of-aliyabad")
+    const cleaned = raw.replace(/^\d{8,}-/, '');
+    return cleaned.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()).trim() || null;
+  } catch { return null; }
+};
+
+const isGenericTitle = (t) => !t || t.length <= 5 || /^pdf$/i.test(t.trim());
+
 export const mapDoc = (d, domain) => {
+  const title = isGenericTitle(d.title) ? (titleFromUrl(d.url) || d.title || null) : d.title;
   const ai_summary = d.ai_summary || buildFreeSummary(d) || null;
   const summary_tier = d.summary_tier || (ai_summary && !d.ai_summary ? 'free' : null);
-  const langKey = d.ai_language || detectLanguage([d.excerpt, d.title].filter(Boolean).join(' ')) || 'unknown';
+  const langKey = d.ai_language || detectLanguage([d.excerpt, title].filter(Boolean).join(' ')) || 'unknown';
   const ai_language = LANG_DISPLAY[langKey] ?? null;
   const lang_cost_mult = LANG_COST[langKey] ?? LANG_COST.unknown;
   const pages = d.pages || 0;
@@ -54,6 +68,7 @@ export const mapDoc = (d, domain) => {
   const effort_mins = pagesNeeded > 0 ? Math.max(1, Math.round(pagesNeeded * 0.5 * lang_cost_mult)) : 0;
   return {
     ...d,
+    title,
     ai_summary,
     summary_tier,
     ai_language,
