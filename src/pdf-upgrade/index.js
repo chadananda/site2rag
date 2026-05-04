@@ -288,16 +288,22 @@ const tick = async () => {
       if (!pass2plus.length) return;
       if (!ocrBackend) { log('No OCR backend available — skipping pass-2+'); return; }
       if (ocrBackend === 'claude') log('Boss unreachable — falling back to Claude Haiku for OCR');
-      // Count already-running fire-and-forget OCR jobs across all sites
-      let activeOcr = 0;
-      for (const { db } of openDbs) {
-        try { activeOcr += db.prepare("SELECT COUNT(*) as n FROM pdf_upgrade_queue WHERE status='processing' AND pass>=2").get().n; } catch {}
+      // Per-site fair cap: each site gets equal share of OCR slots to prevent starvation
+      const perSite = Math.max(1, Math.ceil(OCR_DOC_CONCURRENCY / openDbs.length));
+      const activeBySite = {};
+      for (const { db, domain } of openDbs) {
+        try { activeBySite[domain] = db.prepare("SELECT COUNT(*) as n FROM pdf_upgrade_queue WHERE status='processing' AND pass>=2").get().n; }
+        catch { activeBySite[domain] = 0; }
       }
-      const available = Math.max(0, OCR_DOC_CONCURRENCY - activeOcr);
-      if (available <= 0) { log(`Pass 2+ skipped — ${activeOcr} OCR jobs already active`); return; }
+      const totalActive = Object.values(activeBySite).reduce((s, n) => s + n, 0);
+      if (totalActive >= OCR_DOC_CONCURRENCY) { log(`Pass 2+ skipped — ${totalActive} OCR jobs already active`); return; }
       pass2plus.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
-      const batch = pass2plus.slice(0, available);
-      log(`Pass 2+ (${ocrBackend}): ${batch.length} docs (fire-and-forget, ${activeOcr} already active)`);
+      // Filter: only include docs for sites that haven't hit their per-site cap
+      const batch = pass2plus
+        .filter(({ domain }) => (activeBySite[domain] || 0) < perSite)
+        .slice(0, OCR_DOC_CONCURRENCY - totalActive);
+      if (!batch.length) { log(`Pass 2+ skipped — all sites at per-site cap (${perSite} each)`); return; }
+      log(`Pass 2+ (${ocrBackend}): ${batch.length} docs (fire-and-forget, ${totalActive} active)`);
       // Fire-and-forget: OCR jobs own their DB connections and can span multiple ticks
       batch.forEach(({ domain, row, siteConfig }) =>
         upgradeDocumentOcr(domain, row, allDomains, ocrBackend, siteConfig).catch(e => log(`OCR job error: ${e.message}`)));
