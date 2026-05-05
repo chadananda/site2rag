@@ -31,10 +31,11 @@ export async function startPipelineServer({
   const jobs = await openJobStore(dbPath);
   let running = 0;
 
-  // Delay reset to avoid race with pm2 graceful reload: the old instance may still be running
-  // briefly and could write 'processing' back after we reset. 5s is enough for graceful exit.
+  // Reset jobs stuck in 'processing' from a previous instance. Use server start time as the
+  // cutoff so jobs started by THIS instance (after startup) are never reset.
+  const serverStartedAt = new Date().toISOString();
   setTimeout(() => {
-    const resetCount = jobs.resetStuck();
+    const resetCount = jobs.resetStuck(serverStartedAt);
     if (resetCount > 0) log(`startup: reset ${resetCount} stuck processing jobs to pending`);
   }, 5000);
 

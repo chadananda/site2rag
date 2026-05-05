@@ -90,11 +90,13 @@ export class JobStore {
     this.db.prepare('DELETE FROM jobs WHERE id=?').run(id);
   }
 
-  /** Reset jobs stuck in 'processing' (e.g. from a crash/reload) back to pending. Returns count. */
-  resetStuck() {
-    return this.db.prepare(
-      "UPDATE jobs SET status='pending', started_at=NULL, progress=NULL WHERE status='processing'"
-    ).run().changes;
+  /** Reset jobs stuck in 'processing' that started before a given ISO timestamp. Returns count.
+   *  Pass the server start time so only orphaned jobs from previous instances are reset. */
+  resetStuck(beforeIso) {
+    const sql = beforeIso
+      ? "UPDATE jobs SET status='pending', started_at=NULL, progress=NULL WHERE status='processing' AND (started_at IS NULL OR started_at < ?)"
+      : "UPDATE jobs SET status='pending', started_at=NULL, progress=NULL WHERE status='processing'";
+    return (beforeIso ? this.db.prepare(sql).run(beforeIso) : this.db.prepare(sql).run()).changes;
   }
 
   /** Number of pending + processing jobs. */
