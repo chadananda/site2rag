@@ -88,7 +88,11 @@ export const maybeQueue = (db, url, contentHash, score, threshold = 0.7, languag
   if (score >= threshold) return false;
   const existing = db.prepare('SELECT status FROM pdf_upgrade_queue WHERE url=?').get(url);
   if (existing && existing.status !== 'pending') return false; // already processed or in progress
-  const langKey = (language || 'unknown').toLowerCase();
+  // Prefer the DB-stored language (corrected by detectLanguageForImagePdfs) over the
+  // text-extraction guess — pdf-parse often detects Persian/Arabic as 'english' due to
+  // sparse Latin metadata (title, publisher) outweighing undecodable script characters.
+  const dbLang = db.prepare('SELECT ai_language FROM pdf_quality WHERE url=?').get(url)?.ai_language;
+  const langKey = ((dbLang && dbLang !== 'unknown' ? dbLang : language) || 'unknown').toLowerCase();
   const langMult = LANG_PRIORITY[langKey] ?? LANG_PRIORITY.unknown;
   const priority = (1 - score) * langMult;
   db.prepare(`INSERT OR REPLACE INTO pdf_upgrade_queue (url, content_hash, priority, status, queued_at)

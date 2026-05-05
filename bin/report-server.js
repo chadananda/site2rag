@@ -165,8 +165,23 @@ createServer(async (req, res) => {
       pdb.close();
       const activity = rows.map(r => {
         const p = r.progress ? JSON.parse(r.progress) : {};
-        const stage = r.status === 'pending' ? 'queued' : (p.stage || null);
-        return { url: r.source_url, stage, pages_done: p.pages_affected || 0, total_pages: p.total_pages || 0 };
+        const isActive = r.status === 'processing';
+        const stageStartedAt = p.stage_started_at ? new Date(p.stage_started_at).getTime() : null;
+        const elapsedMs = stageStartedAt ? Date.now() - stageStartedAt : null;
+        const pagesRate = (p.pages_done > 0 && elapsedMs > 0) ? p.pages_done / elapsedMs : null;
+        const pagesRemaining = (p.total_pages || 0) - (p.pages_done || 0);
+        const estimatedRemainingMs = (pagesRate && pagesRemaining > 0) ? Math.round(pagesRemaining / pagesRate) : null;
+        return {
+          url: r.source_url,
+          status: r.status,
+          stage: isActive ? (p.stage || null) : 'queued',
+          stage_started_at: p.stage_started_at || null,
+          elapsed_ms: elapsedMs,
+          pages_done: p.pages_done || 0,
+          total_pages: p.total_pages || 0,
+          estimated_remaining_ms: estimatedRemainingMs,
+          completed: p.completed || [],
+        };
       });
       return json(res, activity);
     } catch { return json(res, []); }
@@ -269,7 +284,7 @@ createServer(async (req, res) => {
       const importanceParam = url.searchParams.get('importance');
       const importance = importanceParam ? Math.max(1, Math.min(5, parseInt(importanceParam, 10))) : null;
       const existing = db.prepare('SELECT status FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
-      if (existing?.status === 'processing') return json(res, { ok: true, status: 'processing', message: 'Already processing' });
+      if (existing?.status === 'processing' || existing?.status === 'submitted') return json(res, { ok: true, status: existing.status, message: 'Already in pipeline' });
       const now = new Date().toISOString();
       const imp = importance ?? 1;
       if (existing) {

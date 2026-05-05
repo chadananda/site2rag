@@ -46,6 +46,9 @@ export async function runPipeline(opts) {
     }
 
     log(`  run ${stageName}`);
+    if (opts.onStageStart) {
+      try { opts.onStageStart(stageName); } catch (_) { /* never stop the pipeline */ }
+    }
     try {
       await stageFn(ctx);
     } catch (err) {

@@ -31,6 +31,13 @@ export async function startPipelineServer({
   const jobs = await openJobStore(dbPath);
   let running = 0;
 
+  // Delay reset to avoid race with pm2 graceful reload: the old instance may still be running
+  // briefly and could write 'processing' back after we reset. 5s is enough for graceful exit.
+  setTimeout(() => {
+    const resetCount = jobs.resetStuck();
+    if (resetCount > 0) log(`startup: reset ${resetCount} stuck processing jobs to pending`);
+  }, 5000);
+
   // Worker: pick up next pending job and run it
   const processNext = async () => {
     if (running >= concurrency) return;
@@ -41,6 +48,8 @@ export async function startPipelineServer({
     jobs.setProcessing(job.id);
     log(`start job=${job.id}`);
 
+    let stageStartedAt = null;
+    const completedStages = [];
     try {
       const ctx = await runPipeline({
         docId:      job.id,
@@ -49,8 +58,27 @@ export async function startPipelineServer({
         importance: job.importance ?? 1,
         meta:       job.meta ?? {},
         config:     { ...baseConfig, ...job.config },
+        onStageStart: (stage) => {
+          stageStartedAt = Date.now();
+          const prev = jobs.getProgress(job.id) || {};
+          jobs.setProgress(job.id, {
+            stage,
+            stage_started_at: new Date().toISOString(),
+            total_pages: prev.total_pages || 0,
+            pages_done: 0,
+            completed: completedStages,
+          });
+        },
         onProgress: (stage, pagesAffected, totalPages) => {
-          jobs.setProgress(job.id, { stage, pages_affected: pagesAffected, total_pages: totalPages });
+          const duration_ms = stageStartedAt ? Date.now() - stageStartedAt : 0;
+          completedStages.push({ stage, pages: pagesAffected, ms: duration_ms });
+          jobs.setProgress(job.id, {
+            stage: null,
+            stage_started_at: null,
+            total_pages: totalPages,
+            pages_done: pagesAffected,
+            completed: completedStages,
+          });
         },
       });
 

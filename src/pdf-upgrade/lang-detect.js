@@ -36,6 +36,9 @@ const saveAndReprioritize = (db, url, langKey, topic) => {
  */
 export const detectLanguageForImagePdfs = async (db, domain) => {
   // Stage 1 — free Unicode detection on all docs with unknown language
+  // Include docs detected as 'english' but with low readability — likely mislabeled due to
+  // sparse Latin metadata (title, publisher info) in a non-Latin document (Persian/Arabic/etc.)
+  // whose actual text layer can't be decoded by pdf-parse.
   const freeRows = db.prepare(`
     SELECT pq.url, pq.pdf_title, pq.excerpt,
            h.hosted_title, hp.local_path as host_local_path, p.local_path
@@ -43,7 +46,8 @@ export const detectLanguageForImagePdfs = async (db, domain) => {
     LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title FROM hosts GROUP BY hosted_url) h ON pq.url=h.hosted_url
     LEFT JOIN pages hp ON h.host_url=hp.url
     LEFT JOIN pages p ON pq.url=p.url
-    WHERE (pq.ai_language IS NULL OR pq.ai_language='unknown')
+    WHERE (pq.ai_language IS NULL OR pq.ai_language='unknown'
+      OR (pq.ai_language='english' AND pq.readable_pages_pct < 0.4 AND pq.word_quality_estimate < 0.5))
     LIMIT ?`).all(FREE_BATCH);
 
   let freeDetected = 0;

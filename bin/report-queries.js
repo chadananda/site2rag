@@ -111,6 +111,7 @@ export const siteDocs = (domain, params) => {
     const vals = [];
 
     if (tab === 'upgraded') {
+      // 'submitted' stays in Original tab; only actively-running and terminal states shown here
       wheres.push("u.status IN ('done','processing','failed')");
     }
     // 'original' (default/fallback): all PDFs, no quality filter
@@ -128,7 +129,7 @@ export const siteDocs = (domain, params) => {
       title_asc: 'COALESCE(h.hosted_title, p.url) ASC',
       improved_desc: 'COALESCE(u.score_improvement, 0) DESC'
     };
-    // Upgraded default: processing first, then hardest (highest importance, lowest score)
+    // Upgraded default: actively processing first, failed second, done last; then by importance/score
     const upgradedOrder = `CASE u.status WHEN 'processing' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END ASC, COALESCE(u.importance,3) DESC, COALESCE(q.composite_score,1) ASC`;
     const orderBy = tab === 'upgraded'
       ? (orderMap[sort] || upgradedOrder)

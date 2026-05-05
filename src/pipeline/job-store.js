@@ -69,6 +69,11 @@ export class JobStore {
       .run(JSON.stringify(progress), id);
   }
 
+  getProgress(id) {
+    const row = this.db.prepare('SELECT progress FROM jobs WHERE id=?').get(id);
+    return row?.progress ? JSON.parse(row.progress) : null;
+  }
+
   setDone(id, { mdPath, pdfOutPath, receipt }) {
     this.db.prepare(
       "UPDATE jobs SET status='done', finished_at=?, md_path=?, pdf_out_path=?, receipt=? WHERE id=?"
@@ -83,6 +88,13 @@ export class JobStore {
 
   delete(id) {
     this.db.prepare('DELETE FROM jobs WHERE id=?').run(id);
+  }
+
+  /** Reset jobs stuck in 'processing' (e.g. from a crash/reload) back to pending. Returns count. */
+  resetStuck() {
+    return this.db.prepare(
+      "UPDATE jobs SET status='pending', started_at=NULL, progress=NULL WHERE status='processing'"
+    ).run().changes;
   }
 
   /** Number of pending + processing jobs. */

@@ -59,6 +59,16 @@ export async function s0Baseline(ctx) {
       notes = 'early_exit: doc already good enough';
     }
 
+    // OCR escalation (s4 = 600dpi re-scan, s5 = Vision AI) are only for true image PDFs.
+    // Text-layer PDFs may score poorly due to encoding issues (e.g. Persian/Arabic fonts that
+    // pdf-parse can't decode), but running Vision AI on them produces worse results, not better.
+    if (score.has_text_layer === 1 && !ctx.config.skip?.includes('s4')) {
+      ctx.config.skip = [...new Set([...(ctx.config.skip ?? []), 's4', 's5'])];
+      ctx.addDecision('s0', 'skip_ocr_escalation',
+        `has_text_layer=1 — 600dpi re-scan and Vision AI only apply to image PDFs`,
+        score.composite_score);
+    }
+
     const visionGate = ctx.config.escalation?.localVision ?? 1;
     if (ctx.importance < visionGate && !ctx.config.skip?.includes('s5')) {
       ctx.config.skip = [...new Set([...(ctx.config.skip ?? []), 's5'])];

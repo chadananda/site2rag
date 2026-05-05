@@ -99,7 +99,7 @@ const submitViaPipeline = async (db, domain, row, page, siteConfig) => {
         keywords:        ['site2rag', domain],
       },
     });
-    db.prepare("UPDATE pdf_upgrade_queue SET status='processing', started_at=?, pipeline_job_id=? WHERE url=?")
+    db.prepare("UPDATE pdf_upgrade_queue SET status='submitted', started_at=?, pipeline_job_id=? WHERE url=?")
       .run(now(), jobId, row.url);
     log(`Pipeline submitted: ${row.url.split('/').pop()}`);
   } catch (err) {
@@ -112,7 +112,7 @@ const submitViaPipeline = async (db, domain, row, page, siteConfig) => {
 /** Poll all in-flight pipeline jobs and update site DB when done/failed. */
 const checkPipelineJobs = async (db) => {
   const running = db.prepare(
-    "SELECT url, pipeline_job_id, before_score FROM pdf_upgrade_queue WHERE status='processing' AND pipeline_job_id IS NOT NULL"
+    "SELECT url, pipeline_job_id, before_score FROM pdf_upgrade_queue WHERE status IN ('processing','submitted') AND pipeline_job_id IS NOT NULL"
   ).all();
   for (const { url, pipeline_job_id: jobId, before_score } of running) {
     try {
@@ -133,8 +133,12 @@ const checkPipelineJobs = async (db) => {
         db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=?, pipeline_job_id=NULL WHERE url=?")
           .run(now(), (job.error || 'pipeline failed').slice(0, 300), url);
         log(`Pipeline failed: ${url.split('/').pop()}: ${job.error}`);
+      } else if (job.status === 'processing') {
+        // Mark as actively running (was 'submitted' = waiting in queue)
+        db.prepare("UPDATE pdf_upgrade_queue SET status='processing' WHERE url=? AND status='submitted'")
+          .run(url);
       }
-      // pending/processing → still running, check next tick
+      // 'pending' = still waiting in queue, stays 'submitted'
     } catch (err) {
       if (err.message?.includes('404') || err.message?.includes('HTTP 404')) {
         db.prepare("UPDATE pdf_upgrade_queue SET status='failed', error=?, pipeline_job_id=NULL WHERE url=?")
@@ -507,8 +511,14 @@ const resetStuckProcessing = () => {
       let db;
       try {
         db = openDb(domain);
-        const n = db.prepare("UPDATE pdf_upgrade_queue SET status='pending', started_at=NULL WHERE status='processing'").run().changes;
+        const n = db.prepare("UPDATE pdf_upgrade_queue SET status='pending', started_at=NULL WHERE status IN ('processing','submitted')").run().changes;
         if (n) log(`Reset ${n} stuck docs to pending`);
+        // Reset failed docs whose failure was a pipeline timeout (not a real processing error).
+        // These docs never got a fair chance — they were just waiting in a queue when the old
+        // 1-hour client timeout fired. Re-queue them so they're retried at their normal priority.
+        const n2 = db.prepare(`UPDATE pdf_upgrade_queue SET status='pending', started_at=NULL, error=NULL
+          WHERE status='failed' AND error LIKE '%timed out%'`).run().changes;
+        if (n2) log(`Reset ${n2} timeout-failed docs to pending (will retry at normal priority)`);
       } catch {} finally { try { db?.close(); } catch {} }
     }
   } catch {}
