@@ -31,6 +31,7 @@ export async function s0Baseline(ctx) {
       avg_chars_per_page: score.avg_chars_per_page,
       language: score.language,
       excerpt: score.excerpt ?? null,
+      processing_difficulty: score.processing_difficulty ?? 1.0,
     });
 
     ctx.addDecision('s0', 'baseline_computed', [
@@ -77,11 +78,15 @@ export async function s0Baseline(ctx) {
         score.composite_score);
     }
 
+    // Skip s5 only if below localVision gate AND not a hard image PDF.
+    // Hard docs (difficulty >= 0.3) need vision even at low importance — they're hard because
+    // local OCR fails on them and escalation is the only path to usable text.
     const visionGate = ctx.config.escalation?.localVision ?? 1;
-    if (ctx.importance < visionGate && !ctx.config.skip?.includes('s5')) {
+    const difficulty = score.processing_difficulty ?? 0;
+    if (ctx.importance < visionGate && difficulty < 0.3 && !ctx.config.skip?.includes('s5')) {
       ctx.config.skip = [...new Set([...(ctx.config.skip ?? []), 's5'])];
       ctx.addDecision('s0', 'skip_vision',
-        `importance ${ctx.importance} < gate ${visionGate}`, ctx.importance);
+        `importance ${ctx.importance} < gate ${visionGate} and difficulty ${difficulty} < 0.3`, ctx.importance);
     }
 
   } catch (err) {

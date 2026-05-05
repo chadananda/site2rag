@@ -195,6 +195,19 @@ if ('serviceWorker' in navigator) {
             ↑ Prioritize
           </button>
         </template>
+        <template x-if="adminToken">
+          <button @click="requeueAll(activeSite.domain)"
+            class="text-xs px-2 py-0.5 rounded border border-amber-300 text-amber-700 hover:bg-amber-50 font-medium"
+            title="Clear queue and re-score all PDFs from scratch">
+            ↺ Re-assess
+          </button>
+        </template>
+        <template x-if="adminToken && focusDomain === activeSite.domain">
+          <span class="text-xs px-2 py-0.5 rounded bg-indigo-100 text-indigo-700 font-semibold flex items-center gap-1">
+            ⊙ Focused
+            <button @click="clearFocus()" class="ml-1 text-indigo-400 hover:text-indigo-700 font-bold" title="Clear focus — resume all sites">×</button>
+          </span>
+        </template>
         <a :href="activeSite.url" target="_blank" rel="noopener" class="ml-auto text-xs text-gray-400 hover:text-blue-600 mono">↗ open site</a>
       </div>
 
@@ -995,6 +1008,7 @@ function app() {
     _searchTimer: null,
     adminToken: localStorage.getItem('adminToken') || '',
     showLoginModal: false, loginPassword: '', loginError: '',
+    focusDomain: null,
     fmt, scorePillCls, scoreBlockCls, scoreLabel, effortEstimate, cannotUpgrade, langBadgeCls,
 
     fmtUptime(s) {
@@ -1143,6 +1157,11 @@ function app() {
     async init() {
       await this.checkVersion();
       await this.loadSites();
+      // Load current focus state
+      try {
+        const f = await this.adminFetch(`${API_BASE}/api/focus`).then(r => r.json());
+        this.focusDomain = f.domain || null;
+      } catch {}
       setInterval(() => this.refresh(), 30000);
       setInterval(() => this.pollActivity(), 5000);
       // Smooth interpolation ticker: advance sumDisplay at measured rate between refreshes
@@ -1254,7 +1273,34 @@ function app() {
       this.docsPage = 1;
       this.tabTotals = { original: null, upgraded: null };
       this.filters = { q: '', status: '', score_max: 1, sort: 'score_asc' };
+      // Selecting a site in admin mode focuses all upgrade processing on it
+      if (this.adminToken) await this.setFocus(s.domain);
       await Promise.all([this.loadDocs(), this.refreshTabCounts()]);
+    },
+
+    async setFocus(domain) {
+      try {
+        await this.adminFetch(`${API_BASE}/api/focus?site=${encodeURIComponent(domain)}`, { method: 'POST' });
+        this.focusDomain = domain;
+      } catch {}
+    },
+
+    async clearFocus() {
+      try {
+        await this.adminFetch(`${API_BASE}/api/focus`, { method: 'DELETE' });
+        this.focusDomain = null;
+        this.apiStatus = 'Focus cleared — all sites will be processed';
+        setTimeout(() => { if (this.apiStatus.startsWith('Focus')) this.apiStatus = 'connected'; }, 4000);
+      } catch {}
+    },
+
+    async requeueAll(domain) {
+      const res = await this.adminFetch(`${API_BASE}/api/docs/requeue-all?site=${encodeURIComponent(domain)}`, { method: 'POST' });
+      if (res.ok) {
+        this.apiStatus = 'Queue cleared — rescoring in background';
+        setTimeout(() => { if (this.apiStatus.startsWith('Queue')) this.apiStatus = 'connected'; }, 6000);
+        await this.refresh();
+      } else { this.apiError = `Requeue failed: ${res.status}`; }
     },
 
     selectedSiteData() { return this.sites.find(s => s.domain === this.activeSite?.domain); },

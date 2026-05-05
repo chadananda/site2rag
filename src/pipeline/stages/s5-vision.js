@@ -23,6 +23,7 @@ const execFileAsync = promisify(execFile);
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 
 const VISION_PROMPT = 'Transcribe all text from this document page exactly as it appears. Output only the transcribed text in clean Markdown. Preserve headings, paragraphs, lists, and tables. Do not add commentary.';
+const HANDWRITING_PROMPT = 'Carefully transcribe all handwritten and printed text from this document page. The text may include multiple languages and scripts including Arabic, Persian, and English. Preserve paragraph breaks. Mark words that are truly illegible as [illegible]. Output only the transcribed text in clean Markdown. Do not add commentary.';
 
 const SURYA_CHUNK_SIZE = 20; // pages per surya_ocr call — limits memory on large docs
 const SURYA_BIN = process.env.SURYA_PATH ?? 'surya_ocr'; // path to surya_ocr CLI
@@ -206,14 +207,14 @@ async function visionViaGoogle(key, b64, lang) {
   return { text, tokens_in: 0, tokens_out: 0, cost: 0.0015 };
 }
 
-async function visionViaCloud(b64, apiKey, model) {
+async function visionViaCloud(b64, apiKey, model, prompt = VISION_PROMPT) {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey });
   const msg = await client.messages.create({
     model, max_tokens: 2048,
     messages: [{ role: 'user', content: [
       { type: 'image', source: { type: 'base64', media_type: 'image/png', data: b64 } },
-      { type: 'text', text: VISION_PROMPT },
+      { type: 'text', text: prompt },
     ]}],
   });
   const text = msg.content.map(b => b.type === 'text' ? b.text : '').join('');
@@ -223,6 +224,13 @@ async function visionViaCloud(b64, apiKey, model) {
 
 async function buildBackendChain(ctx) {
   const order = ctx.config.implementations?.vision ?? ['boss', 'azure', 'google', 'claude-opus-4-7'];
+  const difficulty = ctx.quality?.baseline?.processing_difficulty ?? 0;
+  // Hard/handwritten docs escalate to cloud vision regardless of importance (difficulty >= 0.5).
+  // Standard cloud gate still applies for easy docs (importance >= cloudVision threshold).
+  const cloudVisionGate = ctx.config.escalation?.cloudVision ?? 3;
+  const needsCloud = ctx.importance >= cloudVisionGate || difficulty >= 0.5;
+  // Use handwriting-aware prompt for very hard docs (dense image scans, handwritten scripts).
+  const visionPrompt = difficulty >= 0.7 ? HANDWRITING_PROMPT : VISION_PROMPT;
   const chain = [];
   for (const name of order.filter(n => n !== 'surya')) {
     if (name === 'boss') {
@@ -231,14 +239,14 @@ async function buildBackendChain(ctx) {
         if (ok) chain.push({ name: 'boss', call: (b64) => visionViaBoss(ctx.config.bossUrl, b64) });
       }
     } else if (name === 'azure') {
-      if (ctx.importance >= (ctx.config.escalation?.cloudVision ?? 3) && ctx.config.azureKey && ctx.config.azureEndpoint)
+      if (needsCloud && ctx.config.azureKey && ctx.config.azureEndpoint)
         chain.push({ name: 'azure', call: (b64) => visionViaAzure(ctx.config.azureEndpoint, ctx.config.azureKey, b64) });
     } else if (name === 'google') {
-      if (ctx.importance >= (ctx.config.escalation?.cloudVision ?? 3) && ctx.config.googleKey)
+      if (needsCloud && ctx.config.googleKey)
         chain.push({ name: 'google', call: (b64, lang) => visionViaGoogle(ctx.config.googleKey, b64, lang) });
     } else if (name.startsWith('claude')) {
-      if (ctx.importance >= (ctx.config.escalation?.cloudVision ?? 3) && ctx.config.apiKey)
-        chain.push({ name, call: (b64) => visionViaCloud(b64, ctx.config.apiKey, name) });
+      if (needsCloud && ctx.config.apiKey)
+        chain.push({ name, call: (b64) => visionViaCloud(b64, ctx.config.apiKey, name, visionPrompt) });
     }
   }
   return chain;
@@ -255,8 +263,11 @@ export async function s5Vision(ctx) {
   try {
     const visionPages = ctx.pages.filter(p => shouldVisionPage(p).shouldVision);
 
-    // Phase 1: Surya batch pre-pass (free, handles difficult scripts well)
-    if (visionPages.length > 0 && ctx.importance >= (ctx.config.escalation?.suryaVision ?? 2)) {
+    // Phase 1: Surya batch pre-pass (free, handles difficult scripts well).
+    // Always run for hard docs (difficulty >= 0.3) — they need it most.
+    const difficulty = ctx.quality?.baseline?.processing_difficulty ?? 0;
+    const suryaGate = ctx.config.escalation?.suryaVision ?? 2;
+    if (visionPages.length > 0 && (ctx.importance >= suryaGate || difficulty >= 0.3)) {
       const suryaOk = await checkSuryaCli();
       if (suryaOk) {
         try {

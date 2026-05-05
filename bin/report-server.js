@@ -1,6 +1,6 @@
-// HTTP API + static file server. Routes: /api/sites, /api/docs, /api/thumbnail, /api/runs, /api/docs/*, /api/pdf; static public/. Deps: report-queries, report-utils, thumb-worker-pool, db, config, Anthropic
+// HTTP API + static file server. Routes: /api/sites, /api/docs, /api/thumbnail, /api/runs, /api/docs/*, /api/pdf, /api/focus; static public/. Deps: report-queries, report-utils, thumb-worker-pool, db, config, Anthropic
 import { createServer } from 'http';
-import { existsSync, readFileSync, mkdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync } from 'fs';
 import { join, extname, dirname, resolve } from 'path';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
@@ -12,8 +12,22 @@ import { detectLanguage } from '../src/language.js';
 import { siteSummary, siteDocs, siteTabCounts, recentRuns } from './report-queries.js';
 import { stripHtml, getLinkContext, buildSummaryPrompt } from './report-utils.js';
 import { generateThumb } from './thumb-worker-pool.js';
+import { runScorePdfs } from '../src/score-pdfs.js';
+import { maybeQueue } from '../src/pdf-upgrade/score.js';
 
 const PORT = parseInt(process.env.REPORT_PORT || '7840', 10);
+const FOCUS_FILE = join(getMirrorRoot(), '.focused_domain');
+
+const getFocusDomain = () => {
+  try { const d = readFileSync(FOCUS_FILE, 'utf8').trim(); return d || null; } catch { return null; }
+};
+const setFocusDomain = (domain) => {
+  mkdirSync(getMirrorRoot(), { recursive: true });
+  writeFileSync(FOCUS_FILE, domain, 'utf8');
+};
+const clearFocusDomain = () => {
+  try { unlinkSync(FOCUS_FILE); } catch {}
+};
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://site2rag.lnker.com';
 
 let _sitesCache = null;
@@ -296,6 +310,55 @@ createServer(async (req, res) => {
       }
       return json(res, { ok: true, status: 'pending', queued: !existing, method: upgradeMethod, importance: imp, message: existing ? 'Boosted to front of queue' : 'Added to front of queue' });
     } finally { db.close(); }
+  }
+
+  // Focus mode — tells the upgrade daemon to concentrate on one site until done
+  if (path === '/api/focus') {
+    if (!isAdmin(req)) return err(res, 401, 'Admin password required');
+    if (req.method === 'GET') {
+      return json(res, { domain: getFocusDomain() });
+    }
+    if (req.method === 'POST') {
+      const domain = url.searchParams.get('site');
+      if (!domain) return err(res, 400, 'site param required');
+      setFocusDomain(domain);
+      return json(res, { ok: true, domain });
+    }
+    if (req.method === 'DELETE') {
+      clearFocusDomain();
+      return json(res, { ok: true, domain: null });
+    }
+  }
+
+  // Wipe and re-score all PDFs for a site, then requeue everything below threshold
+  if (path === '/api/docs/requeue-all' && req.method === 'POST') {
+    if (!isAdmin(req)) return err(res, 401, 'Admin password required');
+    const domain = url.searchParams.get('site');
+    if (!domain) return err(res, 400, 'site param required');
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, 'db unavailable');
+    let queued = 0;
+    try {
+      // Clear queue and quality scores so everything gets fresh-scored
+      db.prepare("DELETE FROM pdf_upgrade_queue").run();
+      db.prepare("DELETE FROM pdf_quality").run();
+    } finally { db.close(); }
+
+    // Re-score and requeue in background — don't block the HTTP response
+    const siteConfig = sites.find(s => {
+      try { return new URL(s.url).hostname === domain; } catch { return false; }
+    }) ?? {};
+    const db2 = safeOpenDb(domain);
+    if (db2) {
+      runScorePdfs(db2, siteConfig).then(stats => {
+        console.log(`[requeue-all] ${domain}: scored=${stats.scored} queued=${stats.queued} skipped=${stats.skipped}`);
+        db2.close();
+      }).catch(e => {
+        console.error(`[requeue-all] ${domain}: ${e.message}`);
+        try { db2.close(); } catch {}
+      });
+    }
+    return json(res, { ok: true, message: 'Queue cleared — rescoring in background. Processing will start when scores are ready.' });
   }
 
   if (path === '/api/docs/skip' && req.method === 'POST') {

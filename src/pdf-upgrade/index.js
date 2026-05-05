@@ -1,6 +1,6 @@
 // PDF upgrade loop: multi-pass (Marker → boss vision → Claude). Exports: (none, daemon). Deps: backfill, lang-detect, summarize, reocr, rebuild, score, marker-client, db
 // Set PIPELINE_URL env var to route upgrades through the new pipeline service instead of Marker.
-import { existsSync, copyFileSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
+import { existsSync, copyFileSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
 import { loadConfig, getMirrorRoot, mirrorDir, mdDir, metaDir } from '../config.js';
@@ -366,6 +366,11 @@ const upgradeDocumentOcr = async (domain, row, allDomains, ocrBackend, siteConfi
   }
 };
 
+const FOCUS_FILE = join(getMirrorRoot(), '.focused_domain');
+const getFocusDomain = () => {
+  try { const d = readFileSync(FOCUS_FILE, 'utf8').trim(); return d || null; } catch { return null; }
+};
+
 const tick = async () => {
   let sites;
   try {
@@ -376,8 +381,15 @@ const tick = async () => {
   }
   if (!sites.length) return;
 
-  // Filter out sites with invalid URLs before opening any DBs
-  const validSites = sites.filter(site => safeHostname(site.url));
+  // Respect focus mode: admin can focus all processing on one site via report UI
+  const focusDomain = getFocusDomain();
+  if (focusDomain) log(`Focus mode: processing ${focusDomain} only`);
+
+  // Filter out sites with invalid URLs, and apply focus when set
+  const validSites = sites.filter(site => {
+    const d = safeHostname(site.url);
+    return d && (!focusDomain || d === focusDomain);
+  });
 
   const openDbs = [];
   try {
