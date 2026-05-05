@@ -249,7 +249,7 @@ const upgradeDocumentOcr = async (domain, row, allDomains, ocrBackend, siteConfi
       }
     } catch (err) {
       log(`Failed pass ${row.pass||2}: ${row.url}: ${err.message}`);
-      const permanent = err.message?.includes('EncryptedPdf') || err.message?.includes('local_path missing') || err.message?.includes('Data format error');
+      const permanent = err.message?.includes('EncryptedPdf') || err.message?.includes('local_path missing') || err.message?.includes('Data format error') || err.message?.includes('image file is truncated') || err.message?.includes('cannot identify image file');
       logUpgradeHistory(db, row.url, { method: ocrBackend, score_before: row.before_score, error: err.message });
       if (permanent) {
         db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
