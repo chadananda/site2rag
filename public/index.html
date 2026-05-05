@@ -568,7 +568,7 @@ if ('serviceWorker' in navigator) {
                       <div class="ml-auto flex gap-1.5 items-center flex-shrink-0">
                         <!-- Processing / queued state -->
                         <template x-if="!doc.skip && doc.status==='processing'">
-                          <span class="px-2 py-0.5 rounded border border-blue-200 text-blue-500 bg-blue-50 text-xs font-semibold">⚙ running…</span>
+                          <span class="px-2 py-0.5 rounded border border-blue-200 text-blue-500 bg-blue-50 text-xs font-semibold" x-text="'⚙ '+activityLabel(doc.url)"></span>
                         </template>
                         <template x-if="!doc.skip && doc.status==='pending'">
                           <button @click.stop="queueUpgrade(doc)" :disabled="doc._upgrading"
@@ -1214,9 +1214,10 @@ function app() {
     activityLabel(docUrl) {
       const a = this.processingActivity[docUrl];
       if (!a?.stage) return 'processing';
-      const labels = { s0:'scoring', s1:'preprocessing', s2:'classifying', s3:'OCR', s4:'escalating', s5:'vision', s6:'spell-fixing', s7:'rebuilding', s8:'exporting' };
+      if (a.stage === 'queued') return 'queued';
+      const labels = { s0:'scoring', s1:'preprocessing', s2:'classifying', s3:'OCR', s4:'re-OCR', s5:'vision', s6:'spell-fixing', s7:'rebuilding', s8:'exporting' };
       const label = labels[a.stage] || a.stage;
-      if (a.stage === 's3' && a.total_pages > 0) return `${label} ${a.pages_done}/${a.total_pages}`;
+      if ((a.stage === 's3' || a.stage === 's4') && a.total_pages > 0) return `${label} ${a.pages_done}/${a.total_pages}`;
       return label;
     },
 

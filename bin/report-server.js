@@ -160,12 +160,13 @@ createServer(async (req, res) => {
     try {
       const pdb = new Database(pipelineDb, { readonly: true });
       const rows = pdb.prepare(
-        `SELECT source_url, progress FROM jobs WHERE status='processing' AND source_url LIKE ?`
+        `SELECT source_url, progress, status FROM jobs WHERE status IN ('processing','pending') AND source_url LIKE ?`
       ).all(`%${domain}%`);
       pdb.close();
       const activity = rows.map(r => {
         const p = r.progress ? JSON.parse(r.progress) : {};
-        return { url: r.source_url, stage: p.stage || null, pages_done: p.pages_affected || 0, total_pages: p.total_pages || 0 };
+        const stage = r.status === 'pending' ? 'queued' : (p.stage || null);
+        return { url: r.source_url, stage, pages_done: p.pages_affected || 0, total_pages: p.total_pages || 0 };
       });
       return json(res, activity);
     } catch { return json(res, []); }
