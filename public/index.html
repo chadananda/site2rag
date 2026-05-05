@@ -94,8 +94,42 @@ if ('serviceWorker' in navigator) {
               class="flex items-center gap-1 text-gray-400 hover:text-gray-600 transition-colors">
         <span class="text-sm leading-none">ⓘ</span><span class="not-mono font-medium">about upgrades</span>
       </button>
+      <template x-if="adminToken">
+        <button @click="logout()" title="Logged in as admin — click to log out"
+                class="flex items-center gap-1 px-2 py-0.5 rounded bg-green-50 text-green-700 hover:bg-red-50 hover:text-red-600 transition-colors">
+          <span class="status-dot bg-green-400"></span><span class="not-mono">admin</span>
+        </button>
+      </template>
+      <template x-if="!adminToken">
+        <button @click="showLoginModal=true"
+                class="flex items-center gap-1 px-2 py-0.5 rounded bg-gray-100 text-gray-500 hover:bg-gray-200 transition-colors">
+          <span class="not-mono">log in</span>
+        </button>
+      </template>
     </div>
   </div>
+
+  <!-- Admin login modal -->
+  <template x-if="showLoginModal">
+    <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" @click.self="showLoginModal=false">
+      <div class="bg-white rounded-xl shadow-2xl p-6 w-80 flex flex-col gap-4">
+        <h2 class="text-base font-bold">Admin login</h2>
+        <p class="text-sm text-gray-500">Enter the admin password to access controls.</p>
+        <input type="password" x-model="loginPassword" @keyup.enter="login()"
+               class="border rounded px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-blue-400"
+               placeholder="Password" autofocus />
+        <template x-if="loginError">
+          <p class="text-sm text-red-600" x-text="loginError"></p>
+        </template>
+        <div class="flex gap-2 justify-end">
+          <button @click="showLoginModal=false; loginError=''; loginPassword=''"
+                  class="px-3 py-1.5 text-sm rounded border hover:bg-gray-50">Cancel</button>
+          <button @click="login()"
+                  class="px-3 py-1.5 text-sm rounded bg-blue-600 text-white hover:bg-blue-700">Login</button>
+        </div>
+      </div>
+    </div>
+  </template>
 
   <template x-if="apiError">
     <div class="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700 mb-4">
@@ -822,12 +856,47 @@ function app() {
     serverHealth: null,
     appVersion: '', _buildId: null,
     _searchTimer: null,
+    adminToken: localStorage.getItem('adminToken') || '',
+    showLoginModal: false, loginPassword: '', loginError: '',
     fmt, scorePillCls, scoreBlockCls, scoreLabel, effortEstimate, cannotUpgrade, langBadgeCls,
 
     fmtUptime(s) {
       if (s < 60) return s + 's';
       if (s < 3600) return Math.floor(s / 60) + 'm';
       return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+    },
+
+    /** fetch() wrapper that adds admin token and intercepts 401 with a login prompt. */
+    async adminFetch(url, opts = {}) {
+      const headers = { ...(opts.headers || {}), ...(this.adminToken ? { Authorization: `Bearer ${this.adminToken}` } : {}) };
+      const res = await fetch(url, { ...opts, headers });
+      if (res.status === 401) {
+        this.showLoginModal = true;
+        return null;
+      }
+      return res;
+    },
+
+    async login() {
+      this.loginError = '';
+      const res = await fetch(`${API_BASE}/api/auth`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${this.loginPassword}` }
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.ok) {
+        this.adminToken = this.loginPassword;
+        localStorage.setItem('adminToken', this.adminToken);
+        this.showLoginModal = false;
+        this.loginPassword = '';
+      } else {
+        this.loginError = 'Wrong password';
+      }
+    },
+
+    logout() {
+      this.adminToken = '';
+      localStorage.removeItem('adminToken');
     },
 
     thumbSrc(doc, w = 144, page = 1, h = 192) {
@@ -856,8 +925,8 @@ function app() {
       doc._summarizing = true;
       if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
       try {
-        const res = await fetch(`${API_BASE}/api/docs/summarize?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}`, { method: 'POST' });
-        if (res.ok) {
+        const res = await this.adminFetch(`${API_BASE}/api/docs/summarize?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}`, { method: 'POST' });
+        if (res?.ok) {
           const { summary, author, language, tier } = await res.json();
           doc.ai_summary = summary;
           doc.ai_author = author;
@@ -878,9 +947,8 @@ function app() {
       const skip = !doc.skip;
       doc.skip = skip ? 1 : 0;
       if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
-      await fetch(`${API_BASE}/api/docs/skip?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}&skip=${skip ? 1 : 0}`, { method: 'POST' }).catch(() => {
-        doc.skip = skip ? 0 : 1;
-      });
+      const r = await this.adminFetch(`${API_BASE}/api/docs/skip?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}&skip=${skip ? 1 : 0}`, { method: 'POST' }).catch(() => null);
+      if (!r) doc.skip = skip ? 0 : 1;
     },
 
     upgradeProgressLabel(s) {

@@ -14,7 +14,15 @@ import { generateThumb } from './thumb-worker-pool.js';
 
 const PORT = parseInt(process.env.REPORT_PORT || '7840', 10);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://site2rag.lnker.com';
+const ADMIN_PASSWORD = process.env.REPORT_ADMIN_PASSWORD || null;
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
+
+/** Returns true if the request carries a valid admin token (or no password is configured). */
+const isAdmin = (req) => {
+  if (!ADMIN_PASSWORD) return true;
+  const auth = req.headers['authorization'] || '';
+  return auth === `Bearer ${ADMIN_PASSWORD}`;
+};
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(__dirname, '..', 'public');
@@ -25,7 +33,7 @@ const STATIC_MIME = {
   '.jpg': 'image/jpeg', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.woff2': 'font/woff2',
 };
 
-const corsHeaders = { 'Access-Control-Allow-Origin': CORS_ORIGIN, 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type' };
+const corsHeaders = { 'Access-Control-Allow-Origin': CORS_ORIGIN, 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' };
 const noCacheHeaders = { ...corsHeaders, 'Cache-Control': 'no-cache, no-store' };
 const cacheHeaders = (maxAge = 86400) => ({ ...corsHeaders, 'Cache-Control': `public, max-age=${maxAge}` });
 const json = (res, data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json', ...noCacheHeaders }); res.end(JSON.stringify(data)); };
@@ -63,6 +71,10 @@ createServer(async (req, res) => {
   let cfg;
   try { cfg = loadConfig(); } catch (e) { return err(res, 500, `Config error: ${e.message}`); }
   const sites = cfg.sites.map(s => ({ domain: new URL(s.url).hostname, url: s.url, description: s.description || null }));
+
+  if (path === '/api/auth' && req.method === 'POST') {
+    return json(res, { ok: isAdmin(req), admin: isAdmin(req) });
+  }
 
   if (path === '/api/health') {
     const checks = sites.map(s => {
@@ -153,6 +165,7 @@ createServer(async (req, res) => {
   }
 
   if (path === '/api/docs/skip' && req.method === 'POST') {
+    if (!isAdmin(req)) return err(res, 401, 'Admin password required');
     const domain = url.searchParams.get('site');
     const docUrl = url.searchParams.get('url');
     const skip = url.searchParams.get('skip') !== '0';
@@ -168,6 +181,7 @@ createServer(async (req, res) => {
   }
 
   if (path === '/api/docs/summarize-batch' && req.method === 'POST') {
+    if (!isAdmin(req)) return err(res, 401, 'Admin password required');
     const domain = url.searchParams.get('site');
     const limit = Math.min(1000, parseInt(url.searchParams.get('limit') || '500', 10));
     const concurrency = Math.min(40, parseInt(url.searchParams.get('concurrency') || '20', 10));
@@ -244,6 +258,7 @@ createServer(async (req, res) => {
   }
 
   if (path === '/api/docs/summarize' && req.method === 'POST') {
+    if (!isAdmin(req)) return err(res, 401, 'Admin password required');
     const domain = url.searchParams.get('site');
     const docUrl = url.searchParams.get('url');
     if (!domain || !docUrl) return err(res, 400, 'site and url params required');
