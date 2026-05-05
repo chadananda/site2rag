@@ -14,7 +14,7 @@ import { generateThumb } from './thumb-worker-pool.js';
 
 const PORT = parseInt(process.env.REPORT_PORT || '7840', 10);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://site2rag.lnker.com';
-const ADMIN_PASSWORD = process.env.REPORT_ADMIN_PASSWORD || null;
+const ADMIN_PASSWORD = process.env.SITE_ADMIN_PASS || process.env.REPORT_ADMIN_PASSWORD || null;
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
 /** Returns true if the request carries a valid admin token (or no password is configured). */
