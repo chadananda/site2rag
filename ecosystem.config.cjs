@@ -11,6 +11,7 @@ if (fs.existsSync(envFile)) {
   });
 }
 const ANTHROPIC_API_KEY = envVars.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '';
+const SURYA_PATH = envVars.SURYA_PATH || SURYA_PATH;
 module.exports = {
   apps: [
     {
@@ -76,7 +77,7 @@ module.exports = {
         PIPELINE_DB: path.join(SITE2RAG_ROOT, 'pipeline-jobs.db'),
         PIPELINE_CONCURRENCY: '1',
         LOCAL_LLM: process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:49800/v1',
-        SURYA_PATH: process.env.SURYA_PATH || 'surya_ocr',
+        SURYA_PATH: SURYA_PATH,
         AZURE_KEY: envVars.AZURE_KEY || '',
         AZURE_ENDPOINT: envVars.AZURE_ENDPOINT || '',
         GOOGLE_KEY: envVars.GOOGLE_KEY || '',
@@ -103,7 +104,7 @@ module.exports = {
         LOCAL_LLM_MODEL: process.env.LOCAL_LLM_MODEL || 'vision',
         MARKER_URL: process.env.MARKER_URL || 'http://localhost:7842',
         PIPELINE_URL: 'http://localhost:49900',
-        SURYA_PATH: process.env.SURYA_PATH || 'surya_ocr',
+        SURYA_PATH: SURYA_PATH,
       },
       autorestart: true,
       watch: false,
