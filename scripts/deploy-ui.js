@@ -18,6 +18,9 @@ writeFileSync(swPath, origSw.replace('__BUILD_TIME__', build.replace(/[:.]/g, '-
 
 try {
   execSync('npm run build:css', { stdio: 'inherit' });
+  // Commit built CSS so backend git pull gets the same file CF Pages receives
+  execSync('git add public/tailwind.css', { stdio: 'inherit' });
+  try { execSync('git commit -m "chore: rebuild tailwind css"', { stdio: 'inherit' }); } catch {}
   execSync('wrangler pages deploy public/ --project-name=site2rag-report', { stdio: 'inherit' });
   console.log(`\n✓ Deployed site2rag v${v} (${build})`);
   execSync(`git push`, { stdio: 'inherit' });
