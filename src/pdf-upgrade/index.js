@@ -85,11 +85,17 @@ const ensurePipelineJobIdColumn = (db) => {
 /** Submit one doc to the pipeline service and mark it processing. No waiting — checkPipelineJobs polls. */
 const submitViaPipeline = async (db, domain, row, page, siteConfig) => {
   const quality = db.prepare('SELECT * FROM pdf_quality WHERE url=?').get(row.url) ?? {};
+  // Priority: text-layer PDFs process in seconds; non-English image PDFs take 30+ min.
+  // importance drives pipeline ordering (DESC): easy English text PDFs first.
+  const lang = (quality.ai_language || 'unknown').toLowerCase();
+  const hasText = quality.has_text_layer === 1;
+  const easyLang = ['english', 'unknown'].includes(lang);
+  const importance = hasText ? (easyLang ? 200 : 150) : (easyLang ? 50 : 10);
   try {
     const jobId = await pipelineClient.submitJob({
       pdfPath:    page.local_path,
       sourceUrl:  row.url,
-      importance: row.importance ?? 1,
+      importance,
       meta: {
         title:           quality.pdf_title       || undefined,
         language:        quality.ai_language     || undefined,

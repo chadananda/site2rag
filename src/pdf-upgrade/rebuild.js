@@ -45,7 +45,8 @@ export const rebuildPdf = async (inputPdfPath, outputPdfPath, ocrResults, meta =
     if (meta.title)   args.push('--title',   meta.title);
     if (meta.author)  args.push('--author',  meta.author);
     if (meta.subject) args.push('--subject', meta.subject);
-    if (meta.keywords?.length) args.push('--keywords', meta.keywords.join(', '));
+    const kwArr = Array.isArray(meta.keywords) ? meta.keywords : (meta.keywords ? [meta.keywords] : []);
+    if (kwArr.length) args.push('--keywords', kwArr.join(', '));
     await execFileAsync('ocrmypdf', args, { timeout: 300_000 });
     return { success: true, method: 'ocrmypdf-pdfa3' };
   } catch (err) {
@@ -70,7 +71,7 @@ const injectTextLayer = async (inputPdfPath, outputPdfPath, ocrResults, meta = {
   const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
   const pages = pdfDoc.getPages();
 
-  for (const { pageNo, text_md } of ocrResults) {
+  for (const { pageNo, text_md } of (ocrResults || [])) {
     const page = pages[pageNo - 1];
     if (!page) continue;
     const { width, height } = page.getSize();
@@ -98,7 +99,8 @@ const injectTextLayer = async (inputPdfPath, outputPdfPath, ocrResults, meta = {
   pdfDoc.setProducer('site2rag OCR upgrade');
   pdfDoc.setCreator('site2rag');
   pdfDoc.setModificationDate(now);
-  pdfDoc.setKeywords([...(meta.keywords || []), 'OCR-upgraded', 'site2rag', now.toISOString().slice(0, 10)]);
+  const kwArr2 = Array.isArray(meta.keywords) ? meta.keywords : (meta.keywords ? [meta.keywords] : []);
+  pdfDoc.setKeywords([...kwArr2, 'OCR-upgraded', 'site2rag', now.toISOString().slice(0, 10)]);
 
   const outBytes = await pdfDoc.save({ addDefaultPage: false });
   writeFileSync(outputPdfPath, outBytes);

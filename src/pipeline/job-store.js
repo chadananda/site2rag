@@ -51,10 +51,10 @@ export class JobStore {
     return row ? parse(row) : null;
   }
 
-  /** Oldest pending job, or null. */
+  /** Next pending job: highest importance first, then oldest submitted. */
   nextPending() {
     const row = this.db.prepare(
-      "SELECT * FROM jobs WHERE status='pending' ORDER BY submitted_at LIMIT 1"
+      "SELECT * FROM jobs WHERE status='pending' ORDER BY importance DESC, submitted_at ASC LIMIT 1"
     ).get();
     return row ? parse(row) : null;
   }
