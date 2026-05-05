@@ -22,7 +22,7 @@ const SUMMARIZE_INTERVAL_MS = 15 * 1000;
 // When set, the service MUST be reachable; unreachable = skip tick with a visible error.
 // To move the service to another host: just change PIPELINE_URL.
 const pipelineClient = process.env.PIPELINE_URL
-  ? new PipelineClient({ baseUrl: process.env.PIPELINE_URL, timeout: 3_600_000 })
+  ? new PipelineClient({ baseUrl: process.env.PIPELINE_URL, timeout: 8 * 3_600_000 })
   : null;
 const MARKER_CONCURRENCY = 16;   // CPU-bound, tower-nas has 80 cores
 const OCR_DOC_CONCURRENCY = 8;   // GPU-bound on boss (max_num_seqs=8)
