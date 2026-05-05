@@ -533,8 +533,8 @@ const resetStuckProcessing = () => {
         // These docs never got a fair chance — they were just waiting in a queue when the old
         // 1-hour client timeout fired. Re-queue them so they're retried at their normal priority.
         const n2 = db.prepare(`UPDATE pdf_upgrade_queue SET status='pending', started_at=NULL, error=NULL
-          WHERE status='failed' AND error LIKE '%timed out%'`).run().changes;
-        if (n2) log(`Reset ${n2} timeout-failed docs to pending (will retry at normal priority)`);
+          WHERE status='failed' AND (error LIKE '%timed out%' OR error='pipeline job record expired')`).run().changes;
+        if (n2) log(`Reset ${n2} transient-failed docs to pending (will retry at normal priority)`);
       } catch {} finally { try { db?.close(); } catch {} }
     }
   } catch {}
