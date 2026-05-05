@@ -122,7 +122,9 @@ const upgradeDocumentMarker = async (db, domain, row, allDomains, siteConfig) =>
       if (apiKey && (spellFixOnly || mdScore < SPELL_FIX_THRESHOLD)) {
         try {
           log(`Spell-fix: ${row.url} (marker score ${mdScore.toFixed(2)})`);
-          const result = await spellFixMarkdown(markdown, apiKey);
+          const quality = db.prepare('SELECT pages, pdf_title FROM pdf_quality WHERE url=?').get(row.url);
+          const ctx = { title: quality?.pdf_title, totalPages: quality?.pages };
+          const result = await spellFixMarkdown(markdown, apiKey, ctx);
           const fixedScore = scoreMarkdown(result.markdown);
           if (fixedScore > mdScore) {
             finalMarkdown = result.markdown;
