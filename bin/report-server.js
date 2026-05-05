@@ -164,6 +164,30 @@ createServer(async (req, res) => {
     return res.end(readFileSync(row.upgraded_pdf_path));
   }
 
+  if (path === '/api/docs/upgrade' && req.method === 'POST') {
+    if (!isAdmin(req)) return err(res, 401, 'Admin password required');
+    const domain = url.searchParams.get('site');
+    const docUrl = url.searchParams.get('url');
+    if (!domain || !docUrl) return err(res, 400, 'site and url params required');
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, 'db unavailable');
+    try {
+      const quality = db.prepare('SELECT composite_score, content_hash FROM pdf_quality WHERE url=?').get(docUrl);
+      if (!quality) return err(res, 404, 'doc not scored yet');
+      const existing = db.prepare('SELECT status FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
+      if (existing?.status === 'processing') return json(res, { ok: true, status: 'processing', message: 'Already processing' });
+      const now = new Date().toISOString();
+      if (existing) {
+        db.prepare(`UPDATE pdf_upgrade_queue SET status='pending', priority=999, pass=1, started_at=NULL, finished_at=NULL, error=NULL, queued_at=? WHERE url=?`)
+          .run(now, docUrl);
+      } else {
+        db.prepare(`INSERT INTO pdf_upgrade_queue (url, content_hash, priority, status, queued_at) VALUES (?,?,999,'pending',?)`)
+          .run(docUrl, quality.content_hash || null, now);
+      }
+      return json(res, { ok: true, status: 'pending', queued: !existing, message: existing ? 'Boosted to front of queue' : 'Added to front of queue' });
+    } finally { db.close(); }
+  }
+
   if (path === '/api/docs/skip' && req.method === 'POST') {
     if (!isAdmin(req)) return err(res, 401, 'Admin password required');
     const domain = url.searchParams.get('site');

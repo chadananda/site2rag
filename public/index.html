@@ -561,12 +561,25 @@ if ('serviceWorker' in navigator) {
                       <a :href="`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
                          @click.stop class="font-semibold text-green-700 hover:underline ml-auto">↓ upgraded PDF</a>
                     </template>
-                    <!-- Skip toggle (failed tab) -->
-                    <template x-if="activeTab==='failed'">
-                      <button @click.stop="toggleSkip(doc)"
-                              class="ml-auto px-2 py-0.5 rounded border text-xs transition-colors"
-                              :class="doc.skip ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-gray-200 text-gray-300 hover:text-amber-600 hover:border-amber-300'"
-                              x-text="doc.skip ? '⊘ skipped' : 'skip'"></button>
+                    <!-- Card action buttons -->
+                    <template x-if="activeTab==='failed' || activeTab==='all'">
+                      <div class="ml-auto flex gap-1.5 items-center">
+                        <!-- Upgrade button -->
+                        <template x-if="!doc.skip && doc.status !== 'done'">
+                          <button @click.stop="queueUpgrade(doc)"
+                                  :disabled="doc._upgrading || doc.status==='processing'"
+                                  class="px-2 py-0.5 rounded border text-xs font-semibold transition-colors"
+                                  :class="doc.status==='processing' ? 'border-blue-200 text-blue-500 bg-blue-50 cursor-default' :
+                                          doc.status==='pending'    ? 'border-indigo-300 text-indigo-600 bg-indigo-50 hover:bg-indigo-100' :
+                                          'border-indigo-200 text-indigo-600 hover:bg-indigo-50'"
+                                  x-text="doc.status==='processing' ? '⚙ processing…' : doc.status==='pending' ? '↑ boost priority' : doc._upgrading ? '…' : doc.status==='failed' ? '↺ retry' : '⬆ upgrade'"></button>
+                        </template>
+                        <!-- Skip toggle -->
+                        <button @click.stop="toggleSkip(doc)"
+                                class="px-2 py-0.5 rounded border text-xs transition-colors"
+                                :class="doc.skip ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-gray-200 text-gray-300 hover:text-amber-600 hover:border-amber-300'"
+                                x-text="doc.skip ? '⊘' : 'skip'"></button>
+                      </div>
                     </template>
                   </div>
 
@@ -732,11 +745,28 @@ if ('serviceWorker' in navigator) {
                class="px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold">Open PDF ↗</a>
             <a x-show="expandedDoc.archive_url" :href="expandedDoc.archive_url" target="_blank"
                class="px-3 py-1.5 text-xs rounded-lg bg-green-100 hover:bg-green-200 text-green-800 font-semibold">↓ Upgraded PDF</a>
+
+            <!-- Upgrade controls -->
+            <template x-if="!cannotUpgrade(expandedDoc) && !expandedDoc.skip">
+              <button @click="queueUpgrade(expandedDoc)"
+                      :disabled="expandedDoc._upgrading || expandedDoc.status==='processing'"
+                      class="px-3 py-1.5 text-xs rounded-lg border font-semibold transition-colors"
+                      :class="expandedDoc.status==='processing' ? 'border-blue-200 text-blue-600 bg-blue-50 cursor-default' :
+                              expandedDoc.status==='pending'    ? 'border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100' :
+                              expandedDoc.status==='done'       ? 'border-gray-200 text-gray-400 hover:border-indigo-300 hover:text-indigo-600' :
+                              'border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100'"
+                      x-text="expandedDoc.status==='processing' ? '⚙ Processing…' :
+                               expandedDoc.status==='pending'    ? '↑ Boost to front of queue' :
+                               expandedDoc.status==='failed'     ? '↺ Retry upgrade' :
+                               expandedDoc.status==='done'       ? '↺ Re-run upgrade' :
+                               expandedDoc._upgrading            ? '…' : '⬆ Queue for OCR upgrade'"></button>
+            </template>
+
             <template x-if="expandedDoc.status !== 'done'">
               <button @click="toggleSkip(expandedDoc)"
                       class="px-3 py-1.5 text-xs rounded-lg border font-semibold"
                       :class="expandedDoc.skip ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-gray-200 text-gray-500 hover:text-amber-600'"
-                      x-text="expandedDoc.skip ? '⊘ Un-skip' : 'Skip — not worth processing'"></button>
+                      x-text="expandedDoc.skip ? '⊘ Un-skip' : 'Skip'"></button>
             </template>
           </div>
         </div>
@@ -949,6 +979,23 @@ function app() {
       if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
       const r = await this.adminFetch(`${API_BASE}/api/docs/skip?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}&skip=${skip ? 1 : 0}`, { method: 'POST' }).catch(() => null);
       if (!r) doc.skip = skip ? 0 : 1;
+    },
+
+    async queueUpgrade(doc) {
+      if (doc._upgrading) return;
+      doc._upgrading = true;
+      if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
+      const r = await this.adminFetch(`${API_BASE}/api/docs/upgrade?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}`, { method: 'POST' }).catch(() => null);
+      if (r?.ok) {
+        const data = await r.json().catch(() => ({}));
+        doc.status = data.status || 'pending';
+        doc.error = null;
+        const idx = this.docs.findIndex(d => d.url === doc.url);
+        if (idx >= 0) Object.assign(this.docs[idx], { status: doc.status, error: null });
+        if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
+      }
+      doc._upgrading = false;
+      if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
     },
 
     upgradeProgressLabel(s) {
