@@ -38,7 +38,7 @@ const extractExcerpt = (text, maxChars = 280) => {
 };
 
 export const scorePdf = async (pdfPath) => {
-  const empty = { avg_chars_per_page: 0, readable_pages_pct: 0, has_text_layer: 0, word_quality_estimate: 0, composite_score: 0, pages: 0, pdf_title: '', excerpt: '', language: 'unknown' };
+  const empty = { avg_chars_per_page: 0, readable_pages_pct: 0, has_text_layer: 0, word_quality_estimate: 0, composite_score: 0, pages: 0, pdf_title: '', excerpt: '', language: 'unknown', processing_difficulty: 1.0 };
   try {
     const buf = readFileSync(pdfPath);
     // First pass: get page count + PDF metadata title
@@ -72,8 +72,9 @@ export const scorePdf = async (pdfPath) => {
     // Handwritten non-Latin scripts (Persian/Arabic image PDFs) are hardest → OCR nearly always fails.
     const scriptHard = ['persian','arabic','hebrew','hindi','chinese','japanese','korean'].includes(language);
     const processing_difficulty = hasText === 1
-      ? 0.05                                          // text layer: skip OCR, trivially easy
-      : Math.min(1.0, (pages / 400) * (scriptHard ? 2.0 : 1.0)); // image PDF: pages + script penalty
+      ? 0.05                                                          // text layer: skip OCR, trivially easy
+      : pages === 0 ? 1.0                                             // unreadable/failed: assume worst
+      : Math.min(1.0, (pages / 400) * (scriptHard ? 2.0 : 1.0));    // image PDF: page count + script penalty
     return { avg_chars_per_page: Math.round(avgChars), readable_pages_pct: Math.round(readablePct * 100) / 100, has_text_layer: hasText, word_quality_estimate: Math.round(wq * 100) / 100, composite_score: Math.round(composite * 100) / 100, pages, pdf_title, excerpt, language, processing_difficulty: Math.round(processing_difficulty * 100) / 100 };
   } catch { return empty; }
 };
