@@ -303,25 +303,15 @@ if ('serviceWorker' in navigator) {
         </div>
         <!-- Tabs -->
         <div class="flex items-end gap-0">
-        <button class="tab-btn" :class="activeTab==='failed'?'active':''" @click="switchTab('failed')">
-          Poor Quality
-          <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='failed'?'text-red-400':'text-gray-400'"
-            x-text="'('+fmt(tabTotals.failed ?? ((selectedSiteData()?.total_pdfs||0)-(selectedSiteData()?.already_ok||0)-(selectedSiteData()?.upgraded||0)))+')'"></span>
-        </button>
-        <button class="tab-btn" :class="activeTab==='adequate'?'active':''" @click="switchTab('adequate')">
-          Adequate
-          <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='adequate'?'text-blue-400':'text-gray-400'"
-            x-text="'('+fmt(tabTotals.adequate ?? (selectedSiteData()?.already_ok||0))+')'"></span>
+        <button class="tab-btn" :class="activeTab==='original'?'active':''" @click="switchTab('original')">
+          Original
+          <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='original'?'text-gray-600':'text-gray-400'"
+            x-text="'('+fmt(tabTotals.original ?? (selectedSiteData()?.total_pdfs||0))+')'"></span>
         </button>
         <button class="tab-btn" :class="activeTab==='upgraded'?'active':''" @click="switchTab('upgraded')">
           Upgraded
           <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='upgraded'?'text-green-500':'text-gray-400'"
             x-text="'('+fmt(tabTotals.upgraded ?? (selectedSiteData()?.upgraded||0))+')'"></span>
-        </button>
-        <button class="tab-btn" :class="activeTab==='all'?'active':''" @click="switchTab('all')">
-          All PDFs
-          <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='all'?'text-purple-500':'text-gray-400'"
-            x-text="'('+fmt(tabTotals.all ?? (selectedSiteData()?.total_pdfs||0))+')'"></span>
         </button>
         </div><!-- end sticky tabs -->
       </div><!-- end sticky bar -->
@@ -366,7 +356,7 @@ if ('serviceWorker' in navigator) {
             placeholder="title, URL or text…"
             class="border border-gray-200 rounded px-3 py-1.5 text-sm w-52 focus:outline-none focus:ring-1 focus:ring-gray-400">
         </div>
-        <template x-if="activeTab==='failed'">
+        <template x-if="activeTab==='original'">
           <div>
             <label class="block text-xs text-gray-400 mb-1">Status</label>
             <select x-model="filters.status" @change="loadDocs()"
@@ -391,7 +381,7 @@ if ('serviceWorker' in navigator) {
           <label class="block text-xs text-gray-400 mb-1">Sort</label>
           <select x-model="filters.sort" @change="loadDocs()"
             class="border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400">
-            <template x-if="activeTab==='failed'">
+            <template x-if="activeTab==='original'">
               <option value="score_asc">Worst first</option>
             </template>
             <option value="score_desc">Best first</option>
@@ -424,7 +414,6 @@ if ('serviceWorker' in navigator) {
                      doc.skip ? 'opacity-40' : '',
                      doc.status==='processing' ? 'bg-green-50 border-green-200 ring-1 ring-green-300' :
                      activeTab==='upgraded'     ? 'bg-green-50 border-green-200' :
-                     activeTab==='adequate'     ? 'bg-blue-50 border-blue-200' :
                      doc.status==='failed'      ? 'bg-red-50 border-red-200' :
                                                   'bg-white border-gray-200'
                    ]">
@@ -547,7 +536,7 @@ if ('serviceWorker' in navigator) {
                             :title="doc.lang_key==='unknown' ? 'Language undetected — deprioritized in queue' : doc.ai_language"
                             x-text="doc.lang_key==='unknown' ? '?' : doc.ai_language"></span>
                     </template>
-                    <template x-if="effortEstimate(doc) && activeTab==='failed'">
+                    <template x-if="effortEstimate(doc) && activeTab==='original'">
                       <span :class="(doc.lang_key && doc.lang_key !== 'english' && doc.lang_key !== 'unknown') ? 'text-amber-600 font-bold' : 'text-amber-600 font-medium'"
                             x-text="effortEstimate(doc)"></span>
                     </template>
@@ -558,11 +547,15 @@ if ('serviceWorker' in navigator) {
                        class="hover:text-blue-500 truncate max-w-xs"
                        x-text="'↗ '+(doc.source_url||'').replace(/^https?:\/\//,'').split('/')[0]"></a>
                     <template x-if="activeTab==='upgraded' && doc.upgraded_pdf_path">
-                      <a :href="`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
-                         @click.stop class="font-semibold text-green-700 hover:underline ml-auto">↓ upgraded PDF</a>
+                      <span class="ml-auto flex items-center gap-2">
+                        <a :href="`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
+                           @click.stop class="font-semibold text-green-700 hover:underline">↓ upgraded PDF</a>
+                        <a :href="`${API_BASE}/api/docs/receipt?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
+                           target="_blank" @click.stop class="text-xs text-gray-400 hover:text-indigo-600 hover:underline">receipt ↗</a>
+                      </span>
                     </template>
                     <!-- Card action buttons (admin only) -->
-                    <template x-if="adminToken && (activeTab==='failed' || activeTab==='all' || activeTab==='adequate' || activeTab==='upgraded')">
+                    <template x-if="adminToken && (activeTab==='original' || activeTab==='all' || activeTab==='adequate' || activeTab==='upgraded')">
                       <div class="ml-auto flex gap-1.5 items-center flex-shrink-0">
                         <!-- Processing / queued state -->
                         <template x-if="!doc.skip && doc.status==='processing'">
@@ -572,22 +565,19 @@ if ('serviceWorker' in navigator) {
                           <button @click.stop="queueUpgrade(doc)" :disabled="doc._upgrading"
                                   class="px-2 py-0.5 rounded border border-indigo-300 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 text-xs font-semibold">↑ boost</button>
                         </template>
-                        <!-- Action buttons when not currently queued -->
-                        <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending'">
-                          <!-- Spell-fix: any doc with decent extractable text below 95% quality -->
-                          <template x-if="doc.composite_score >= 0.55 && doc.composite_score < 0.95 && activeTab !== 'failed'">
-                            <button @click.stop="queueUpgrade(doc, 'spell-fix')" :disabled="doc._upgrading"
-                                    class="px-2 py-0.5 rounded border border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-100 text-xs font-semibold"
-                                    :title="'AI text correction (hyphen-breaks, OCR errors)' + (doc.spell_fix_cost_usd > 0 ? ' ~$' + doc.spell_fix_cost_usd.toFixed(3) : '')">✦ spell-fix</button>
-                          </template>
-                          <!-- Re-OCR: image-heavy, failed, or any doc below 90% readable -->
-                          <template x-if="activeTab==='failed' || doc.readable_pages_pct == null || doc.readable_pages_pct < 0.9">
-                            <button @click.stop="queueUpgrade(doc, 'ocr')" :disabled="doc._upgrading"
-                                    class="px-2 py-0.5 rounded border text-xs font-semibold transition-colors"
-                                    :class="doc.status==='failed' ? 'border-red-300 text-red-700 bg-red-50 hover:bg-red-100' : 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'"
-                                    :title="'Boss vision OCR' + (doc.vision_cost_usd > 0 ? ' ~$' + doc.vision_cost_usd.toFixed(2) : '')"
-                                    x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ re-OCR' : '⬆ OCR'"></button>
-                          </template>
+                        <!-- Spell-fix: mostly-readable doc with minor OCR errors (≥80% text extractable) -->
+                        <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending' && doc.composite_score >= 0.55 && doc.composite_score < 0.95 && activeTab !== 'failed' && (doc.readable_pages_pct == null || doc.readable_pages_pct >= 0.8)">
+                          <button @click.stop="queueUpgrade(doc, 'spell-fix')" :disabled="doc._upgrading"
+                                  class="px-2 py-0.5 rounded border border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-100 text-xs font-semibold"
+                                  :title="'AI text correction (hyphen-breaks, OCR errors)' + (doc.spell_fix_cost_usd > 0 ? ' ~$' + doc.spell_fix_cost_usd.toFixed(3) : '')">✦ spell-fix</button>
+                        </template>
+                        <!-- Re-OCR: image-heavy docs, failed, or below 90% readable -->
+                        <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending' && (activeTab==='original' || doc.readable_pages_pct == null || doc.readable_pages_pct < 0.9)">
+                          <button @click.stop="queueUpgrade(doc, 'ocr')" :disabled="doc._upgrading"
+                                  class="px-2 py-0.5 rounded border text-xs font-semibold transition-colors"
+                                  :class="doc.status==='failed' ? 'border-red-300 text-red-700 bg-red-50 hover:bg-red-100' : 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'"
+                                  :title="'Boss vision OCR' + (doc.vision_cost_usd > 0 ? ' ~$' + doc.vision_cost_usd.toFixed(2) : '')"
+                                  x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ re-OCR' : '⬆ OCR'"></button>
                         </template>
                         <!-- Skip toggle -->
                         <button @click.stop="toggleSkip(doc)"
@@ -610,7 +600,7 @@ if ('serviceWorker' in navigator) {
           <!-- Empty state -->
           <template x-if="!loading && !docs.length">
             <div class="text-center py-12 text-gray-400 text-sm bg-white border border-gray-100 rounded-xl">
-              <template x-if="activeTab==='failed'">
+              <template x-if="activeTab==='original'">
                 <div>No image PDFs needing upgrade match the current filters.</div>
               </template>
               <template x-if="activeTab==='adequate'">
@@ -758,8 +748,18 @@ if ('serviceWorker' in navigator) {
                class="px-3 py-1.5 text-xs rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-semibold">📖 Read PDF</a>
             <a :href="expandedDoc.url" target="_blank"
                class="px-3 py-1.5 text-xs rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold">Open PDF ↗</a>
-            <a x-show="expandedDoc.archive_url" :href="expandedDoc.archive_url" target="_blank"
+            <template x-if="expandedDoc.upgraded_pdf_path">
+              <a :href="`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(expandedDoc.url)}`"
+                 target="_blank"
+                 class="px-3 py-1.5 text-xs rounded-lg bg-green-100 hover:bg-green-200 text-green-800 font-semibold">↓ Upgraded PDF</a>
+            </template>
+            <a x-show="expandedDoc.archive_url && !expandedDoc.upgraded_pdf_path" :href="expandedDoc.archive_url" target="_blank"
                class="px-3 py-1.5 text-xs rounded-lg bg-green-100 hover:bg-green-200 text-green-800 font-semibold">↓ Upgraded PDF</a>
+            <template x-if="expandedDoc.status === 'done'">
+              <a :href="`${API_BASE}/api/docs/receipt?site=${activeSite.domain}&url=${encodeURIComponent(expandedDoc.url)}`"
+                 target="_blank"
+                 class="px-3 py-1.5 text-xs rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold">📋 View Receipt</a>
+            </template>
 
             <!-- Admin-only upgrade controls -->
             <template x-if="adminToken">
@@ -776,8 +776,8 @@ if ('serviceWorker' in navigator) {
                 <!-- Upgrade action buttons (when not queued) -->
                 <template x-if="!expandedDoc.skip && expandedDoc.status !== 'processing' && expandedDoc.status !== 'pending'">
                   <span class="flex gap-2 items-center flex-wrap">
-                    <!-- Spell-fix: any doc with extractable text below 95% quality -->
-                    <template x-if="expandedDoc.composite_score >= 0.55 && expandedDoc.composite_score < 0.95">
+                    <!-- Spell-fix: mostly-readable doc (≥80% text extractable) with minor OCR errors -->
+                    <template x-if="expandedDoc.composite_score >= 0.55 && expandedDoc.composite_score < 0.95 && (expandedDoc.readable_pages_pct == null || expandedDoc.readable_pages_pct >= 0.8)">
                       <button @click="queueUpgrade(expandedDoc, 'spell-fix')" :disabled="expandedDoc._upgrading"
                               class="px-3 py-1.5 text-xs rounded-lg border border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-100 font-semibold"
                               :title="'Fix hyphen-breaks, missing spaces, OCR artifacts via Haiku'"
@@ -789,6 +789,14 @@ if ('serviceWorker' in navigator) {
                               class="px-3 py-1.5 text-xs rounded-lg border border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-semibold"
                               :title="'Full OCR with boss vision model' + (expandedDoc.vision_cost_usd > 0 ? ' ~$' + expandedDoc.vision_cost_usd.toFixed(2) : '')"
                               x-text="expandedDoc.status==='failed' ? '↺ Retry OCR' : expandedDoc.readable_pages_pct >= 0.9 ? '↺ Re-OCR (already readable)' : expandedDoc.status==='done' ? '↺ Re-OCR' : '⬆ Full OCR upgrade'"></button>
+                    </template>
+                    <!-- Process again at higher importance (for upgraded docs) -->
+                    <template x-if="expandedDoc.status === 'done' && (expandedDoc.importance ?? 1) < 5">
+                      <button @click="queueUpgrade(expandedDoc, 'ocr', (expandedDoc.importance ?? 1) + 1)"
+                              :disabled="expandedDoc._upgrading"
+                              class="px-3 py-1.5 text-xs rounded-lg border border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 font-semibold"
+                              :title="'Re-process at importance ' + ((expandedDoc.importance ?? 1) + 1) + ' (higher quality, more cost)'"
+                              x-text="'↑ importance ' + ((expandedDoc.importance ?? 1) + 1)"></button>
                     </template>
                   </span>
                 </template>
@@ -903,7 +911,7 @@ function app() {
     sites: [], activeSite: null,
     docs: [],
     docsTotal: 0, docsPage: 1, docsPages: 1,
-    tabTotals: { failed: null, adequate: null, upgraded: null },
+    tabTotals: { original: null, upgraded: null },
     filters: { q: '', status: '', score_max: 1, sort: 'score_asc' },
     loading: false, apiStatus: '', apiError: '', lastRefresh: '',
     sumDisplay: {},   // domain -> interpolated summarized count for smooth bar
@@ -912,7 +920,7 @@ function app() {
     _crawlRates: {},  // domain -> { value, rate, ts }
     expandedDoc: null,
     modalPage: 1,
-    activeTab: 'failed',
+    activeTab: 'original',
     showUpgradeInfo: false, showHealthDetail: false,
     serverHealth: null,
     appVersion: '', _buildId: null,
@@ -1012,11 +1020,13 @@ function app() {
       if (!r) doc.skip = skip ? 0 : 1;
     },
 
-    async queueUpgrade(doc, upgradeMethod = 'ocr') {
+    async queueUpgrade(doc, upgradeMethod = 'ocr', importance = null) {
       if (doc._upgrading) return;
       doc._upgrading = true;
       if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
-      const r = await this.adminFetch(`${API_BASE}/api/docs/upgrade?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}&method=${upgradeMethod}`, { method: 'POST' }).catch(() => null);
+      let upgradeUrl = `${API_BASE}/api/docs/upgrade?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}&method=${upgradeMethod}`;
+      if (importance !== null) upgradeUrl += `&importance=${importance}`;
+      const r = await this.adminFetch(upgradeUrl, { method: 'POST' }).catch(() => null);
       if (r?.ok) {
         const data = await r.json().catch(() => ({}));
         doc.status = data.status || 'pending';
@@ -1162,7 +1172,7 @@ function app() {
     async selectSite(s) {
       this.activeSite = s;
       this.docsPage = 1;
-      this.tabTotals = { failed: null, adequate: null, upgraded: null };
+      this.tabTotals = { original: null, upgraded: null };
       this.filters = { q: '', status: '', score_max: 1, sort: 'score_asc' };
       await this.loadDocs();
     },
@@ -1172,7 +1182,7 @@ function app() {
     async switchTab(tab) {
       this.activeTab = tab;
       this.docsPage = 1;
-      const defaultSort = tab === 'upgraded' ? 'improved_desc' : tab === 'adequate' ? 'score_desc' : tab === 'all' ? 'score_asc' : 'score_asc';
+      const defaultSort = tab === 'upgraded' ? 'improved_desc' : 'score_asc';
       this.filters = { q: '', status: '', score_max: 1, sort: defaultSort };
       await this.loadDocs();
     },

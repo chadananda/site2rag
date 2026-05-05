@@ -86,7 +86,7 @@ const DOC_SELECT = `
          q.thumbnail_path, q.summary_tier, q.ai_language,
          h.host_url as source_url,
          u.status, u.before_score, u.after_score, u.score_improvement,
-         u.upgraded_pdf_path, u.pages_processed, u.method, u.finished_at, u.error,
+         u.upgraded_pdf_path, u.pages_processed, u.method, u.finished_at, u.error, u.importance,
          (SELECT json_group_array(json_object('attempt', uh.attempt, 'method', uh.method, 'score_before', uh.score_before, 'score_after', uh.score_after, 'error', uh.error))
           FROM pdf_upgrade_history uh WHERE uh.url=p.url ORDER BY uh.attempt) as upgrade_history
   FROM pages p
@@ -112,18 +112,8 @@ export const siteDocs = (domain, params) => {
 
     if (tab === 'upgraded') {
       wheres.push("u.status='done'");
-    } else if (tab === 'adequate') {
-      wheres.push("(u.url IS NULL OR u.status IS NULL)");
-      wheres.push("q.composite_score >= 0.7");
-      wheres.push("(q.skip IS NULL OR q.skip=0)");
-      wheres.push("COALESCE(q.pages, 2) > 1");
-    } else if (tab === 'all') {
-      // No quality filter — show every PDF
-    } else {
-      wheres.push("(u.status IS NULL OR u.status != 'done')");
-      wheres.push("(q.has_text_layer=0 OR q.has_text_layer IS NULL OR q.readable_pages_pct < 0.4)");
-      wheres.push("(q.skip IS NULL OR q.skip=0)");
     }
+    // 'original' (default/fallback): all PDFs, no quality filter
 
     if (q) { wheres.push("(p.url LIKE ? OR COALESCE(h.hosted_title,q.pdf_title) LIKE ? OR q.excerpt LIKE ?)"); vals.push(`%${q}%`, `%${q}%`, `%${q}%`); }
     if (status === 'unscored') wheres.push("q.composite_score IS NULL");
@@ -140,13 +130,10 @@ export const siteDocs = (domain, params) => {
     };
     const orderBy = tab === 'upgraded'
       ? (orderMap[sort] || 'COALESCE(u.score_improvement, 0) DESC')
-      : tab === 'adequate'
-        ? (orderMap[sort] || orderMap.score_desc)
-        : tab === 'all'
-          ? (orderMap[sort] || orderMap.score_asc)
-          : (sort && orderMap[sort])
-            ? `CASE WHEN u.status='processing' THEN 0 ELSE 1 END ASC, ${orderMap[sort]}`
-            : `CASE WHEN u.status='processing' THEN 0 ELSE 1 END ASC, ${orderMap.score_asc}`;
+      : (sort && orderMap[sort])
+        ? orderMap[sort]
+        // Default: processing first, then by priority (easiest/highest score first)
+        : `CASE WHEN u.status='processing' THEN 0 ELSE 1 END ASC, COALESCE(u.priority, COALESCE(q.composite_score,0.5)*100) DESC`;
     const where = wheres.join(' AND ');
 
     const total = db.prepare(`SELECT COUNT(*) as n FROM pages p
