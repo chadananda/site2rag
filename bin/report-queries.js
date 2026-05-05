@@ -111,8 +111,8 @@ export const siteDocs = (domain, params) => {
     const vals = [];
 
     if (tab === 'upgraded') {
-      // Include 'submitted' (queued in pipeline) and 'processing' alongside done/failed
-      wheres.push("u.status IN ('done','processing','submitted','failed')");
+      // Only actively-running and terminal states — submitted (waiting in pipeline queue) stays in Original
+      wheres.push("u.status IN ('done','processing','failed')");
     }
     // 'original' (default/fallback): all PDFs, no quality filter
 
@@ -156,7 +156,7 @@ export const siteTabCounts = (domain) => {
     const row = db.prepare(`
       SELECT
         COUNT(*) as original,
-        SUM(CASE WHEN u.status IN ('done','processing','submitted') THEN 1 ELSE 0 END) as upgraded
+        SUM(CASE WHEN u.status IN ('done','processing') THEN 1 ELSE 0 END) as upgraded
       FROM pages p
       LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
       WHERE p.gone=0 AND p.mime_type='application/pdf' AND LOWER(p.url) LIKE '%.pdf'

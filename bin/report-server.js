@@ -330,24 +330,25 @@ createServer(async (req, res) => {
     }
   }
 
-  // Wipe and re-score all PDFs for a site, then requeue everything below threshold
+  // Wipe and re-score all PDFs for a site, then requeue ALL of them (threshold=1.0 so easy text-layer PDFs are included)
   if (path === '/api/docs/requeue-all' && req.method === 'POST') {
     if (!isAdmin(req)) return err(res, 401, 'Admin password required');
     const domain = url.searchParams.get('site');
     if (!domain) return err(res, 400, 'site param required');
     const db = safeOpenDb(domain);
     if (!db) return err(res, 404, 'db unavailable');
-    let queued = 0;
     try {
       // Clear queue and quality scores so everything gets fresh-scored
       db.prepare("DELETE FROM pdf_upgrade_queue").run();
       db.prepare("DELETE FROM pdf_quality").run();
     } finally { db.close(); }
 
-    // Re-score and requeue in background — don't block the HTTP response
-    const siteConfig = sites.find(s => {
+    // Re-score and requeue in background — threshold=1.0 so ALL PDFs are queued,
+    // including easy text-layer PDFs (they process in seconds via pipeline, skipping OCR)
+    const baseSiteConfig = sites.find(s => {
       try { return new URL(s.url).hostname === domain; } catch { return false; }
     }) ?? {};
+    const siteConfig = { ...baseSiteConfig, pdf_upgrade: { ...(baseSiteConfig.pdf_upgrade ?? {}), score_threshold: 1.0 } };
     const db2 = safeOpenDb(domain);
     if (db2) {
       runScorePdfs(db2, siteConfig).then(stats => {
