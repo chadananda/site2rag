@@ -3,8 +3,9 @@
 import Anthropic from '@anthropic-ai/sdk';
 
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
-const COST_IN  = 0.00025 / 1000;  // $/token input
-const COST_OUT = 0.00125 / 1000;  // $/token output
+// Haiku 4.5 pricing: $0.80/MTok in, $4.00/MTok out
+const COST_IN  = 0.80 / 1e6;
+const COST_OUT = 4.00 / 1e6;
 
 /** Estimated cost in USD to spell-fix a document. */
 export const spellFixCost = (pages, avgCharsPerPage = 2000) => {
@@ -131,9 +132,10 @@ export const spellFixWordObjects = async (bboxWords, apiKey, ctx = {}) => {
     // Use corrected text, or strip ¶ from uncorrected merged display
     obj.text = corrected !== undefined ? corrected : display.replace(/¶/g, '');
     if (mergedSrcIdx !== null) {
-      // Extend bbox to cover the dropped second-half object
       const next = bboxWords[mergedSrcIdx];
-      if (next) {
+      // Only extend bbox when both words are on the same line (cross-line hyphen splits
+      // keep the first word's bbox — the continuation is on the next line).
+      if (next && next.y1 !== undefined && obj.y2 !== undefined && next.y1 <= obj.y2) {
         obj.x2 = Math.max(obj.x2 ?? 0, next.x2 ?? 0);
         obj.y2 = Math.max(obj.y2 ?? 0, next.y2 ?? 0);
       }

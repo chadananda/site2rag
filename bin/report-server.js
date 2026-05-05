@@ -172,6 +172,21 @@ createServer(async (req, res) => {
     return err(res, 404, 'thumbnail unavailable');
   }
 
+  if (path === '/api/docs/receipt') {
+    const domain = url.searchParams.get('site');
+    const docUrl = url.searchParams.get('url');
+    if (!domain || !docUrl) return err(res, 400, 'site and url params required');
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, 'db unavailable');
+    let row;
+    try { row = db.prepare("SELECT receipt_json FROM pdf_upgrade_queue WHERE url=?").get(docUrl); }
+    finally { db.close(); }
+    if (!row?.receipt_json) return err(res, 404, 'receipt not available');
+    let receipt;
+    try { receipt = JSON.parse(row.receipt_json); } catch { return err(res, 500, 'receipt parse error'); }
+    return json(res, receipt);
+  }
+
   if (path === '/api/docs/download') {
     const domain = url.searchParams.get('site');
     const docUrl = url.searchParams.get('url');
@@ -198,17 +213,20 @@ createServer(async (req, res) => {
       const quality = db.prepare('SELECT composite_score, content_hash FROM pdf_quality WHERE url=?').get(docUrl);
       if (!quality) return err(res, 404, 'doc not scored yet');
       const upgradeMethod = url.searchParams.get('method') || 'ocr'; // 'spell-fix' | 'ocr'
+      const importanceParam = url.searchParams.get('importance');
+      const importance = importanceParam ? Math.max(1, Math.min(5, parseInt(importanceParam, 10))) : null;
       const existing = db.prepare('SELECT status FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
       if (existing?.status === 'processing') return json(res, { ok: true, status: 'processing', message: 'Already processing' });
       const now = new Date().toISOString();
+      const imp = importance ?? 1;
       if (existing) {
-        db.prepare(`UPDATE pdf_upgrade_queue SET status='pending', priority=999, pass=1, started_at=NULL, finished_at=NULL, error=NULL, requested_method=?, queued_at=? WHERE url=?`)
-          .run(upgradeMethod, now, docUrl);
+        db.prepare(`UPDATE pdf_upgrade_queue SET status='pending', priority=999, pass=1, started_at=NULL, finished_at=NULL, error=NULL, requested_method=?, importance=?, queued_at=? WHERE url=?`)
+          .run(upgradeMethod, imp, now, docUrl);
       } else {
-        db.prepare(`INSERT INTO pdf_upgrade_queue (url, content_hash, priority, status, requested_method, queued_at) VALUES (?,?,999,'pending',?,?)`)
-          .run(docUrl, quality.content_hash || null, upgradeMethod, now);
+        db.prepare(`INSERT INTO pdf_upgrade_queue (url, content_hash, priority, status, requested_method, importance, queued_at) VALUES (?,?,999,'pending',?,?,?)`)
+          .run(docUrl, quality.content_hash || null, upgradeMethod, imp, now);
       }
-      return json(res, { ok: true, status: 'pending', queued: !existing, method: upgradeMethod, message: existing ? 'Boosted to front of queue' : 'Added to front of queue' });
+      return json(res, { ok: true, status: 'pending', queued: !existing, method: upgradeMethod, importance: imp, message: existing ? 'Boosted to front of queue' : 'Added to front of queue' });
     } finally { db.close(); }
   }
 

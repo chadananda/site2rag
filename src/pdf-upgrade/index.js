@@ -1,4 +1,5 @@
 // PDF upgrade loop: multi-pass (Marker → boss vision → Claude). Exports: (none, daemon). Deps: backfill, lang-detect, summarize, reocr, rebuild, score, marker-client, db
+// Set PIPELINE_URL env var to route upgrades through the new pipeline service instead of Marker.
 import { existsSync, copyFileSync, mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { createHash } from 'crypto';
@@ -12,9 +13,17 @@ import { detectLanguageForImagePdfs } from './lang-detect.js';
 import { summarizeTopPending } from './summarize.js';
 import { markerAvailable, convertPdfWithMarker, scoreMarkdown } from './marker-client.js';
 import { spellFixMarkdown, spellFixCost } from './spell-fix.js';
+import { PipelineClient } from '../pipeline/client.js';
 
 const TICK_INTERVAL_MS = 60 * 1000;
 const SUMMARIZE_INTERVAL_MS = 15 * 1000;
+
+// Pipeline service client — set PIPELINE_URL to route pass-1 upgrades through the new pipeline.
+// When set, the service MUST be reachable; unreachable = skip tick with a visible error.
+// To move the service to another host: just change PIPELINE_URL.
+const pipelineClient = process.env.PIPELINE_URL
+  ? new PipelineClient({ baseUrl: process.env.PIPELINE_URL, timeout: 3_600_000 })
+  : null;
 const MARKER_CONCURRENCY = 16;   // CPU-bound, tower-nas has 80 cores
 const OCR_DOC_CONCURRENCY = 8;   // GPU-bound on boss (max_num_seqs=8)
 const MARKER_SCORE_THRESHOLD = 0.55;  // md quality to mark pass-1 done
@@ -66,6 +75,57 @@ const saveMarkerMd = (db, domain, page, markdown) => {
       .run(page.url, outPath, 'ok', now());
   } catch {}
   return outPath;
+};
+
+/**
+ * Route one document through the new pipeline service.
+ * Called when PIPELINE_URL is set and the service is reachable.
+ * Updates pdf_upgrade_queue with the result so the report server can serve outputs.
+ */
+const upgradeViaPipeline = async (db, domain, row, page, siteConfig) => {
+  db.prepare("UPDATE pdf_upgrade_queue SET status='processing', started_at=? WHERE url=?")
+    .run(now(), row.url);
+  const quality = db.prepare('SELECT * FROM pdf_quality WHERE url=?').get(row.url) ?? {};
+  try {
+    const jobId = await pipelineClient.submitJob({
+      pdfPath:    page.local_path,
+      sourceUrl:  row.url,
+      importance: row.importance ?? 1,
+      meta: {
+        title:           quality.pdf_title       || undefined,
+        language:        quality.ai_language     || undefined,
+        anchorText:      quality.anchor_text     || undefined,
+        siteDescription: siteConfig?.description || undefined,
+        contextHints:    quality.ai_summary      || undefined,
+        keywords:        ['site2rag', domain],
+      },
+    });
+    const job = await pipelineClient.waitForJob(jobId);
+    const receipt = job.receipt ?? {};
+    db.prepare(`UPDATE pdf_upgrade_queue
+      SET status='done', finished_at=?, upgraded_pdf_path=?,
+          after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?
+      WHERE url=?`)
+      .run(now(),
+        job.pdf_out_path ?? null,
+        receipt.quality?.final            ?? null,
+        receipt.quality?.gain             ?? null,
+        receipt.page_count                ?? null,
+        'pipeline-v2',
+        JSON.stringify(receipt),
+        row.url);
+    logUpgradeHistory(db, row.url, {
+      method: 'pipeline-v2',
+      score_before: row.before_score,
+      score_after:  receipt.quality?.final ?? null,
+      pages_processed: receipt.page_count  ?? null,
+    });
+    log(`Pipeline done: ${row.url}`);
+  } catch (err) {
+    db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
+      .run(now(), err.message.slice(0, 300), row.url);
+    log(`Pipeline failed: ${row.url}: ${err.message}`);
+  }
 };
 
 /** Run pass-1 (Marker) for one document. */
@@ -205,16 +265,31 @@ const upgradeDocumentOcr = async (domain, row, allDomains, ocrBackend, siteConfi
 
       db.prepare('UPDATE pdf_quality SET content_hash=? WHERE url=?').run(contentHash, row.url);
       const quality = db.prepare(`
-        SELECT pq.pages, pq.pdf_title, pq.ai_summary, pq.ai_author, pq.ai_language, h.hosted_title, h.host_url as source_url
-        FROM pdf_quality pq LEFT JOIN hosts h ON pq.url=h.hosted_url WHERE pq.url=?`).get(row.url);
+        SELECT pq.pages, pq.pdf_title, pq.ai_summary, pq.ai_author, pq.ai_language,
+               h.hosted_title as anchor_text, h.host_url,
+               p.classify_rationale as host_page_rationale
+        FROM pdf_quality pq
+        LEFT JOIN hosts h ON pq.url=h.hosted_url
+        LEFT JOIN pages p ON h.host_url=p.url
+        WHERE pq.url=?`).get(row.url);
       const numPages = quality?.pages || 1;
       const slug = row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
+
+      // meta feeds ctx.meta in the new pipeline — field names match domain-detect.js signal names
       const meta = {
-        title:    quality?.hosted_title || quality?.pdf_title || (slug.length > 3 ? slug : undefined),
-        author:   quality?.ai_author && quality.ai_author !== 'Unknown' ? quality.ai_author : undefined,
+        // Document identity
+        title:       quality?.pdf_title || (slug.length > 3 ? slug : undefined),
+        author:      quality?.ai_author && quality.ai_author !== 'Unknown' ? quality.ai_author : undefined,
+        language:    quality?.ai_language || undefined,
+
+        // Crawl-derived context signals — fed to domain detection
+        anchorText:       quality?.anchor_text || undefined,   // link text from HTML page
+        siteDescription:  siteConfig?.description || undefined, // site-level description from config
+        contextHints:     quality?.ai_summary || undefined,    // prior AI summary as a hint
+
+        // PDF embed fields (for archival PDF rebuild)
         subject:  quality?.ai_summary || undefined,
-        keywords: ['site2rag', domain, ...(quality?.source_url ? [quality.source_url] : []), row.url],
-        language: quality?.ai_language || undefined
+        keywords: ['site2rag', domain, ...(quality?.host_url ? [quality.host_url] : []), row.url],
       };
 
       // Per-document timeout: 30 min max (large PDFs with many pages)
@@ -327,6 +402,32 @@ const tick = async () => {
 
     const runPass1 = async () => {
       if (!pass1.length) return;
+
+      // When PIPELINE_URL is set, all pass-1 work goes through the pipeline service.
+      // If the service is unreachable, skip this tick rather than silently falling back —
+      // a hidden fallback would mask deployment problems and mix upgrade methods unexpectedly.
+      if (pipelineClient) {
+        try {
+          await pipelineClient.health();
+        } catch (err) {
+          log(`ERROR: Pipeline service unreachable (${err.message}) — skipping pass-1 this tick. Fix PIPELINE_URL or start pipeline-server.`);
+          return;
+        }
+        pass1.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
+        const batch = pass1.slice(0, MARKER_CONCURRENCY);
+        log(`Pass 1 (pipeline-v2): ${batch.length} docs`);
+        await Promise.all(batch.map(async ({ db, domain, row, siteConfig }) => {
+          const page = db.prepare('SELECT * FROM pages WHERE url=?').get(row.url);
+          if (!page?.local_path || !existsSync(page.local_path)) {
+            db.prepare("UPDATE pdf_upgrade_queue SET status='failed', error=? WHERE url=?")
+              .run('local_path missing', row.url);
+            return;
+          }
+          return upgradeViaPipeline(db, domain, row, page, siteConfig);
+        }));
+        return;
+      }
+
       if (!markerOk) {
         log('Marker unavailable — escalating all pass-1 to pass-2');
         for (const { db, row } of pass1)

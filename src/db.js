@@ -177,6 +177,8 @@ const migrate = (db) => {
   addCol('pdf_upgrade_queue', 'pass', 'INT DEFAULT 1');
   addCol('pdf_upgrade_queue', 'marker_md_path', 'TEXT');
   addCol('pdf_upgrade_queue', 'requested_method', 'TEXT'); // 'spell-fix' | 'ocr' | null (auto)
+  addCol('pdf_upgrade_queue', 'receipt_json', 'TEXT');     // JSON receipt from pipeline
+  addCol('pdf_upgrade_queue', 'importance', 'INT DEFAULT 1'); // pipeline processing depth 1-5
   // Fix readable_pages_pct stored as 0-100 instead of 0-1; recompute composite_score
   db.exec(`
     UPDATE pdf_quality
