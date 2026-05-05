@@ -3,10 +3,7 @@
 import { execSync } from 'child_process';
 import { readFileSync, writeFileSync } from 'fs';
 
-// Version bump is handled by bump-version.js (also used by predeploy:backend)
-const { execSync: bumpExec } = await import('child_process');
-bumpExec('node scripts/bump-version.js', { stdio: 'inherit' });
-
+// Read version.json (bump-version.js already ran as predeploy:backend, or caller bumped)
 const versionJson = JSON.parse(readFileSync('public/version.json', 'utf8'));
 const v = versionJson.v;
 const build = versionJson.build;
