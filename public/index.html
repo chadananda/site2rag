@@ -561,18 +561,33 @@ if ('serviceWorker' in navigator) {
                       <a :href="`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
                          @click.stop class="font-semibold text-green-700 hover:underline ml-auto">↓ upgraded PDF</a>
                     </template>
-                    <!-- Card action buttons -->
-                    <template x-if="activeTab==='failed' || activeTab==='all' || activeTab==='adequate'">
-                      <div class="ml-auto flex gap-1.5 items-center">
-                        <!-- Upgrade button -->
-                        <template x-if="!doc.skip && doc.status !== 'done'">
-                          <button @click.stop="queueUpgrade(doc)"
-                                  :disabled="doc._upgrading || doc.status==='processing'"
-                                  class="px-2 py-0.5 rounded border text-xs font-semibold transition-colors"
-                                  :class="doc.status==='processing' ? 'border-blue-200 text-blue-500 bg-blue-50 cursor-default' :
-                                          doc.status==='pending'    ? 'border-indigo-300 text-indigo-600 bg-indigo-50 hover:bg-indigo-100' :
-                                          'border-indigo-200 text-indigo-600 hover:bg-indigo-50'"
-                                  x-text="doc.status==='processing' ? '⚙ processing…' : doc.status==='pending' ? '↑ boost priority' : doc._upgrading ? '…' : doc.status==='failed' ? '↺ retry' : '⬆ upgrade'"></button>
+                    <!-- Card action buttons (admin only) -->
+                    <template x-if="adminToken && (activeTab==='failed' || activeTab==='all' || activeTab==='adequate' || activeTab==='upgraded')">
+                      <div class="ml-auto flex gap-1.5 items-center flex-shrink-0">
+                        <!-- Processing / queued state -->
+                        <template x-if="!doc.skip && doc.status==='processing'">
+                          <span class="px-2 py-0.5 rounded border border-blue-200 text-blue-500 bg-blue-50 text-xs font-semibold">⚙ running…</span>
+                        </template>
+                        <template x-if="!doc.skip && doc.status==='pending'">
+                          <button @click.stop="queueUpgrade(doc)" :disabled="doc._upgrading"
+                                  class="px-2 py-0.5 rounded border border-indigo-300 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 text-xs font-semibold">↑ boost</button>
+                        </template>
+                        <!-- Action buttons when not currently queued -->
+                        <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending'">
+                          <!-- Spell-fix: any doc with decent extractable text below 95% quality -->
+                          <template x-if="doc.composite_score >= 0.55 && doc.composite_score < 0.95 && activeTab !== 'failed'">
+                            <button @click.stop="queueUpgrade(doc, 'spell-fix')" :disabled="doc._upgrading"
+                                    class="px-2 py-0.5 rounded border border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-100 text-xs font-semibold"
+                                    :title="'AI text correction (hyphen-breaks, OCR errors)' + (doc.spell_fix_cost_usd > 0 ? ' ~$' + doc.spell_fix_cost_usd.toFixed(3) : '')">✦ spell-fix</button>
+                          </template>
+                          <!-- Re-OCR: image-heavy, failed, or any doc below 90% readable -->
+                          <template x-if="activeTab==='failed' || doc.readable_pages_pct == null || doc.readable_pages_pct < 0.9">
+                            <button @click.stop="queueUpgrade(doc, 'ocr')" :disabled="doc._upgrading"
+                                    class="px-2 py-0.5 rounded border text-xs font-semibold transition-colors"
+                                    :class="doc.status==='failed' ? 'border-red-300 text-red-700 bg-red-50 hover:bg-red-100' : 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'"
+                                    :title="'Boss vision OCR' + (doc.vision_cost_usd > 0 ? ' ~$' + doc.vision_cost_usd.toFixed(2) : '')"
+                                    x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ re-OCR' : '⬆ OCR'"></button>
+                          </template>
                         </template>
                         <!-- Skip toggle -->
                         <button @click.stop="toggleSkip(doc)"
@@ -746,38 +761,44 @@ if ('serviceWorker' in navigator) {
             <a x-show="expandedDoc.archive_url" :href="expandedDoc.archive_url" target="_blank"
                class="px-3 py-1.5 text-xs rounded-lg bg-green-100 hover:bg-green-200 text-green-800 font-semibold">↓ Upgraded PDF</a>
 
-            <!-- Upgrade controls -->
-            <template x-if="expandedDoc.status==='processing'">
-              <span class="px-3 py-1.5 text-xs rounded-lg border border-blue-200 text-blue-600 bg-blue-50 font-semibold">⚙ Processing…</span>
-            </template>
-            <template x-if="expandedDoc.status==='pending'">
-              <button @click="queueUpgrade(expandedDoc)" :disabled="expandedDoc._upgrading"
-                      class="px-3 py-1.5 text-xs rounded-lg border border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-semibold">↑ Boost to front of queue</button>
-            </template>
-            <template x-if="expandedDoc.status !== 'processing' && expandedDoc.status !== 'pending' && !expandedDoc.skip">
+            <!-- Admin-only upgrade controls -->
+            <template x-if="adminToken">
               <span class="flex gap-2 items-center flex-wrap">
-                <!-- Spell-fix option (cheap text correction) -->
-                <template x-if="expandedDoc.status !== 'done' || expandedDoc.composite_score < 0.95">
-                  <button @click="queueUpgrade(expandedDoc, 'spell-fix')" :disabled="expandedDoc._upgrading"
-                          class="px-3 py-1.5 text-xs rounded-lg border border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-100 font-semibold"
-                          :title="'Fix hyphen-breaks, missing spaces, OCR artifacts via Haiku text correction'"
-                          x-text="'✦ Spell-fix' + (expandedDoc.spell_fix_cost_usd > 0 ? ' ~$' + expandedDoc.spell_fix_cost_usd.toFixed(3) : '')"></button>
+                <!-- Status indicators -->
+                <template x-if="expandedDoc.status==='processing'">
+                  <span class="px-3 py-1.5 text-xs rounded-lg border border-blue-200 text-blue-600 bg-blue-50 font-semibold">⚙ Processing…</span>
                 </template>
-                <!-- Full OCR upgrade -->
-                <template x-if="!cannotUpgrade(expandedDoc)">
-                  <button @click="queueUpgrade(expandedDoc, 'ocr')" :disabled="expandedDoc._upgrading"
-                          class="px-3 py-1.5 text-xs rounded-lg border border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-semibold"
-                          :title="'Full OCR with boss vision model (GPU-accelerated)'"
-                          x-text="(expandedDoc.status==='failed' ? '↺ Retry' : expandedDoc.status==='done' ? '↺ Re-run' : '⬆ Full OCR upgrade') + (expandedDoc.vision_cost_usd > 0 ? ' ~$' + expandedDoc.vision_cost_usd.toFixed(2) : '')"></button>
+                <template x-if="expandedDoc.status==='pending'">
+                  <button @click="queueUpgrade(expandedDoc)" :disabled="expandedDoc._upgrading"
+                          class="px-3 py-1.5 text-xs rounded-lg border border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-semibold">↑ Boost to front</button>
                 </template>
-              </span>
-            </template>
 
-            <template x-if="expandedDoc.status !== 'done'">
-              <button @click="toggleSkip(expandedDoc)"
-                      class="px-3 py-1.5 text-xs rounded-lg border font-semibold"
-                      :class="expandedDoc.skip ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-gray-200 text-gray-500 hover:text-amber-600'"
-                      x-text="expandedDoc.skip ? '⊘ Un-skip' : 'Skip'"></button>
+                <!-- Upgrade action buttons (when not queued) -->
+                <template x-if="!expandedDoc.skip && expandedDoc.status !== 'processing' && expandedDoc.status !== 'pending'">
+                  <span class="flex gap-2 items-center flex-wrap">
+                    <!-- Spell-fix: any doc with extractable text below 95% quality -->
+                    <template x-if="expandedDoc.composite_score >= 0.55 && expandedDoc.composite_score < 0.95">
+                      <button @click="queueUpgrade(expandedDoc, 'spell-fix')" :disabled="expandedDoc._upgrading"
+                              class="px-3 py-1.5 text-xs rounded-lg border border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-100 font-semibold"
+                              :title="'Fix hyphen-breaks, missing spaces, OCR artifacts via Haiku'"
+                              x-text="'✦ Spell-fix' + (expandedDoc.spell_fix_cost_usd > 0 ? ' ~$' + expandedDoc.spell_fix_cost_usd.toFixed(3) : '')"></button>
+                    </template>
+                    <!-- Re-OCR: any doc with pages (empty docs excluded) -->
+                    <template x-if="!cannotUpgrade(expandedDoc)">
+                      <button @click="queueUpgrade(expandedDoc, 'ocr')" :disabled="expandedDoc._upgrading"
+                              class="px-3 py-1.5 text-xs rounded-lg border border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-semibold"
+                              :title="'Full OCR with boss vision model' + (expandedDoc.vision_cost_usd > 0 ? ' ~$' + expandedDoc.vision_cost_usd.toFixed(2) : '')"
+                              x-text="expandedDoc.status==='failed' ? '↺ Retry OCR' : expandedDoc.readable_pages_pct >= 0.9 ? '↺ Re-OCR (already readable)' : expandedDoc.status==='done' ? '↺ Re-OCR' : '⬆ Full OCR upgrade'"></button>
+                    </template>
+                  </span>
+                </template>
+
+                <!-- Skip toggle (admin only) -->
+                <button @click="toggleSkip(expandedDoc)"
+                        class="px-3 py-1.5 text-xs rounded-lg border font-semibold"
+                        :class="expandedDoc.skip ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-gray-200 text-gray-500 hover:text-amber-600'"
+                        x-text="expandedDoc.skip ? '⊘ Un-skip' : 'Skip'"></button>
+              </span>
             </template>
           </div>
         </div>
@@ -862,8 +883,7 @@ function langBadgeCls(doc) {
 }
 
 function cannotUpgrade(doc) {
-  if (doc.status === 'done') return false;
-  if (doc.has_text_layer && doc.readable_pages_pct != null && doc.readable_pages_pct >= 0.8) return true;
+  // Only truly impossible: empty document
   if (doc.pages === 0) return true;
   return false;
 }
@@ -925,8 +945,8 @@ function app() {
         headers: { Authorization: `Bearer ${this.loginPassword}` }
       });
       const data = await res.json().catch(() => ({}));
-      if (data.ok) {
-        this.adminToken = this.loginPassword;
+      if (data.ok && data.token) {
+        this.adminToken = data.token;
         localStorage.setItem('adminToken', this.adminToken);
         this.showLoginModal = false;
         this.loginPassword = '';

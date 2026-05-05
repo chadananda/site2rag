@@ -16,12 +16,30 @@ const PORT = parseInt(process.env.REPORT_PORT || '7840', 10);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://site2rag.lnker.com';
 const ADMIN_PASSWORD = process.env.SITE_ADMIN_PASS || process.env.REPORT_ADMIN_PASSWORD || null;
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
+const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
 
-/** Returns true if the request carries a valid admin token (or no password is configured). */
+/** Active session tokens: token -> expiry timestamp */
+const sessions = new Map();
+
+/** Issue a new random session token. */
+const issueToken = () => {
+  const token = createHash('sha256')
+    .update(`${Math.random()}${Date.now()}${ADMIN_PASSWORD}`)
+    .digest('hex');
+  sessions.set(token, Date.now() + SESSION_TTL_MS);
+  return token;
+};
+
+/** Returns true if the request carries a valid admin session token (or no password configured). */
 const isAdmin = (req) => {
   if (!ADMIN_PASSWORD) return true;
   const auth = req.headers['authorization'] || '';
-  return auth === `Bearer ${ADMIN_PASSWORD}`;
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  if (!token) return false;
+  const expiry = sessions.get(token);
+  if (!expiry) return false;
+  if (Date.now() > expiry) { sessions.delete(token); return false; }
+  return true;
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -73,7 +91,12 @@ createServer(async (req, res) => {
   const sites = cfg.sites.map(s => ({ domain: new URL(s.url).hostname, url: s.url, description: s.description || null }));
 
   if (path === '/api/auth' && req.method === 'POST') {
-    return json(res, { ok: isAdmin(req), admin: isAdmin(req) });
+    const auth = req.headers['authorization'] || '';
+    const pw = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+    const valid = !ADMIN_PASSWORD || pw === ADMIN_PASSWORD;
+    if (!valid) return json(res, { ok: false }, 401);
+    const token = issueToken();
+    return json(res, { ok: true, token });
   }
 
   if (path === '/api/health') {
