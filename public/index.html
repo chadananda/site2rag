@@ -188,6 +188,13 @@ if ('serviceWorker' in navigator) {
         <h1 class="text-2xl font-bold mono text-gray-900" x-text="activeSite.domain"></h1>
         <span class="text-sm px-2 py-0.5 rounded-full font-semibold" :class="runBadgeCls(activeSite)" x-text="runBadge(activeSite)"></span>
         <span class="text-sm text-gray-400 mono" x-text="lastRunAgo(activeSite)"></span>
+        <template x-if="adminToken">
+          <button @click="prioritizeSite(activeSite.domain)"
+            class="text-xs px-2 py-0.5 rounded border border-blue-300 text-blue-600 hover:bg-blue-50 font-medium"
+            title="Boost this site's pending queue to process before all others">
+            ↑ Prioritize
+          </button>
+        </template>
         <a :href="activeSite.url" target="_blank" rel="noopener" class="ml-auto text-xs text-gray-400 hover:text-blue-600 mono">↗ open site</a>
       </div>
 
@@ -1168,6 +1175,16 @@ function app() {
       if (this.activeSite) { const u = this.sites.find(s => s.domain === this.activeSite.domain); if (u) this.activeSite = u; }
       this.lastRefresh = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       this.refreshTabCounts();
+    },
+
+    async prioritizeSite(domain) {
+      const res = await this.apiFetch(`${API_BASE}/api/sites/prioritize?site=${encodeURIComponent(domain)}`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        this.apiError = '';
+        this.apiStatus = `↑ Prioritized ${data.boosted} pending jobs for ${domain}`;
+        setTimeout(() => { if (this.apiStatus.startsWith('↑')) this.apiStatus = 'connected'; }, 4000);
+      } else { this.apiError = `Prioritize failed: ${res.status}`; }
     },
 
     async selectSite(s) {

@@ -137,6 +137,20 @@ createServer(async (req, res) => {
     return json(res, counts || { original: 0, upgraded: 0 });
   }
 
+  if (path === '/api/sites/prioritize' && req.method === 'POST') {
+    if (!isAdmin(req)) return err(res, 401, 'Admin password required');
+    const domain = url.searchParams.get('site');
+    if (!domain) return err(res, 400, 'site param required');
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, `No DB for ${domain}`);
+    try {
+      // Boost all pending jobs above any other site's max priority (~5000)
+      const n = db.prepare(`UPDATE pdf_upgrade_queue SET priority = 1000000 + COALESCE(priority, 0) WHERE status='pending'`).run().changes;
+      invalidateSitesCache();
+      return json(res, { ok: true, boosted: n, domain });
+    } finally { db.close(); }
+  }
+
   if (path === '/api/docs') {
     const domain = url.searchParams.get('site');
     if (!domain) return err(res, 400, 'site param required');
