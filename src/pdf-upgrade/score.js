@@ -67,7 +67,14 @@ export const scorePdf = async (pdfPath) => {
     // Detect language from extracted text + PDF title
     const langSample = [pdf_title, sampleText.slice(0, 2000)].join(' ');
     const language = detectLanguage(langSample);
-    return { avg_chars_per_page: Math.round(avgChars), readable_pages_pct: Math.round(readablePct * 100) / 100, has_text_layer: hasText, word_quality_estimate: Math.round(wq * 100) / 100, composite_score: Math.round(composite * 100) / 100, pages, pdf_title, excerpt, language };
+    // Processing difficulty: 0=trivial (text PDF, skip OCR), 1=hardest (dense image scan).
+    // Primary driver: no text layer = needs OCR. Secondary: page count. Tertiary: script complexity.
+    // Handwritten non-Latin scripts (Persian/Arabic image PDFs) are hardest → OCR nearly always fails.
+    const scriptHard = ['persian','arabic','hebrew','hindi','chinese','japanese','korean'].includes(language);
+    const processing_difficulty = hasText === 1
+      ? 0.05                                          // text layer: skip OCR, trivially easy
+      : Math.min(1.0, (pages / 400) * (scriptHard ? 2.0 : 1.0)); // image PDF: pages + script penalty
+    return { avg_chars_per_page: Math.round(avgChars), readable_pages_pct: Math.round(readablePct * 100) / 100, has_text_layer: hasText, word_quality_estimate: Math.round(wq * 100) / 100, composite_score: Math.round(composite * 100) / 100, pages, pdf_title, excerpt, language, processing_difficulty: Math.round(processing_difficulty * 100) / 100 };
   } catch { return empty; }
 };
 /** Extract a short sample of OCR text for display (shows quality problems). */
@@ -83,9 +90,10 @@ export const extractBadSample = (pdfPath, maxChars = 300) => {
 };
 /** Save quality score to DB for a document URL. */
 export const saveQualityScore = (db, url, contentHash, metrics) => {
-  db.prepare(`INSERT OR REPLACE INTO pdf_quality (url, content_hash, scored_at, avg_chars_per_page, readable_pages_pct, has_text_layer, word_quality_estimate, composite_score, pages, pdf_title, excerpt, ai_language)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(url, contentHash, new Date().toISOString(), metrics.avg_chars_per_page, metrics.readable_pages_pct, metrics.has_text_layer, metrics.word_quality_estimate, metrics.composite_score, metrics.pages, metrics.pdf_title || null, metrics.excerpt || null, metrics.language || null);
+  try { db.exec('ALTER TABLE pdf_quality ADD COLUMN processing_difficulty REAL'); } catch {}
+  db.prepare(`INSERT OR REPLACE INTO pdf_quality (url, content_hash, scored_at, avg_chars_per_page, readable_pages_pct, has_text_layer, word_quality_estimate, composite_score, pages, pdf_title, excerpt, ai_language, processing_difficulty)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+    .run(url, contentHash, new Date().toISOString(), metrics.avg_chars_per_page, metrics.readable_pages_pct, metrics.has_text_layer, metrics.word_quality_estimate, metrics.composite_score, metrics.pages, metrics.pdf_title || null, metrics.excerpt || null, metrics.language || null, metrics.processing_difficulty ?? null);
 };
 /** Queue a PDF for upgrade if below score threshold. Priority boosted for English (cheaper to process). */
 export const maybeQueue = (db, url, contentHash, score, threshold = 0.7, language = null) => {

@@ -107,7 +107,8 @@ CREATE TABLE IF NOT EXISTS pdf_quality (
   composite_score REAL,
   pages INT,
   pdf_title TEXT,
-  excerpt TEXT
+  excerpt TEXT,
+  processing_difficulty REAL  -- 0=trivial (text PDF), 1=hardest (dense handwritten non-Latin scan)
 );
 CREATE INDEX IF NOT EXISTS idx_pages_mime_gone ON pages(mime_type, gone);
 CREATE INDEX IF NOT EXISTS idx_pages_last_seen ON pages(last_seen_at);
