@@ -31,7 +31,7 @@ export const siteSummary = (domain, siteUrl, description = null) => {
       SELECT COUNT(*) as scored,
         SUM(CASE WHEN u.status='done' THEN 1 ELSE 0 END) as upgraded,
         SUM(CASE WHEN u.status='pending' THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN u.status='processing' THEN 1 ELSE 0 END) as processing,
+        SUM(CASE WHEN u.status IN ('processing','submitted') THEN 1 ELSE 0 END) as processing,
         SUM(CASE WHEN u.status='failed' THEN 1 ELSE 0 END) as failed,
         SUM(CASE WHEN q.skip=1 THEN 1 ELSE 0 END) as skipped,
         SUM(CASE WHEN u.url IS NULL AND q.skip=0 AND q.composite_score >= 0.7 THEN 1 ELSE 0 END) as already_ok,
@@ -111,8 +111,8 @@ export const siteDocs = (domain, params) => {
     const vals = [];
 
     if (tab === 'upgraded') {
-      // 'submitted' stays in Original tab; only actively-running and terminal states shown here
-      wheres.push("u.status IN ('done','processing','failed')");
+      // Include 'submitted' (queued in pipeline) and 'processing' alongside done/failed
+      wheres.push("u.status IN ('done','processing','submitted','failed')");
     }
     // 'original' (default/fallback): all PDFs, no quality filter
 
@@ -156,7 +156,7 @@ export const siteTabCounts = (domain) => {
     const row = db.prepare(`
       SELECT
         COUNT(*) as original,
-        SUM(CASE WHEN u.status IN ('done','processing') THEN 1 ELSE 0 END) as upgraded
+        SUM(CASE WHEN u.status IN ('done','processing','submitted') THEN 1 ELSE 0 END) as upgraded
       FROM pages p
       LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
       WHERE p.gone=0 AND p.mime_type='application/pdf' AND LOWER(p.url) LIKE '%.pdf'
