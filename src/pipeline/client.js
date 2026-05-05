@@ -107,7 +107,7 @@ export class PipelineClient {
         res.on('end', () => {
           if (res.statusCode >= 400) {
             let msg = `HTTP ${res.statusCode}`;
-            try { msg = JSON.parse(data).error ?? msg; } catch {}
+            try { const body = JSON.parse(data); if (body.error) msg = `HTTP ${res.statusCode} ${body.error}`; } catch {}
             return reject(new Error(`pipeline ${method} ${path}: ${msg}`));
           }
           try {
