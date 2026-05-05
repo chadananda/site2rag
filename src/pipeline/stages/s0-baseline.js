@@ -59,10 +59,18 @@ export async function s0Baseline(ctx) {
       notes = 'early_exit: doc already good enough';
     }
 
-    // OCR escalation (s4 = 600dpi re-scan, s5 = Vision AI) are only for true image PDFs.
-    // Text-layer PDFs may score poorly due to encoding issues (e.g. Persian/Arabic fonts that
-    // pdf-parse can't decode), but running Vision AI on them produces worse results, not better.
-    if (score.has_text_layer === 1 && !ctx.config.skip?.includes('s4')) {
+    // Text-layer PDFs with substantial content need no OCR at all — skip s1-s5 entirely.
+    // pdf-parse can't decode Persian/Arabic fonts, so composite_score may be low even when the
+    // text layer is perfect (e.g. bilingual PDFs generated from Word/Google Docs). avg_chars_per_page
+    // is a reliable signal: if text is extractable at scale, OCR will only make things worse.
+    if (score.has_text_layer === 1 && score.avg_chars_per_page >= 300) {
+      ctx.config.skip = [...new Set([...(ctx.config.skip ?? []), 's1', 's2', 's3', 's4', 's5'])];
+      ctx.addDecision('s0', 'skip_all_ocr',
+        `has_text_layer=1 avg_chars=${score.avg_chars_per_page} — text PDF needs no OCR`,
+        score.composite_score);
+      notes = (notes ? notes + '; ' : '') + 'text_layer_skip: no OCR needed';
+    } else if (score.has_text_layer === 1 && !ctx.config.skip?.includes('s4')) {
+      // Sparse text layer: still skip the escalation stages (re-OCR + Vision AI)
       ctx.config.skip = [...new Set([...(ctx.config.skip ?? []), 's4', 's5'])];
       ctx.addDecision('s0', 'skip_ocr_escalation',
         `has_text_layer=1 — 600dpi re-scan and Vision AI only apply to image PDFs`,

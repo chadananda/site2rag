@@ -58,7 +58,11 @@ export const scorePdf = async (pdfPath) => {
     const hasText = avgChars > 5 ? 1 : 0;
     const wq = wordQuality(sampleText.slice(0, 5000));
     const charsScore = Math.min(avgChars / 500, 1);
-    const composite = 0.4 * wq + 0.3 * readablePct + 0.2 * charsScore + 0.1 * hasText;
+    // pdf-parse cannot decode Persian/Arabic/CJK scripts → pages with non-Latin text appear empty,
+    // making readablePct artificially low for text-layer PDFs. Use charsScore as a floor when
+    // has_text_layer=1: high avg_chars proves content exists even if the script is undecodable.
+    const adjustedReadable = hasText === 1 ? Math.max(readablePct, charsScore * 0.85) : readablePct;
+    const composite = 0.4 * wq + 0.3 * adjustedReadable + 0.2 * charsScore + 0.1 * hasText;
     const excerpt = extractExcerpt(sampleText);
     // Detect language from extracted text + PDF title
     const langSample = [pdf_title, sampleText.slice(0, 2000)].join(' ');
