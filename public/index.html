@@ -1192,7 +1192,7 @@ function app() {
       this.activeTab = tab;
       this.docsPage = 1;
       this.docs = [];
-      const defaultSort = tab === 'upgraded' ? 'improved_desc' : 'score_asc';
+      const defaultSort = 'score_asc';
       this.filters = { q: '', status: '', score_max: 1, sort: defaultSort };
       await this.loadDocs();
     },
