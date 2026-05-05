@@ -1,0 +1,191 @@
+// Pipeline HTTP service. Wraps runPipeline() behind a REST API for deployment isolation.
+// Exports: startPipelineServer. Deps: job-store.js, index.js, context.js
+//
+// Routes:
+//   GET  /health              → { status, version, queue_depth }
+//   POST /jobs                → { jobId }        body: { pdfPath, sourceUrl, meta, config, importance }
+//   GET  /jobs/:id            → { status, progress, receipt, error, ... }
+//   GET  /jobs/:id/md         → text/markdown
+//   GET  /jobs/:id/pdf        → application/pdf
+//   DELETE /jobs/:id          → { ok: true }
+//
+// To move this service to another host: just point PipelineClient at the new URL.
+// Remote hosts: pdfPath must be accessible from the server; for cross-machine use,
+// extend with POST /jobs/upload (multipart) when needed.
+
+import { createServer } from 'http';
+import { readFileSync, existsSync } from 'fs';
+import { PIPELINE_VERSION } from './context.js';
+import { runPipeline } from './index.js';
+import { openJobStore } from './job-store.js';
+
+const log = (msg) => console.log(`[pipeline-server] ${new Date().toISOString().slice(0,19)} ${msg}`);
+
+export async function startPipelineServer({
+  port        = 49900,
+  dbPath      = '/tmp/pipeline-jobs.db',
+  concurrency = 1,
+  config: baseConfig = {},
+  apiKey      = null,   // if set, require Authorization: Bearer <key> on all requests
+} = {}) {
+  const jobs = await openJobStore(dbPath);
+  let running = 0;
+
+  // Worker: pick up next pending job and run it
+  const processNext = async () => {
+    if (running >= concurrency) return;
+    const job = jobs.nextPending();
+    if (!job) return;
+
+    running++;
+    jobs.setProcessing(job.id);
+    log(`start job=${job.id}`);
+
+    try {
+      const ctx = await runPipeline({
+        docId:      job.id,
+        sourcePath: job.pdf_path,
+        sourceUrl:  job.source_url ?? null,
+        importance: job.importance ?? 1,
+        meta:       job.meta ?? {},
+        config:     { ...baseConfig, ...job.config },
+        onProgress: (stage, pagesAffected, totalPages) => {
+          jobs.setProgress(job.id, { stage, pages_affected: pagesAffected, total_pages: totalPages });
+        },
+      });
+
+      jobs.setDone(job.id, {
+        mdPath:     ctx.outputs.mdPath ?? null,
+        pdfOutPath: ctx.outputs.archivalPdfPath ?? null,
+        receipt:    ctx.toReceipt(),
+      });
+      log(`done job=${job.id}`);
+    } catch (err) {
+      jobs.setFailed(job.id, err.message);
+      log(`failed job=${job.id}: ${err.message}`);
+    } finally {
+      running--;
+    }
+  };
+
+  // Poll every 2 s; process multiple pending jobs per poll up to concurrency limit
+  const poll = () => {
+    for (let i = 0; i < concurrency; i++) processNext().catch(() => {});
+    setTimeout(poll, 2000);
+  };
+  setTimeout(poll, 100);
+
+  const server = createServer(async (req, res) => {
+    // Optional API key auth
+    if (apiKey) {
+      const auth = req.headers['authorization'] ?? '';
+      if (auth !== `Bearer ${apiKey}`) return reply(res, 401, { error: 'unauthorized' });
+    }
+
+    const url  = new URL(req.url, `http://localhost:${port}`);
+    const path = url.pathname;
+
+    try {
+      // GET /health
+      if (req.method === 'GET' && path === '/health') {
+        return reply(res, 200, { status: 'ok', version: PIPELINE_VERSION, queue_depth: jobs.queueDepth() });
+      }
+
+      // POST /jobs
+      if (req.method === 'POST' && path === '/jobs') {
+        const body = await readBody(req);
+        if (!body.pdfPath)            return reply(res, 400, { error: 'pdfPath required' });
+        if (!existsSync(body.pdfPath)) return reply(res, 400, { error: `pdfPath not found: ${body.pdfPath}` });
+        const id = jobs.create({
+          pdfPath:    body.pdfPath,
+          sourceUrl:  body.sourceUrl  ?? null,
+          meta:       body.meta       ?? {},
+          config:     body.config     ?? {},
+          importance: body.importance ?? 1,
+        });
+        log(`queued job=${id} path=${body.pdfPath}`);
+        return reply(res, 202, { jobId: id });
+      }
+
+      // Routes that need a job id
+      const idMatch  = path.match(/^\/jobs\/([^/]+)$/);
+      const mdMatch  = path.match(/^\/jobs\/([^/]+)\/md$/);
+      const pdfMatch = path.match(/^\/jobs\/([^/]+)\/pdf$/);
+
+      // GET /jobs/:id
+      if (req.method === 'GET' && idMatch) {
+        const job = jobs.get(idMatch[1]);
+        if (!job) return reply(res, 404, { error: 'not found' });
+        // Omit internal paths from public response
+        const { pdf_path, md_path, pdf_out_path, meta, config, ...pub } = job;
+        pub.has_markdown = !!md_path && existsSync(md_path);
+        pub.has_pdf      = !!pdf_out_path && existsSync(pdf_out_path);
+        return reply(res, 200, pub);
+      }
+
+      // GET /jobs/:id/md
+      if (req.method === 'GET' && mdMatch) {
+        const job = jobs.get(mdMatch[1]);
+        if (!job) return reply(res, 404, { error: 'not found' });
+        if (job.status !== 'done' || !job.md_path || !existsSync(job.md_path))
+          return reply(res, 404, { error: 'markdown not available' });
+        res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' });
+        return res.end(readFileSync(job.md_path, 'utf8'));
+      }
+
+      // GET /jobs/:id/pdf
+      if (req.method === 'GET' && pdfMatch) {
+        const job = jobs.get(pdfMatch[1]);
+        if (!job) return reply(res, 404, { error: 'not found' });
+        if (job.status !== 'done' || !job.pdf_out_path || !existsSync(job.pdf_out_path))
+          return reply(res, 404, { error: 'upgraded pdf not available' });
+        const buf = readFileSync(job.pdf_out_path);
+        res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Length': buf.length });
+        return res.end(buf);
+      }
+
+      // DELETE /jobs/:id
+      if (req.method === 'DELETE' && idMatch) {
+        const job = jobs.get(idMatch[1]);
+        if (!job) return reply(res, 404, { error: 'not found' });
+        jobs.delete(idMatch[1]);
+        return reply(res, 200, { ok: true });
+      }
+
+      reply(res, 404, { error: 'not found' });
+    } catch (err) {
+      log(`request error: ${err.message}`);
+      reply(res, 500, { error: 'internal error' });
+    }
+  });
+
+  await new Promise((resolve, reject) => {
+    server.on('error', reject);
+    server.listen(port, () => { log(`listening on port ${port}`); resolve(); });
+  });
+
+  return {
+    server,
+    jobs,
+    close: () => new Promise(r => server.close(() => { jobs.close(); r(); })),
+  };
+}
+
+// --- helpers ---
+
+function reply(res, status, data) {
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(data));
+}
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', chunk => { body += chunk; });
+    req.on('end', () => {
+      try { resolve(JSON.parse(body || '{}')); }
+      catch { reject(new Error('invalid JSON body')); }
+    });
+    req.on('error', reject);
+  });
+}

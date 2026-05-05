@@ -1,0 +1,117 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { openJobStore } from '../../src/pipeline/job-store.js';
+import { makeTempDir } from './helpers.js';
+import { join } from 'path';
+
+let tempDir, cleanup, store;
+
+beforeEach(async () => {
+  ({ dir: tempDir, cleanup } = makeTempDir());
+  store = await openJobStore(join(tempDir, 'jobs.db'));
+});
+
+afterEach(() => {
+  store.close();
+  cleanup();
+});
+
+describe('JobStore — create / get', () => {
+  it('creates a job and returns a uuid', () => {
+    const id = store.create({ pdfPath: '/tmp/test.pdf' });
+    expect(typeof id).toBe('string');
+    expect(id).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  it('get returns the created job with pending status', () => {
+    const id = store.create({ pdfPath: '/tmp/test.pdf', sourceUrl: 'https://example.com/test.pdf', importance: 3 });
+    const job = store.get(id);
+    expect(job).toMatchObject({ id, status: 'pending', pdf_path: '/tmp/test.pdf', importance: 3 });
+    expect(job.source_url).toBe('https://example.com/test.pdf');
+  });
+
+  it('parses meta and config from JSON', () => {
+    const id = store.create({ pdfPath: '/tmp/a.pdf', meta: { title: 'Hello' }, config: { apiKey: 'x' } });
+    const job = store.get(id);
+    expect(job.meta).toEqual({ title: 'Hello' });
+    expect(job.config).toEqual({ apiKey: 'x' });
+  });
+
+  it('returns null for unknown id', () => {
+    expect(store.get('no-such-id')).toBeNull();
+  });
+});
+
+describe('JobStore — status transitions', () => {
+  it('setProcessing sets status and started_at', () => {
+    const id = store.create({ pdfPath: '/tmp/a.pdf' });
+    store.setProcessing(id);
+    const job = store.get(id);
+    expect(job.status).toBe('processing');
+    expect(job.started_at).toBeTruthy();
+  });
+
+  it('setDone sets status, paths, and receipt', () => {
+    const id = store.create({ pdfPath: '/tmp/a.pdf' });
+    store.setProcessing(id);
+    store.setDone(id, { mdPath: '/out/a.md', pdfOutPath: '/out/a.pdf', receipt: { quality: { gain: 0.2 } } });
+    const job = store.get(id);
+    expect(job.status).toBe('done');
+    expect(job.md_path).toBe('/out/a.md');
+    expect(job.pdf_out_path).toBe('/out/a.pdf');
+    expect(job.receipt.quality.gain).toBe(0.2);
+    expect(job.finished_at).toBeTruthy();
+  });
+
+  it('setFailed sets status and truncates long error messages', () => {
+    const id = store.create({ pdfPath: '/tmp/a.pdf' });
+    store.setFailed(id, 'A'.repeat(600));
+    const job = store.get(id);
+    expect(job.status).toBe('failed');
+    expect(job.error.length).toBeLessThanOrEqual(500);
+  });
+});
+
+describe('JobStore — nextPending', () => {
+  it('returns oldest pending job', async () => {
+    const id1 = store.create({ pdfPath: '/tmp/a.pdf' });
+    await new Promise(r => setTimeout(r, 5));
+    const id2 = store.create({ pdfPath: '/tmp/b.pdf' });
+    const next = store.nextPending();
+    expect(next.id).toBe(id1);
+  });
+
+  it('returns null when no pending jobs', () => {
+    expect(store.nextPending()).toBeNull();
+  });
+
+  it('skips processing/done/failed jobs', () => {
+    const id = store.create({ pdfPath: '/tmp/a.pdf' });
+    store.setProcessing(id);
+    expect(store.nextPending()).toBeNull();
+  });
+});
+
+describe('JobStore — progress and queueDepth', () => {
+  it('setProgress stores progress JSON', () => {
+    const id = store.create({ pdfPath: '/tmp/a.pdf' });
+    store.setProgress(id, { stage: 's3', pages_affected: 5, total_pages: 20 });
+    const job = store.get(id);
+    expect(job.progress).toEqual({ stage: 's3', pages_affected: 5, total_pages: 20 });
+  });
+
+  it('queueDepth counts pending and processing, not done/failed', () => {
+    const id1 = store.create({ pdfPath: '/tmp/a.pdf' });
+    const id2 = store.create({ pdfPath: '/tmp/b.pdf' });
+    store.setProcessing(id1);
+    store.setDone(id2, {});
+    expect(store.queueDepth()).toBe(1);  // only id1 still in queue
+  });
+});
+
+describe('JobStore — delete', () => {
+  it('delete removes the job', () => {
+    const id = store.create({ pdfPath: '/tmp/a.pdf' });
+    store.delete(id);
+    expect(store.get(id)).toBeNull();
+  });
+});
