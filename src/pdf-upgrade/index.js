@@ -22,7 +22,7 @@ const SUMMARIZE_INTERVAL_MS = 15 * 1000;
 // When set, the service MUST be reachable; unreachable = skip tick with a visible error.
 // To move the service to another host: just change PIPELINE_URL.
 const pipelineClient = process.env.PIPELINE_URL
-  ? new PipelineClient({ baseUrl: process.env.PIPELINE_URL, timeout: 8 * 3_600_000 })
+  ? new PipelineClient({ baseUrl: process.env.PIPELINE_URL })
   : null;
 const MARKER_CONCURRENCY = 16;   // CPU-bound, tower-nas has 80 cores
 const OCR_DOC_CONCURRENCY = 8;   // GPU-bound on boss (max_num_seqs=8)
@@ -77,14 +77,13 @@ const saveMarkerMd = (db, domain, page, markdown) => {
   return outPath;
 };
 
-/**
- * Route one document through the new pipeline service.
- * Called when PIPELINE_URL is set and the service is reachable.
- * Updates pdf_upgrade_queue with the result so the report server can serve outputs.
- */
-const upgradeViaPipeline = async (db, domain, row, page, siteConfig) => {
-  db.prepare("UPDATE pdf_upgrade_queue SET status='processing', started_at=? WHERE url=?")
-    .run(now(), row.url);
+// Ensure pipeline_job_id column exists (added in robustness refactor)
+const ensurePipelineJobIdColumn = (db) => {
+  try { db.exec('ALTER TABLE pdf_upgrade_queue ADD COLUMN pipeline_job_id TEXT'); } catch {}
+};
+
+/** Submit one doc to the pipeline service and mark it processing. No waiting — checkPipelineJobs polls. */
+const submitViaPipeline = async (db, domain, row, page, siteConfig) => {
   const quality = db.prepare('SELECT * FROM pdf_quality WHERE url=?').get(row.url) ?? {};
   try {
     const jobId = await pipelineClient.submitJob({
@@ -100,31 +99,49 @@ const upgradeViaPipeline = async (db, domain, row, page, siteConfig) => {
         keywords:        ['site2rag', domain],
       },
     });
-    const job = await pipelineClient.waitForJob(jobId);
-    const receipt = job.receipt ?? {};
-    db.prepare(`UPDATE pdf_upgrade_queue
-      SET status='done', finished_at=?, upgraded_pdf_path=?,
-          after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?
-      WHERE url=?`)
-      .run(now(),
-        job.pdf_out_path ?? null,
-        receipt.quality?.final            ?? null,
-        receipt.quality?.gain             ?? null,
-        receipt.page_count                ?? null,
-        'pipeline-v2',
-        JSON.stringify(receipt),
-        row.url);
-    logUpgradeHistory(db, row.url, {
-      method: 'pipeline-v2',
-      score_before: row.before_score,
-      score_after:  receipt.quality?.final ?? null,
-      pages_processed: receipt.page_count  ?? null,
-    });
-    log(`Pipeline done: ${row.url}`);
+    db.prepare("UPDATE pdf_upgrade_queue SET status='processing', started_at=?, pipeline_job_id=? WHERE url=?")
+      .run(now(), jobId, row.url);
+    log(`Pipeline submitted: ${row.url.split('/').pop()}`);
   } catch (err) {
     db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
       .run(now(), err.message.slice(0, 300), row.url);
-    log(`Pipeline failed: ${row.url}: ${err.message}`);
+    log(`Pipeline submit failed: ${row.url.split('/').pop()}: ${err.message}`);
+  }
+};
+
+/** Poll all in-flight pipeline jobs and update site DB when done/failed. */
+const checkPipelineJobs = async (db) => {
+  const running = db.prepare(
+    "SELECT url, pipeline_job_id, before_score FROM pdf_upgrade_queue WHERE status='processing' AND pipeline_job_id IS NOT NULL"
+  ).all();
+  for (const { url, pipeline_job_id: jobId, before_score } of running) {
+    try {
+      const job = await pipelineClient.getJob(jobId);
+      if (job.status === 'done') {
+        const receipt = job.receipt ?? {};
+        db.prepare(`UPDATE pdf_upgrade_queue
+          SET status='done', finished_at=?, upgraded_pdf_path=?,
+              after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL
+          WHERE url=?`)
+          .run(now(), job.pdf_out_path ?? null,
+            receipt.quality?.final ?? null, receipt.quality?.gain ?? null,
+            receipt.page_count ?? null, 'pipeline-v2', JSON.stringify(receipt), url);
+        logUpgradeHistory(db, url, { method: 'pipeline-v2', score_before: before_score,
+          score_after: receipt.quality?.final ?? null, pages_processed: receipt.page_count ?? null });
+        log(`Pipeline done: ${url.split('/').pop()}`);
+      } else if (job.status === 'failed') {
+        db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=?, pipeline_job_id=NULL WHERE url=?")
+          .run(now(), (job.error || 'pipeline failed').slice(0, 300), url);
+        log(`Pipeline failed: ${url.split('/').pop()}: ${job.error}`);
+      }
+      // pending/processing → still running, check next tick
+    } catch (err) {
+      if (err.message?.includes('404') || err.message?.includes('HTTP 404')) {
+        db.prepare("UPDATE pdf_upgrade_queue SET status='failed', error=?, pipeline_job_id=NULL WHERE url=?")
+          .run('pipeline job record expired', url);
+      }
+      // other errors (network) → leave in processing, retry next tick
+    }
   }
 };
 
@@ -359,7 +376,9 @@ const tick = async () => {
     for (const site of validSites) {
       const domain = safeHostname(site.url);
       try {
-        openDbs.push({ db: openDb(domain), domain });
+        const db = openDb(domain);
+        ensurePipelineJobIdColumn(db);
+        openDbs.push({ db, domain });
       } catch (err) {
         log(`Failed to open DB for ${domain}: ${err.message}`);
       }
@@ -413,18 +432,23 @@ const tick = async () => {
           log(`ERROR: Pipeline service unreachable (${err.message}) — skipping pass-1 this tick. Fix PIPELINE_URL or start pipeline-server.`);
           return;
         }
+        // Poll already-submitted jobs first — update done/failed without blocking
+        await Promise.all(openDbs.map(({ db }) => checkPipelineJobs(db)));
+        // Submit only newly-pending docs (not already in pipeline)
         pass1.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
         const batch = pass1.slice(0, MARKER_CONCURRENCY);
-        log(`Pass 1 (pipeline-v2): ${batch.length} docs`);
-        await Promise.all(batch.map(async ({ db, domain, row, siteConfig }) => {
-          const page = db.prepare('SELECT * FROM pages WHERE url=?').get(row.url);
-          if (!page?.local_path || !existsSync(page.local_path)) {
-            db.prepare("UPDATE pdf_upgrade_queue SET status='failed', error=? WHERE url=?")
-              .run('local_path missing', row.url);
-            return;
-          }
-          return upgradeViaPipeline(db, domain, row, page, siteConfig);
-        }));
+        if (batch.length) {
+          log(`Pass 1 (pipeline-v2): submitting ${batch.length} docs`);
+          await Promise.all(batch.map(async ({ db, domain, row, siteConfig }) => {
+            const page = db.prepare('SELECT * FROM pages WHERE url=?').get(row.url);
+            if (!page?.local_path || !existsSync(page.local_path)) {
+              db.prepare("UPDATE pdf_upgrade_queue SET status='failed', error=? WHERE url=?")
+                .run('local_path missing', row.url);
+              return;
+            }
+            return submitViaPipeline(db, domain, row, page, siteConfig);
+          }));
+        }
         return;
       }
 
