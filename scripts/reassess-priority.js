@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Re-queue ALL PDFs through the new pipeline with score-based priority.
-// Easiest (high score, text PDFs) processed first for throughput; hard (image/Arabic) last.
-// Preserves receipt_json for docs already processed by the new pipeline but resets everything else.
+// Easiest (high score, text PDFs) processed first; hard (image/Arabic/CJK) last.
+// Resets ALL queue entries so everything runs through the new pipeline.
 import { openDb } from '../src/db.js';
 import { getMirrorRoot } from '../src/config.js';
 import { existsSync, readdirSync } from 'fs';
@@ -9,7 +9,6 @@ import { join } from 'path';
 
 const HARD_SCRIPT = /^(ar|ara|fa|fas|per|zh|chi|ja|jpn|ko|kor)/i;
 
-// importance: 1=text/easy, 2=marginal, 3=image needs ocr, 4=arabic/cjk/handwritten
 function computeImportance(score, language) {
   const isHard = HARD_SCRIPT.test(language ?? '');
   if (score == null) return 3;
@@ -19,10 +18,9 @@ function computeImportance(score, language) {
   return 1;
 }
 
-// Process easiest first: high score = high priority within same importance tier.
 function computePriority(importance, score, pages) {
-  const tier = (5 - importance) * 1000;               // 4000 for imp=1, 1000 for imp=4
-  const scoreFactor = (score ?? 0.5) * 100;           // 0–100
+  const tier = (5 - importance) * 1000;
+  const scoreFactor = (score ?? 0.5) * 100;
   const pageBonus = Math.min(pages ?? 0, 500) * 0.1;
   return tier + scoreFactor + pageBonus;
 }
@@ -35,11 +33,23 @@ function getSiteDbs() {
     .filter(s => existsSync(s.dbPath));
 }
 
+function ensureColumns(db) {
+  // Ensure columns exist that may not be in older DBs
+  const cols = db.prepare("PRAGMA table_info(pdf_upgrade_queue)").all().map(c => c.name);
+  if (!cols.includes('importance'))  db.exec("ALTER TABLE pdf_upgrade_queue ADD COLUMN importance INT DEFAULT 1");
+  if (!cols.includes('receipt_json')) db.exec("ALTER TABLE pdf_upgrade_queue ADD COLUMN receipt_json TEXT");
+  if (!cols.includes('priority') || typeof cols.priority === 'undefined') {
+    try { db.exec("ALTER TABLE pdf_upgrade_queue ADD COLUMN priority REAL"); } catch {}
+  }
+}
+
 let totalQueued = 0, totalReset = 0;
 
 for (const { domain } of getSiteDbs()) {
   const db = openDb(domain);
   try {
+    ensureColumns(db);
+
     const pdfs = db.prepare(`
       SELECT q.url, q.composite_score, q.ai_language, q.pages, u.status
       FROM pdf_quality q
@@ -56,21 +66,17 @@ for (const { domain } of getSiteDbs()) {
       const priority = computePriority(importance, pdf.composite_score, pdf.pages);
 
       if (!pdf.status) {
-        db.prepare(`
-          INSERT OR IGNORE INTO pdf_upgrade_queue
+        db.prepare(`INSERT OR IGNORE INTO pdf_upgrade_queue
             (url, status, priority, importance, queued_at)
-          VALUES (?, 'pending', ?, ?, ?)
-        `).run(pdf.url, priority, importance, now);
+          VALUES (?, 'pending', ?, ?, ?)`
+        ).run(pdf.url, priority, importance, now);
         siteQueued++;
       } else {
-        // Reset ALL — old pipeline results go through new pipeline
-        db.prepare(`
-          UPDATE pdf_upgrade_queue
-          SET status = 'pending', priority = ?, importance = ?,
-              error = NULL, started_at = NULL, finished_at = NULL,
-              receipt_json = NULL
-          WHERE url = ?
-        `).run(priority, importance, pdf.url);
+        db.prepare(`UPDATE pdf_upgrade_queue
+          SET status='pending', priority=?, importance=?,
+              error=NULL, started_at=NULL, finished_at=NULL, receipt_json=NULL
+          WHERE url=?`
+        ).run(priority, importance, pdf.url);
         siteReset++;
       }
     }
@@ -80,4 +86,4 @@ for (const { domain } of getSiteDbs()) {
   } finally { db.close(); }
 }
 
-console.log(`\nTotal: ${totalQueued} queued + ${totalReset} reset = ${totalQueued + totalReset} pending`);
+console.log(`\nTotal: ${totalQueued + totalReset} pending (${totalQueued} new + ${totalReset} reset)`);
