@@ -8,12 +8,23 @@ import Anthropic from '@anthropic-ai/sdk';
 import { loadConfig, getMirrorRoot } from '../src/config.js';
 import { openDb, logLlmCall, llmCost } from '../src/db.js';
 import { detectLanguage } from '../src/language.js';
-import { siteSummary, siteDocs, recentRuns } from './report-queries.js';
+import { siteSummary, siteDocs, siteTabCounts, recentRuns } from './report-queries.js';
 import { stripHtml, getLinkContext, buildSummaryPrompt } from './report-utils.js';
 import { generateThumb } from './thumb-worker-pool.js';
 
 const PORT = parseInt(process.env.REPORT_PORT || '7840', 10);
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://site2rag.lnker.com';
+
+let _sitesCache = null;
+let _sitesCacheAt = 0;
+const SITES_CACHE_MS = 30_000;
+const getSitesData = (sites) => {
+  if (_sitesCache && Date.now() - _sitesCacheAt < SITES_CACHE_MS) return _sitesCache;
+  _sitesCache = { sites: sites.map(s => siteSummary(s.domain, s.url, s.description)) };
+  _sitesCacheAt = Date.now();
+  return _sitesCache;
+};
+const invalidateSitesCache = () => { _sitesCacheAt = 0; };
 const ADMIN_PASSWORD = process.env.SITE_ADMIN_PASS || process.env.REPORT_ADMIN_PASSWORD || null;
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -116,7 +127,14 @@ createServer(async (req, res) => {
   }
 
   if (path === '/api/sites') {
-    return json(res, { sites: sites.map(s => siteSummary(s.domain, s.url, s.description)) });
+    return json(res, getSitesData(sites));
+  }
+
+  if (path === '/api/docs/tabs') {
+    const domain = url.searchParams.get('site');
+    if (!domain) return err(res, 400, 'site param required');
+    const counts = siteTabCounts(domain);
+    return json(res, counts || { original: 0, upgraded: 0 });
   }
 
   if (path === '/api/docs') {

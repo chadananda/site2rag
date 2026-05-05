@@ -306,12 +306,12 @@ if ('serviceWorker' in navigator) {
         <button class="tab-btn" :class="activeTab==='original'?'active':''" @click="switchTab('original')">
           Original
           <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='original'?'text-gray-600':'text-gray-400'"
-            x-text="'('+fmt(tabTotals.original ?? (selectedSiteData()?.total_pdfs||0))+')'"></span>
+            x-text="tabTotals.original != null ? '('+fmt(tabTotals.original)+')' : ''"></span>
         </button>
         <button class="tab-btn" :class="activeTab==='upgraded'?'active':''" @click="switchTab('upgraded')">
           Upgraded
           <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='upgraded'?'text-green-500':'text-gray-400'"
-            x-text="'('+fmt(tabTotals.upgraded ?? (selectedSiteData()?.upgraded||0))+')'"></span>
+            x-text="tabTotals.upgraded != null ? '('+fmt(tabTotals.upgraded)+')' : ''"></span>
         </button>
         </div><!-- end sticky tabs -->
       </div><!-- end sticky bar -->
@@ -1167,6 +1167,7 @@ function app() {
       this._updateSumRates(this.sites);
       if (this.activeSite) { const u = this.sites.find(s => s.domain === this.activeSite.domain); if (u) this.activeSite = u; }
       this.lastRefresh = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      this.refreshTabCounts();
     },
 
     async selectSite(s) {
@@ -1174,14 +1175,23 @@ function app() {
       this.docsPage = 1;
       this.tabTotals = { original: null, upgraded: null };
       this.filters = { q: '', status: '', score_max: 1, sort: 'score_asc' };
-      await this.loadDocs();
+      await Promise.all([this.loadDocs(), this.refreshTabCounts()]);
     },
 
     selectedSiteData() { return this.sites.find(s => s.domain === this.activeSite?.domain); },
 
+    async refreshTabCounts() {
+      if (!this.activeSite) return;
+      try {
+        const data = await fetch(`${API_BASE}/api/docs/tabs?site=${this.activeSite.domain}`).then(r => r.json());
+        this.tabTotals = { original: data.original, upgraded: data.upgraded };
+      } catch {}
+    },
+
     async switchTab(tab) {
       this.activeTab = tab;
       this.docsPage = 1;
+      this.docs = [];
       const defaultSort = tab === 'upgraded' ? 'improved_desc' : 'score_asc';
       this.filters = { q: '', status: '', score_max: 1, sort: defaultSort };
       await this.loadDocs();

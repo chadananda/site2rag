@@ -1,4 +1,4 @@
-// SQL query functions for API routes: site summaries, doc lists, recent runs. Exports: siteSummary, siteDocs, recentRuns. Deps: db, config, report-utils
+// SQL query functions for API routes: site summaries, doc lists, recent runs. Exports: siteSummary, siteDocs, siteTabCounts, recentRuns. Deps: db, config, report-utils
 import { existsSync } from 'fs';
 import { join } from 'path';
 import { execSync } from 'child_process';
@@ -142,6 +142,23 @@ export const siteDocs = (domain, params) => {
       WHERE ${where}`).get(...vals).n;
     const rows = db.prepare(`${DOC_SELECT} WHERE ${where} ORDER BY ${orderBy} LIMIT ${PER_PAGE} OFFSET ${offset}`).all(...vals);
     return { docs: rows.map(d => mapDoc(d, domain)), total, page, pages: Math.ceil(total / PER_PAGE), per_page: PER_PAGE };
+  } finally { db.close(); }
+};
+
+/** Fast tab counts: original (all PDFs) and upgraded (status=done). Single query. */
+export const siteTabCounts = (domain) => {
+  const db = safeOpenDb(domain);
+  if (!db) return null;
+  try {
+    const row = db.prepare(`
+      SELECT
+        COUNT(*) as original,
+        SUM(CASE WHEN u.status='done' THEN 1 ELSE 0 END) as upgraded
+      FROM pages p
+      LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
+      WHERE p.gone=0 AND p.mime_type='application/pdf' AND LOWER(p.url) LIKE '%.pdf'
+    `).get();
+    return { original: row.original || 0, upgraded: row.upgraded || 0 };
   } finally { db.close(); }
 };
 
