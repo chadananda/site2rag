@@ -1,5 +1,6 @@
 // API response utilities: HTML stripping, link context, free summary, doc mapping. Exports: stripHtml, getLinkContext, buildFreeSummary, mapDoc, buildSummaryPrompt. Deps: language
 import { detectLanguage, LANG_COST, LANG_DISPLAY } from '../src/language.js';
+import { spellFixCost } from '../src/pdf-upgrade/spell-fix.js';
 
 /** Strip HTML tags and decode common entities. */
 export const stripHtml = (html) => html
@@ -73,6 +74,11 @@ export const mapDoc = (d, domain) => {
     ? [history[0].score_before, ...history.map(h => h.score_after)].filter(x => x != null)
     : [];
 
+  // Cost estimates for upgrade options
+  const avgChars = d.avg_chars_per_page || 1500;
+  const spell_fix_cost_usd = pages > 0 ? spellFixCost(pages, avgChars) : 0;
+  const vision_cost_usd    = pages > 0 ? pages * 0.003 * (LANG_COST[langKey] ?? 1) : 0; // Haiku vision
+
   return {
     ...d,
     title,
@@ -82,6 +88,8 @@ export const mapDoc = (d, domain) => {
     lang_key: langKey,
     effort_mins,
     score_trail,
+    spell_fix_cost_usd,
+    vision_cost_usd,
     archive_url: d.status === 'done' && d.upgraded_pdf_path
       ? `https://${domain}.lnker.com/_upgraded/${d.path_slug || d.url.replace(/[^a-z0-9]/gi,'_').slice(-60)}.pdf`
       : null,

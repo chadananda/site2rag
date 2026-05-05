@@ -11,12 +11,14 @@ import { backfillHostsFromMirror } from './backfill.js';
 import { detectLanguageForImagePdfs } from './lang-detect.js';
 import { summarizeTopPending } from './summarize.js';
 import { markerAvailable, convertPdfWithMarker, scoreMarkdown } from './marker-client.js';
+import { spellFixMarkdown, spellFixCost } from './spell-fix.js';
 
 const TICK_INTERVAL_MS = 60 * 1000;
 const SUMMARIZE_INTERVAL_MS = 15 * 1000;
 const MARKER_CONCURRENCY = 16;   // CPU-bound, tower-nas has 80 cores
 const OCR_DOC_CONCURRENCY = 8;   // GPU-bound on boss (max_num_seqs=8)
-const MARKER_SCORE_THRESHOLD = 0.55; // md quality to mark pass-1 done
+const MARKER_SCORE_THRESHOLD = 0.55;  // md quality to mark pass-1 done
+const SPELL_FIX_THRESHOLD   = 0.85;  // above this, spell-fix not worth it
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const sha256file = (path) => sha256(readFileSync(path));
 const now = () => new Date().toISOString();
@@ -108,13 +110,47 @@ const upgradeDocumentMarker = async (db, domain, row, allDomains, siteConfig) =>
     const mdPath = saveMarkerMd(db, domain, page, markdown);
     db.prepare('UPDATE pdf_upgrade_queue SET marker_md_path=? WHERE url=?').run(mdPath, row.url);
 
-    if (mdScore >= MARKER_SCORE_THRESHOLD) {
+    const spellFixOnly = row.requested_method === 'spell-fix';
+
+    if (mdScore >= MARKER_SCORE_THRESHOLD || spellFixOnly) {
+      let finalMarkdown = markdown;
+      let finalScore = mdScore;
+      let method = 'marker';
+
+      // Spell-fix: run if explicitly requested, or if score is decent but below excellence threshold
+      const apiKey = process.env.ANTHROPIC_API_KEY;
+      if (apiKey && (spellFixOnly || mdScore < SPELL_FIX_THRESHOLD)) {
+        try {
+          log(`Spell-fix: ${row.url} (marker score ${mdScore.toFixed(2)})`);
+          const result = await spellFixMarkdown(markdown, apiKey);
+          const fixedScore = scoreMarkdown(result.markdown);
+          if (fixedScore > mdScore) {
+            finalMarkdown = result.markdown;
+            finalScore = fixedScore;
+            method = 'marker+spell-fix';
+            log(`Spell-fix improved: ${mdScore.toFixed(2)} → ${fixedScore.toFixed(2)} cost=$${result.cost_usd.toFixed(4)}`);
+            const { logLlmCall, llmCost } = await import('../db.js');
+            logLlmCall(db, { stage: 'spell-fix', url: row.url, page_no: null, provider: 'claude', model: 'claude-haiku-4-5-20251001', tokens_in: result.tokens_in, tokens_out: result.tokens_out, cost_usd: result.cost_usd, ok: 1 });
+          }
+        } catch (sfErr) {
+          log(`Spell-fix failed (non-fatal): ${sfErr.message}`);
+        }
+      }
+
       db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, after_score=?, score_improvement=?, method=? WHERE url=?`)
-        .run(now(), mdScore, mdScore - (row.before_score||0), 'marker', row.url);
-      const newExcerpt = markdown.replace(/^---[\s\S]*?---\n/, '').slice(0, 800).trim();
+        .run(now(), finalScore, finalScore - (row.before_score||0), method, row.url);
+      const newExcerpt = finalMarkdown.replace(/^---[\s\S]*?---\n/, '').slice(0, 800).trim();
       db.prepare(`UPDATE pdf_quality SET excerpt=?, ai_summarized_at=NULL WHERE url=?`).run(newExcerpt, row.url);
-      logUpgradeHistory(db, row.url, { method: 'marker', score_before: row.before_score, score_after: mdScore });
-      log(`Done (marker): ${row.url} md-score=${mdScore.toFixed(2)}`);
+      // Save spell-fixed MD if it improved
+      if (finalMarkdown !== markdown) saveMarkerMd(db, domain, page, finalMarkdown);
+      logUpgradeHistory(db, row.url, { method, score_before: row.before_score, score_after: finalScore });
+      log(`Done (${method}): ${row.url} md-score=${finalScore.toFixed(2)}`);
+    } else if (spellFixOnly) {
+      // User only wanted spell-fix; marker quality too low for text extraction — mark failed
+      log(`Spell-fix only: marker quality ${mdScore.toFixed(2)} too low, image PDF? — marking failed`);
+      logUpgradeHistory(db, row.url, { method: 'marker+spell-fix', score_before: row.before_score, score_after: mdScore, error: 'insufficient text for spell-fix; use full OCR' });
+      db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
+        .run(now(), 'Text quality too low for spell-fix — try Full OCR upgrade instead', row.url);
     } else {
       log(`Marker quality ${mdScore.toFixed(2)} < ${MARKER_SCORE_THRESHOLD} for ${row.url} → pass 2`);
       logUpgradeHistory(db, row.url, { method: 'marker', score_before: row.before_score, score_after: mdScore, error: `quality ${mdScore.toFixed(2)} below threshold` });

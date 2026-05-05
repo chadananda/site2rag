@@ -176,6 +176,7 @@ const migrate = (db) => {
   // Multi-pass upgrade tracking
   addCol('pdf_upgrade_queue', 'pass', 'INT DEFAULT 1');
   addCol('pdf_upgrade_queue', 'marker_md_path', 'TEXT');
+  addCol('pdf_upgrade_queue', 'requested_method', 'TEXT'); // 'spell-fix' | 'ocr' | null (auto)
   // Fix readable_pages_pct stored as 0-100 instead of 0-1; recompute composite_score
   db.exec(`
     UPDATE pdf_quality
