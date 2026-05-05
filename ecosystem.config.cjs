@@ -55,7 +55,8 @@ module.exports = {
         REPORT_PORT: '7840',
         CORS_ORIGIN: 'https://site2rag.lnker.com',
         ANTHROPIC_API_KEY,
-        UPGRADE_REPORT_PATH: path.join(SITE2RAG_ROOT, 'report')
+        UPGRADE_REPORT_PATH: path.join(SITE2RAG_ROOT, 'report'),
+        PIPELINE_DB: path.join(SITE2RAG_ROOT, 'pipeline-jobs.db')
       },
       autorestart: true,
       watch: false,

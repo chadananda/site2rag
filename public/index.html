@@ -453,8 +453,10 @@ if ('serviceWorker' in navigator) {
                        x-text="docTitle(doc)"></a>
                     <!-- Status badge -->
                     <template x-if="doc.status==='processing'">
-                      <span class="shrink-0 flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
-                        <span class="status-dot bg-blue-500 processing-pulse"></span>processing
+                      <span class="shrink-0 flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full processing-pulse"
+                            :title="activityLabel(doc.url)">
+                        <span class="status-dot bg-blue-500"></span>
+                        <span x-text="activityLabel(doc.url)"></span>
                       </span>
                     </template>
                     <template x-if="doc.status==='failed'">
@@ -925,6 +927,7 @@ function app() {
     _sumRates: {},    // domain -> { value, rate, ts }
     crawlDisplay: {}, // domain -> interpolated crawled count for smooth bar
     _crawlRates: {},  // domain -> { value, rate, ts }
+    processingActivity: {}, // url -> { stage, pages_done, total_pages }
     expandedDoc: null,
     modalPage: 1,
     activeTab: 'original',
@@ -1083,6 +1086,7 @@ function app() {
       await this.checkVersion();
       await this.loadSites();
       setInterval(() => this.refresh(), 30000);
+      setInterval(() => this.pollActivity(), 5000);
       // Smooth interpolation ticker: advance sumDisplay at measured rate between refreshes
       setInterval(() => {
         const now = Date.now();
@@ -1196,6 +1200,25 @@ function app() {
     },
 
     selectedSiteData() { return this.sites.find(s => s.domain === this.activeSite?.domain); },
+
+    async pollActivity() {
+      if (!this.activeSite) return;
+      try {
+        const rows = await fetch(`${API_BASE}/api/sites/activity?site=${this.activeSite.domain}`).then(r => r.json());
+        const map = {};
+        for (const r of rows) map[r.url] = r;
+        this.processingActivity = map;
+      } catch {}
+    },
+
+    activityLabel(docUrl) {
+      const a = this.processingActivity[docUrl];
+      if (!a?.stage) return 'processing';
+      const labels = { s0:'scoring', s1:'preprocessing', s2:'classifying', s3:'OCR', s4:'escalating', s5:'vision', s6:'spell-fixing', s7:'rebuilding', s8:'exporting' };
+      const label = labels[a.stage] || a.stage;
+      if (a.stage === 's3' && a.total_pages > 0) return `${label} ${a.pages_done}/${a.total_pages}`;
+      return label;
+    },
 
     async refreshTabCounts() {
       if (!this.activeSite) return;

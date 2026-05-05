@@ -5,6 +5,7 @@ import { join, extname, dirname, resolve } from 'path';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
 import Anthropic from '@anthropic-ai/sdk';
+import Database from 'better-sqlite3';
 import { loadConfig, getMirrorRoot } from '../src/config.js';
 import { openDb, logLlmCall, llmCost } from '../src/db.js';
 import { detectLanguage } from '../src/language.js';
@@ -149,6 +150,25 @@ createServer(async (req, res) => {
       invalidateSitesCache();
       return json(res, { ok: true, boosted: n, domain });
     } finally { db.close(); }
+  }
+
+  if (path === '/api/sites/activity') {
+    const domain = url.searchParams.get('site');
+    if (!domain) return err(res, 400, 'site param required');
+    const pipelineDb = process.env.PIPELINE_DB;
+    if (!pipelineDb || !existsSync(pipelineDb)) return json(res, []);
+    try {
+      const pdb = new Database(pipelineDb, { readonly: true });
+      const rows = pdb.prepare(
+        `SELECT source_url, progress FROM jobs WHERE status='processing' AND source_url LIKE ?`
+      ).all(`%${domain}%`);
+      pdb.close();
+      const activity = rows.map(r => {
+        const p = r.progress ? JSON.parse(r.progress) : {};
+        return { url: r.source_url, stage: p.stage || null, pages_done: p.pages_affected || 0, total_pages: p.total_pages || 0 };
+      });
+      return json(res, activity);
+    } catch { return json(res, []); }
   }
 
   if (path === '/api/docs') {
