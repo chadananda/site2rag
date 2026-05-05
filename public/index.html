@@ -451,15 +451,21 @@ if ('serviceWorker' in navigator) {
                     <a :href="pdfSrc(doc)" target="_blank" rel="noopener" @click.stop
                        class="font-semibold text-sm text-gray-900 hover:text-blue-600 leading-snug line-clamp-2 flex-1"
                        x-text="docTitle(doc)"></a>
-                    <!-- Status badge -->
-                    <template x-if="doc.status==='processing'">
+                    <!-- Status badge: activity takes priority over status label -->
+                    <template x-if="processingActivity[doc.url]">
                       <span class="shrink-0 flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full processing-pulse"
                             :title="activityLabel(doc.url)">
                         <span class="status-dot bg-blue-500"></span>
                         <span x-text="activityLabel(doc.url)"></span>
                       </span>
                     </template>
-                    <template x-if="doc.status==='failed'">
+                    <template x-if="doc.status==='processing' && !processingActivity[doc.url]">
+                      <span class="shrink-0 flex items-center gap-1 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full processing-pulse">
+                        <span class="status-dot bg-blue-500"></span>
+                        <span>processing</span>
+                      </span>
+                    </template>
+                    <template x-if="doc.status==='failed' && !processingActivity[doc.url]">
                       <span class="shrink-0 text-xs font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full" title="Upgrade failed">✗ failed</span>
                     </template>
                     <template x-if="doc.status==='pending'">
@@ -1039,14 +1045,14 @@ function app() {
       const r = await this.adminFetch(upgradeUrl, { method: 'POST' }).catch(() => null);
       if (r?.ok) {
         const data = await r.json().catch(() => ({}));
-        doc.status = data.status || 'pending';
-        doc.error = null;
+        const newStatus = data.status || 'pending';
         const idx = this.docs.findIndex(d => d.url === doc.url);
-        if (idx >= 0) Object.assign(this.docs[idx], { status: doc.status, error: null });
-        if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
+        if (idx >= 0) this.docs[idx] = { ...this.docs[idx], status: newStatus, error: null, _upgrading: false };
+        if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...this.expandedDoc, status: newStatus, error: null };
+      } else {
+        const idx = this.docs.findIndex(d => d.url === doc.url);
+        if (idx >= 0) this.docs[idx] = { ...this.docs[idx], _upgrading: false };
       }
-      doc._upgrading = false;
-      if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
     },
 
     upgradeProgressLabel(s) {
