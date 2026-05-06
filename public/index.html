@@ -225,7 +225,6 @@ if ('serviceWorker' in navigator) {
           <template x-if="activeSite.total_docs > 0">
             <div><span class="font-bold mono text-gray-700" x-text="fmt(activeSite.total_docs)"></span><span class="text-gray-400 ml-1">docs</span></div>
           </template>
-          <div><span class="font-bold mono text-red-400" x-text="fmt(Math.max(0,(activeSite.total_pdfs||0)-(activeSite.upgraded||0)-(activeSite.already_ok||0)-(activeSite.processing||0)))"></span><span class="text-gray-400 ml-1">remain</span></div>
           <template x-if="activeSite.processing">
             <div><span class="font-bold mono text-blue-500 processing-pulse inline-block" x-text="fmt(activeSite.processing)"></span><span class="text-gray-400 ml-1">processing</span></div>
           </template>
