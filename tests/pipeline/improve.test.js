@@ -174,6 +174,22 @@ describe('analyzeRun — stage_value suggestion', () => {
     const s = db.prepare("SELECT * FROM improvement_suggestions WHERE category='stage_value'").get();
     expect(s).toBeFalsy();
   });
+
+  it('inserts stage_value suggestion for s5 (vision) with cost but no quality delta', () => {
+    const ctx = makeCtx();
+    ctx.sourceUrl = 'https://example.com/doc.pdf';
+    ctx.domain = { subject: 'legal', confidence: 0.8, source: 'pattern_match' };
+    ctx.setBaseline({ composite_score: 0.5 });
+    ctx.beginStage('s5');
+    ctx.endStage('s5', { cost_usd: 0.02, tokens_in: 500, tokens_out: 200 });
+    ctx.recordStageQuality('s5', 0.5); // no improvement
+
+    analyzeRun(ctx, db);
+
+    const s = db.prepare("SELECT * FROM improvement_suggestions WHERE category='stage_value'").get();
+    expect(s).toBeDefined();
+    expect(s.signal).toBe('s5_zero_delta');
+  });
 });
 
 describe('reviewSuggestions', () => {
@@ -207,6 +223,26 @@ describe('reviewSuggestions', () => {
     // 0 days back: no suggestions should appear (they were just written as 'now')
     // This is a timing edge case — just verify it returns the right shape
     expect(result.suggestions).toBeInstanceOf(Array);
+  });
+
+  it('unreviewed=true (default) filters out reviewed suggestions', () => {
+    const ctx = makeCtx();
+    ctx._gsNormalized = true;
+    ctx.sourceUrl = 'https://bahai-library.com/c.pdf';
+    ctx.domain = { subject: 'religious-texts', confidence: 0.9, source: 'pattern_match' };
+    analyzeRun(ctx, db);
+
+    // Mark all suggestions as reviewed
+    const all = db.prepare('SELECT id FROM improvement_suggestions').all();
+    markReviewed(db, all.map(r => r.id));
+
+    // unreviewed=true (default) should return empty suggestions
+    const result = reviewSuggestions(db);  // default unreviewed=true
+    expect(result.suggestions).toHaveLength(0);
+
+    // unreviewed=false should include the reviewed suggestions
+    const allResult = reviewSuggestions(db, { unreviewed: false });
+    expect(allResult.suggestions.length).toBeGreaterThan(0);
   });
 });
 
