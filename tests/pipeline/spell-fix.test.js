@@ -90,6 +90,28 @@ describe('spellFixWordObjects — prompt construction', () => {
     expect(sys).not.toContain('Vision B:');
   });
 
+  it('includes prevPageTail in system prompt', async () => {
+    await spellFixWordObjects([{ text: 'wrold' }], 'key', {
+      prevPageTail: 'the chapter ends here with important context',
+    });
+    const sys = createMock.mock.calls[0][0].system;
+    expect(sys).toContain('Previous page ends with');
+    expect(sys).toContain('the chapter ends here');
+  });
+
+  it('includes pageNo and totalPages when both provided', async () => {
+    await spellFixWordObjects([{ text: 'wrold' }], 'key', { pageNo: 3, totalPages: 12 });
+    const sys = createMock.mock.calls[0][0].system;
+    expect(sys).toContain('Page: 3 of 12');
+  });
+
+  it('includes only pageNo when totalPages not provided', async () => {
+    await spellFixWordObjects([{ text: 'wrold' }], 'key', { pageNo: 5 });
+    const sys = createMock.mock.calls[0][0].system;
+    expect(sys).toContain('Page: 5');
+    expect(sys).not.toContain('Page: 5 of');
+  });
+
   it('sends numbered word list in user message', async () => {
     await spellFixWordObjects([{ text: 'hello' }, { text: 'wrold' }], 'key', {});
     const userContent = createMock.mock.calls[0][0].messages[0].content;

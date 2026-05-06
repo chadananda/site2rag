@@ -117,6 +117,27 @@ describe('s4Escalate stage', () => {
     expect(dirtyWords.every(w => w.needs_vision === true)).toBe(true);
   });
 
+  it('skips pages with fewer than 3 dirty words in a large word set (low ratio)', async () => {
+    const ctx = makeCtx();
+    // 11 words total, only 2 dirty — ratio too low to escalate
+    const manyClean = Array.from({ length: 9 }, (_, i) =>
+      ({ text: `clean${i}`, conf: 95, x1: i*10, y1: 0, x2: i*10+8, y2: 10, source: 'tesseract', pageNo: 1 }));
+    const twoDirty = [
+      { text: 'bad1', conf: 15, x1: 100, y1: 0, x2: 120, y2: 10, source: 'tesseract', pageNo: 1 },
+      { text: 'bad2', conf: 20, x1: 130, y1: 0, x2: 150, y2: 10, source: 'tesseract', pageNo: 1 },
+    ];
+    ctx.pages = [{
+      pageNo: 1, _lang: 'eng',
+      words: [...manyClean, ...twoDirty],
+      regions: [], quality: {},
+      _bucketed: { clean: 9, fuzzy: 0, dirty: 2, needs_vision: 0 },
+    }];
+    await s4Escalate(ctx);
+    expect(execFile).not.toHaveBeenCalled();
+    // No decisions from s4 for this page
+    expect(ctx.metrics.decisions.filter(d => d.stage === 's4' && d.decision?.startsWith('page_'))).toHaveLength(0);
+  });
+
   it('skips when shouldRun returns false', async () => {
     shouldRun.mockReturnValue(false);
     const ctx = makeCtx();

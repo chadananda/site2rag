@@ -123,4 +123,57 @@ describe('PipelineContext', () => {
     expect(restored.quality.baseline.composite_score).toBe(0.4);
     expect(restored.pageCount).toBe(12);
   });
+
+  it('toReceipt cost_efficiency suggestion is high priority when cost > 0.10', () => {
+    const ctx = makeCtx();
+    ctx.beginStage('s5');
+    ctx.endStage('s5', { cost_usd: 0.15 });  // > $0.10
+    ctx.setBaseline({ composite_score: 0.5 });
+    ctx.quality.final = 0.51;  // near-zero gain
+    const r = ctx.toReceipt();
+    const costSuggestion = r.suggestions.find(s => s.category === 'cost_efficiency');
+    expect(costSuggestion?.priority).toBe('high');
+  });
+
+  it('toReceipt flags haiku_thin_signals domain source', () => {
+    const ctx = makeCtx();
+    ctx.domain = { source: 'haiku_thin_signals', subject: 'other' };
+    ctx.setBaseline({ composite_score: 0.3 });
+    ctx.quality.final = 0.3;
+    const r = ctx.toReceipt();
+    const modelSuggestion = r.suggestions.find(s => s.category === 'model_config');
+    expect(modelSuggestion).toBeDefined();
+    expect(modelSuggestion.suggestion).toContain('thin signals');
+  });
+
+  it('toReceipt assessment includes domain_context when set', () => {
+    const ctx = makeCtx();
+    ctx.domain = { subject: 'religious-texts', source: 'pattern_match' };
+    ctx.setBaseline({ composite_score: 0.3 });
+    ctx.quality.final = 0.3;
+    const r = ctx.toReceipt();
+    expect(r.assessment.domain_context).toBe('religious-texts');
+  });
+
+  it('toReceipt assessment doc_type is text_pdf when has_text_layer is 1', () => {
+    const ctx = makeCtx();
+    ctx.setBaseline({ composite_score: 0.9, has_text_layer: 1 });
+    ctx.quality.final = 0.9;
+    const r = ctx.toReceipt();
+    expect(r.assessment.doc_type).toBe('text_pdf');
+  });
+
+  it('toReceipt totals sum all stage costs', () => {
+    const ctx = makeCtx();
+    ctx.beginStage('s3');
+    ctx.endStage('s3', { cost_usd: 0.01, tokens_in: 100, tokens_out: 50 });
+    ctx.beginStage('s6');
+    ctx.endStage('s6', { cost_usd: 0.005, tokens_in: 200, tokens_out: 100 });
+    ctx.setBaseline({ composite_score: 0.3 });
+    ctx.quality.final = 0.7;
+    const r = ctx.toReceipt();
+    expect(r.totals.cost_usd).toBeCloseTo(0.015, 4);
+    expect(r.totals.tokens_in).toBe(300);
+    expect(r.totals.tokens_out).toBe(150);
+  });
 });

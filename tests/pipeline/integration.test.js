@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
 import { makeTempDir, makeTextPdf, makeCtx } from './helpers.js';
-import { runPipeline, runStage, STAGES } from '../../src/pipeline/index.js';
+import { runPipeline, runStage, STAGES, buildSystemPrompt } from '../../src/pipeline/index.js';
 import { PipelineContext } from '../../src/pipeline/context.js';
 
 // Integration tests: run the full pipeline on real fixtures (no mocks)
@@ -145,6 +145,26 @@ describe('runStage — integration', () => {
   it('throws for unknown stage names', async () => {
     const ctx = makeCtx();
     await expect(runStage('s99', ctx)).rejects.toThrow('Unknown stage');
+  });
+});
+
+describe('buildSystemPrompt', () => {
+  it('prepends domain context when ctx.domain.prompt_context is set', () => {
+    const ctx = makeCtx();
+    ctx.domain = { prompt_context: 'Expert OCR for Bahá\'í manuscripts.' };
+    const result = buildSystemPrompt('Fix spelling.', ctx);
+    expect(result).toContain('Expert OCR');
+    expect(result).toContain('Fix spelling.');
+    expect(result.indexOf('Expert')).toBeLessThan(result.indexOf('Fix'));
+  });
+
+  it('returns stageInstructions unchanged when no domain context', () => {
+    const ctx = makeCtx();
+    expect(buildSystemPrompt('Fix spelling.', ctx)).toBe('Fix spelling.');
+  });
+
+  it('handles null ctx without throwing', () => {
+    expect(buildSystemPrompt('Fix spelling.', null)).toBe('Fix spelling.');
   });
 });
 

@@ -301,4 +301,40 @@ describe('s6SpellFix — contract', () => {
     expect(ctxArg.pageNo).toBe(2);
     expect(ctxArg.totalPages).toBe(5);
   });
+
+  it('records quality.perStage.s6 when pages were fixed', async () => {
+    const ctx = makeCtx({ config: { apiKey: 'test-key' } });
+    ctx.quality.baseline = { composite_score: 0.6 };
+    ctx.quality.perStage['s3'] = 0.6;
+    ctx.pages = [{
+      pageNo: 1,
+      words: [{ text: 'wrold', conf: 72, x1: 0, y1: 0, x2: 40, y2: 10, source: 'ocr', pageNo: 1 }],
+      regions: [], quality: {},
+    }];
+    spellFixWordObjects.mockResolvedValue({
+      words: [{ text: 'world', conf: 72, x1: 0, y1: 0, x2: 40, y2: 10, _srcIdx: 0 }],
+      tokens_in: 5, tokens_out: 3, cost_usd: 0.0001,
+    });
+
+    await s6SpellFix(ctx);
+
+    expect(ctx.quality.perStage['s6']).toBeDefined();
+    expect(ctx.quality.perStage['s6']).toBeGreaterThan(0.6);
+  });
+
+  it('does NOT record quality.perStage.s6 when no pages were fixed', async () => {
+    const ctx = makeCtx({ config: { apiKey: 'test-key' } });
+    ctx.quality.baseline = { composite_score: 0.6 };
+    ctx.pages = [{
+      pageNo: 1,
+      words: [
+        { text: 'good', conf: 95, x1: 0, y1: 0, x2: 40, y2: 10, source: 'ocr', pageNo: 1 },
+      ],
+      regions: [], quality: {},
+    }];
+
+    await s6SpellFix(ctx);
+
+    expect(ctx.quality.perStage['s6']).toBeUndefined();
+  });
 });

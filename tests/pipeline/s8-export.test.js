@@ -100,6 +100,50 @@ describe('s8Export — no bbox words fallback', () => {
   });
 });
 
+describe('s8Export — visionMd path', () => {
+  it('uses page.visionMd instead of bbox words when visionMd is set', async () => {
+    const pdfPath = join(tempDir, 'doc.pdf');
+    writeFileSync(pdfPath, makeTextPdf());
+    const ctx = makeCtx({ dir: tempDir, pdfPath });
+    ctx.pages = [{
+      pageNo: 1,
+      visionMd: '# Title\n\nSome vision content here.',
+      words: [{ text: 'ignored', conf: 95, x1: 0, y1: 0, x2: 50, y2: 10, source: 'ocr', pageNo: 1 }],
+      regions: [], quality: {},
+    }];
+    await s8Export(ctx);
+    const md = readFileSync(ctx.outputs.mdPath, 'utf8');
+    expect(md).toContain('Some vision content here.');
+    expect(md).not.toContain('ignored');
+  });
+
+  it('mixes vision and bbox pages correctly', async () => {
+    const pdfPath = join(tempDir, 'doc.pdf');
+    writeFileSync(pdfPath, makeTextPdf());
+    const ctx = makeCtx({ dir: tempDir, pdfPath });
+    ctx.pages = [
+      { pageNo: 1, visionMd: 'Vision page one.', words: [], regions: [], quality: {} },
+      makePageWords(2, [{ text: 'BboxWord', x1: 10, y1: 10, x2: 80, y2: 25 }]),
+    ];
+    await s8Export(ctx);
+    const md = readFileSync(ctx.outputs.mdPath, 'utf8');
+    expect(md).toContain('Vision page one.');
+    expect(md).toContain('BboxWord');
+    expect(md).toContain('<!-- p.1 -->');
+    expect(md).toContain('<!-- p.2 -->');
+  });
+
+  it('records quality.perStage.s8 when pages have content', async () => {
+    const pdfPath = join(tempDir, 'doc.pdf');
+    writeFileSync(pdfPath, makeTextPdf());
+    const ctx = makeCtx({ dir: tempDir, pdfPath });
+    ctx.pages = [makePageWords(1, [{ text: 'Hello', conf: 95, x1: 10, y1: 10, x2: 60, y2: 25 }])];
+    await s8Export(ctx);
+    expect(ctx.quality.perStage['s8']).toBeDefined();
+    expect(ctx.quality.perStage['s8']).toBeGreaterThan(0);
+  });
+});
+
 describe('s8Export — skip logic', () => {
   it('skips when shouldRun returns false', async () => {
     const pdfPath = join(tempDir, 'doc.pdf');
