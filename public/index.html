@@ -464,12 +464,15 @@ if ('serviceWorker' in navigator) {
                     <a :href="pdfSrc(doc)" target="_blank" rel="noopener" @click.stop
                        class="font-semibold text-sm text-gray-900 hover:text-blue-600 leading-snug line-clamp-2 flex-1"
                        x-text="docTitle(doc)"></a>
-                    <!-- Status badge: compact pill when processing, simple otherwise -->
+                    <!-- Status badge -->
                     <template x-if="activityLabel(doc.url)">
                       <span class="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
                         <span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 processing-pulse shrink-0"></span>
-                        <span x-text="processingActivity[doc.url]?.stage && processingActivity[doc.url]?.stage !== 'queued' ? 'processing' : activityLabel(doc.url)"></span>
+                        <span x-text="'processing'"></span>
                       </span>
+                    </template>
+                    <template x-if="doc.status==='submitted' && !activityLabel(doc.url)">
+                      <span class="shrink-0 text-xs font-semibold text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-full">in queue</span>
                     </template>
                     <template x-if="doc.status==='failed' && !activityLabel(doc.url)">
                       <span class="shrink-0 text-xs font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full" title="Upgrade failed">✗ failed</span>
@@ -556,7 +559,28 @@ if ('serviceWorker' in navigator) {
                     </div>
                   </template>
 
-                  <!-- Upgraded tab: full report panel -->
+                  <!-- Queued panel: submitted to pipeline, waiting -->
+                  <template x-if="activeTab==='upgraded' && doc.status==='submitted'">
+                    <div class="mt-2 rounded-lg border border-indigo-100 bg-indigo-50/30 px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 items-center">
+                      <span class="font-semibold px-2 py-0.5 rounded-full"
+                            :class="doc.pdf_type==='image' ? 'bg-amber-100 text-amber-800' : doc.pdf_type==='mixed' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'"
+                            x-text="doc.pdf_type==='image' ? 'Image PDF' : doc.pdf_type==='mixed' ? 'Mixed PDF' : 'Text PDF'"></span>
+                      <template x-if="doc.effective_before != null">
+                        <span><span class="text-gray-400">score before</span> <span class="score-pill font-mono ml-1" :class="scorePillCls(doc.effective_before)" x-text="Math.round(doc.effective_before*100)+'%'"></span></span>
+                      </template>
+                      <template x-if="doc.pages">
+                        <span class="text-gray-500 font-mono"><span x-text="fmt(doc.pages)"></span> pp</span>
+                      </template>
+                      <template x-if="doc.ai_language && doc.lang_key !== 'english' && doc.lang_key !== 'unknown'">
+                        <span class="text-gray-400" x-text="doc.ai_language"></span>
+                      </template>
+                      <template x-if="doc.queued_at">
+                        <span class="text-indigo-400 ml-auto">queued <span x-text="relTime(doc.queued_at)"></span></span>
+                      </template>
+                    </div>
+                  </template>
+
+                  <!-- Upgraded tab: full report panel for done docs -->
                   <template x-if="activeTab==='upgraded' && doc.status==='done'">
                     <div class="mt-2 rounded-lg border border-green-200 bg-white overflow-hidden text-xs">
                       <!-- Header row: PDF type + score trail -->
@@ -569,33 +593,39 @@ if ('serviceWorker' in navigator) {
                         <template x-if="doc.readable_pages_pct != null">
                           <span class="text-gray-500" x-text="Math.round(doc.readable_pages_pct*100)+'% readable before'"></span>
                         </template>
-                        <!-- Score: before → after + improvement -->
-                        <template x-if="doc.effective_after != null">
-                          <span class="ml-auto flex items-center gap-1.5 font-mono">
-                            <template x-if="doc.effective_before != null">
-                              <span class="score-pill" :class="scorePillCls(doc.effective_before)" x-text="Math.round(doc.effective_before*100)+'%'"></span>
-                            </template>
-                            <template x-if="doc.effective_before != null"><span class="text-gray-300">›</span></template>
+                        <!-- Score: before → after + improvement (or just before if no after yet) -->
+                        <span class="ml-auto flex items-center gap-1.5 font-mono">
+                          <template x-if="doc.effective_before != null">
+                            <span class="score-pill" :class="scorePillCls(doc.effective_before)" x-text="Math.round(doc.effective_before*100)+'%'"></span>
+                          </template>
+                          <template x-if="doc.effective_after != null">
+                            <span class="text-gray-300">›</span>
                             <span class="score-pill bg-green-100 text-green-800 font-bold" x-text="Math.round(doc.effective_after*100)+'%'"></span>
                             <template x-if="doc.effective_improvement > 0.01">
                               <span class="text-green-700 font-bold" x-text="'+'+Math.round(doc.effective_improvement*100)+'pts'"></span>
                             </template>
-                          </span>
-                        </template>
+                          </template>
+                        </span>
                       </div>
-                      <!-- Processing details row -->
+                      <!-- Processing details row — always show pages + time, method if known -->
                       <div class="px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 text-gray-600 border-b border-gray-100">
                         <template x-if="doc.method">
                           <span><span class="text-gray-400">method</span> <span class="font-semibold text-gray-700" x-text="methodLabel(doc.method)"></span></span>
                         </template>
                         <template x-if="doc.pages_processed">
-                          <span><span class="font-semibold text-gray-700 mono" x-text="fmt(doc.pages_processed)"></span><span class="text-gray-400"> / <span x-text="fmt(doc.pages)"></span> pages OCR'd</span></span>
+                          <span><span class="font-semibold text-gray-700 mono" x-text="fmt(doc.pages_processed)"></span><span class="text-gray-400"> / <span x-text="fmt(doc.pages)"></span> pp OCR'd</span></span>
+                        </template>
+                        <template x-if="!doc.pages_processed && doc.pages">
+                          <span class="text-gray-500 mono"><span x-text="fmt(doc.pages)"></span> pages</span>
                         </template>
                         <template x-if="doc.word_quality_estimate != null">
                           <span><span class="text-gray-400">word quality</span> <span class="font-semibold text-gray-700" x-text="Math.round(doc.word_quality_estimate*100)+'%'"></span></span>
                         </template>
+                        <template x-if="doc.ai_language && doc.lang_key !== 'english' && doc.lang_key !== 'unknown'">
+                          <span class="text-gray-500" x-text="doc.ai_language"></span>
+                        </template>
                         <template x-if="doc.finished_at">
-                          <span class="text-gray-400" x-text="relTime(doc.finished_at)"></span>
+                          <span class="text-gray-400 ml-auto" x-text="relTime(doc.finished_at)"></span>
                         </template>
                       </div>
                       <!-- Attempt history (only if > 1 attempt) -->
