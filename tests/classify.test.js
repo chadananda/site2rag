@@ -72,6 +72,33 @@ describe('runClassify', () => {
     expect(row.page_role).not.toBe('host_page');
     expect(row.page_role).toBe('content');
   });
+  it('classifies host_page when few words and multiple PDF links', async () => {
+    const path = join(tmpDir, 'host.html');
+    const pdfLinks = Array(5).fill(0).map((_, i) =>
+      `<a href="https://classify.example.com/doc${i}.pdf">Report Document ${i}</a>`
+    ).join('\n');
+    writeFileSync(path, pageHtml(`<p>Document index.</p>${pdfLinks}`, 'Document Repository'));
+    db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone) VALUES (?,?,?,?,?)')
+      .run('https://classify.example.com/host', 'host', path, 'text/html', 0);
+    for (let i = 0; i < 5; i++) {
+      db.prepare('INSERT OR IGNORE INTO pages (url, path_slug, mime_type, gone) VALUES (?,?,?,?)')
+        .run(`https://classify.example.com/doc${i}.pdf`, `doc${i}`, 'application/pdf', 0);
+    }
+    await runClassify(db, { domain: DOMAIN, classify: { word_threshold: 200 } });
+    const row = db.prepare('SELECT page_role FROM pages WHERE url=?').get('https://classify.example.com/host');
+    expect(row.page_role).toBe('host_page');
+  });
+
+  it('skips pages already classified by heuristic (classify_method=heuristic)', async () => {
+    const path = join(tmpDir, 'already.html');
+    const body = Array(50).fill('<p>Content text here.</p>').join('');
+    writeFileSync(path, pageHtml(body, 'Already Classified'));
+    db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone, page_role, classify_method) VALUES (?,?,?,?,?,?,?)')
+      .run('https://classify.example.com/already', 'already', path, 'text/html', 0, 'content', 'heuristic');
+    const stats = await runClassify(db, { domain: DOMAIN, classify: { word_threshold: 200 } });
+    expect(stats.classified).toBe(0);
+  });
+
   it('content selector that matches nothing falls back to body/readability', async () => {
     const path = join(tmpDir, 'fallback.html');
     const body = Array(30).fill('<p>This is content text for the fallback article with lots of words.</p>').join('');
