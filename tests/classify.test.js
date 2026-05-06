@@ -47,6 +47,24 @@ describe('runClassify', () => {
     expect(row.classify_method).toBe('rules');
     expect(stats.rule_overrides).toBe(1);
   });
+  it('rule override of host_page also populates hosts table', async () => {
+    const path = join(tmpDir, 'hostoverride.html');
+    const pdfLinks = Array(3).fill(0).map((_, i) =>
+      `<a href="https://classify.example.com/forced${i}.pdf">Forced Doc ${i}</a>`
+    ).join('\n');
+    writeFileSync(path, pageHtml(`<p>Host override test.</p>${pdfLinks}`, 'Host Override'));
+    db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone) VALUES (?,?,?,?,?)')
+      .run('https://classify.example.com/hostoverride', 'hostoverride', path, 'text/html', 0);
+    await runClassify(db, {
+      domain: DOMAIN,
+      classify: { word_threshold: 200 },
+      rules: { classify_overrides: [{ pattern: '/hostoverride', role: 'host_page' }] }
+    });
+    const row = db.prepare('SELECT page_role FROM pages WHERE url=?').get('https://classify.example.com/hostoverride');
+    expect(row.page_role).toBe('host_page');
+    const hosts = db.prepare('SELECT * FROM hosts WHERE host_url=?').all('https://classify.example.com/hostoverride');
+    expect(hosts.length).toBeGreaterThan(0);
+  });
   it('page with wc=0 (empty body) is classified as redirect', async () => {
     const path = join(tmpDir, 'empty.html');
     writeFileSync(path, pageHtml('', 'Empty'));

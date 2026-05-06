@@ -65,4 +65,22 @@ describe('stripQueryParams', () => {
     const url = 'https://example.com/page?foo=bar';
     expect(stripQueryParams(compiled, url)).toBe(url);
   });
+  it('returns URL unchanged when strip list has no matching params', () => {
+    const compiled = compileRules({ canonical_strip_query: ['utm_source'] });
+    const url = 'https://example.com/page?id=5&category=news';
+    expect(stripQueryParams(compiled, url)).toContain('id=5');
+    expect(stripQueryParams(compiled, url)).toContain('category=news');
+  });
+  it('URL with no query string returns unchanged', () => {
+    const compiled = compileRules({ canonical_strip_query: ['utm_source'] });
+    const url = 'https://example.com/page';
+    expect(stripQueryParams(compiled, url)).toBe(url);
+  });
+});
+
+describe('applyFollowOverride', () => {
+  it('returns true for follow:true pattern match', () => {
+    const compiled = compileRules({ follow_overrides: [{ pattern: '/docs/.*', follow: true }] });
+    expect(applyFollowOverride(compiled, 'https://example.com/docs/guide')).toBe(true);
+  });
 });

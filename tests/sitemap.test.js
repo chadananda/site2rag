@@ -166,6 +166,20 @@ describe('runSitemap', () => {
     expect(result.total).toBe(0);
     expect(result.added).toHaveLength(0);
   });
+
+  it('discovers sitemap from /sitemap.xml fallback when robots.txt has no Sitemap line', async () => {
+    mockFetch({
+      [`${SITE_URL}/robots.txt`]: 'User-agent: *\nDisallow: /private/',  // no Sitemap: line
+      [`${SITE_URL}/sitemap.xml`]: sitemapXml([
+        { url: `${SITE_URL}/fallback-page`, lastmod: '2024-03-01' },
+      ]),
+      '*': ''
+    });
+
+    const result = await runSitemap(db, { url: SITE_URL, domain: DOMAIN });
+    expect(result.added).toContain(`${SITE_URL}/fallback-page`);
+    expect(result.total).toBeGreaterThanOrEqual(1);
+  });
 });
 describe('parseSitemapXml', () => {
   it('malformed XML returns empty array with type=empty, no throw', () => {
