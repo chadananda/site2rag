@@ -193,4 +193,33 @@ describe('analytics — privacy contract', () => {
     // Should resolve without throwing
     await expect(writeAnalytics(ctx, dbPath)).resolves.toBeUndefined();
   });
+
+  it('classifies doc_type as text_pdf when has_text_layer=1 and readable_pages_pct > 0.7', async () => {
+    const ctx = makeCtx();
+    ctx.sourceUrl = 'https://example.com/doc.pdf';
+    ctx.quality.baseline = { composite_score: 0.8, has_text_layer: 1, readable_pages_pct: 0.9 };
+    ctx.quality.final = 0.9;
+
+    await writeAnalytics(ctx, dbPath);
+
+    const db = await openAnalyticsDb(dbPath);
+    const row = db.prepare('SELECT doc_type FROM pipeline_runs').get();
+    db.close();
+    expect(row.doc_type).toBe('text_pdf');
+  });
+
+  it('classifies doc_type as mixed when has_text_layer=1 but readable_pages_pct is low', async () => {
+    const ctx = makeCtx();
+    ctx.sourceUrl = 'https://example.com/doc.pdf';
+    ctx.quality.baseline = { composite_score: 0.4, has_text_layer: 1, readable_pages_pct: 0.3 };
+    ctx.quality.final = 0.5;
+
+    await writeAnalytics(ctx, dbPath);
+
+    const db = await openAnalyticsDb(dbPath);
+    const row = db.prepare('SELECT doc_type FROM pipeline_runs').get();
+    db.close();
+    // has_text_layer=1 but readable_pages_pct <= 0.7 → 'mixed'
+    expect(row.doc_type).toBe('mixed');
+  });
 });
