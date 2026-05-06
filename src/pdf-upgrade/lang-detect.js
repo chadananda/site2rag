@@ -23,9 +23,11 @@ const saveAndReprioritize = (db, url, langKey, topic) => {
   }
   const queueRow = db.prepare("SELECT priority FROM pdf_upgrade_queue WHERE url=? AND status='pending'").get(url);
   if (queueRow) {
-    const score = db.prepare('SELECT composite_score FROM pdf_quality WHERE url=?').get(url)?.composite_score ?? 0.5;
+    const row = db.prepare('SELECT composite_score, has_text_layer FROM pdf_quality WHERE url=?').get(url);
+    const score = row?.composite_score ?? 0.5;
+    const textBoost = row?.has_text_layer ? 100 : 1;
     const mult = LANG_PRIORITY[langKey] ?? LANG_PRIORITY.unknown;
-    db.prepare('UPDATE pdf_upgrade_queue SET priority=? WHERE url=?').run((1 - score) * mult, url);
+    db.prepare('UPDATE pdf_upgrade_queue SET priority=? WHERE url=?').run(textBoost * (1 - score) * mult, url);
   }
 };
 
@@ -47,7 +49,8 @@ export const detectLanguageForImagePdfs = async (db, domain) => {
     LEFT JOIN pages hp ON h.host_url=hp.url
     LEFT JOIN pages p ON pq.url=p.url
     WHERE (pq.ai_language IS NULL OR pq.ai_language='unknown'
-      OR (pq.ai_language='english' AND pq.readable_pages_pct < 0.4 AND pq.word_quality_estimate < 0.5))
+      OR (pq.ai_language='english' AND pq.readable_pages_pct < 0.4 AND pq.word_quality_estimate < 0.5)
+      OR (pq.ai_language='english' AND pq.has_text_layer=1 AND (pq.word_quality_estimate IS NULL OR pq.word_quality_estimate < 0.05)))
     LIMIT ?`).all(FREE_BATCH);
 
   let freeDetected = 0;
@@ -80,7 +83,10 @@ export const detectLanguageForImagePdfs = async (db, domain) => {
   }
   if (freeDetected) log(`Lang free scan: ${freeDetected}/${freeRows.length} identified`);
 
-  // Stage 2 — Tesseract+Haiku identify pipeline for image PDFs still unknown
+  // Stage 2 — Tesseract+Haiku identify pipeline for unknowns + garbled text-layer PDFs
+  // Garbled text-layer: has_text_layer=1 but word_quality<0.05 means custom font encoding —
+  // pdf-parse extracted garbage Latin, making detectLanguage() call it 'english'. Tesseract OSD
+  // on rendered page images is the only reliable way to detect the actual script.
   const identifyRows = db.prepare(`
     SELECT pq.url, pq.pdf_title, pq.excerpt,
            h.hosted_title, hp.local_path as host_local_path, p.local_path
@@ -89,7 +95,8 @@ export const detectLanguageForImagePdfs = async (db, domain) => {
     LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title FROM hosts GROUP BY hosted_url) h ON pq.url=h.hosted_url
     LEFT JOIN pages hp ON h.host_url=hp.url
     WHERE pq.ai_language='unknown'
-      AND (pq.has_text_layer=0 OR pq.has_text_layer IS NULL)
+      AND (pq.has_text_layer=0 OR pq.has_text_layer IS NULL
+           OR (pq.has_text_layer=1 AND (pq.word_quality_estimate IS NULL OR pq.word_quality_estimate < 0.05)))
       AND p.local_path IS NOT NULL
     ORDER BY COALESCE((SELECT priority FROM pdf_upgrade_queue WHERE url=pq.url), 0) DESC
     LIMIT ?`).all(IDENTIFY_BATCH);

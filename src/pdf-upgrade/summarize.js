@@ -31,9 +31,8 @@ export const summarizeTopPending = async (db, domain) => {
 
   const summarizeOne = async (row) => {
     try {
-      const title = row.hosted_title || row.pdf_title || null;
       if (!row.ai_language || row.ai_language === 'unknown') {
-        const sample = [title, row.excerpt].filter(Boolean).join(' ');
+        const sample = [row.hosted_title, row.pdf_title, row.excerpt].filter(Boolean).join(' ');
         const detected = detectLanguage(sample);
         if (detected && detected !== 'unknown') {
           db.prepare('UPDATE pdf_quality SET ai_language=? WHERE url=?').run(detected, row.url);
@@ -43,32 +42,57 @@ export const summarizeTopPending = async (db, domain) => {
           }
         }
       }
+
+      // Build slug from URL as last-resort title signal
       const slug = row.url.split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ').trim();
-      const displayTitle = title || (slug.length > 3 && !/^\d+$/.test(slug.trim()) ? slug : null);
-      if (!displayTitle && !row.excerpt && !row.source_url) {
+      const slugTitle = (slug.length > 3 && !/^\d+$/.test(slug)) ? slug : null;
+
+      const signals = [
+        row.url && `URL: ${row.url}`,
+        row.source_url && `Source page: ${row.source_url}`,
+        row.hosted_title && `Anchor text on source page: ${row.hosted_title}`,
+        row.pdf_title && `PDF internal title: ${row.pdf_title}`,
+        slugTitle && `URL slug: ${slugTitle}`,
+        row.excerpt && `Text excerpt: ${row.excerpt.slice(0, 600)}`
+      ].filter(Boolean).join('\n');
+
+      if (!signals) {
         db.prepare('UPDATE pdf_quality SET ai_summarized_at=? WHERE url=?').run(new Date().toISOString(), row.url);
         done++; return;
       }
-      const prompt = `Metadata for a PDF document:\n${[
-        displayTitle && `Title: ${displayTitle}`,
-        `URL: ${row.url}`,
-        row.source_url && `Source page: ${row.source_url}`,
-        row.excerpt && `Excerpt: ${row.excerpt.slice(0, 500)}`
-      ].filter(Boolean).join('\n')}\n\nRespond with exactly three plain-text lines (no markdown, no numbering):\nLine 1: one sentence describing this document.\nLine 2: Author: [full name, or Unknown]\nLine 3: Title: [the real document title, not a filename or generic phrase]`;
+
+      const prompt = `You are a librarian cataloging a PDF document. Given these raw signals, extract clean metadata.
+
+${signals}
+
+Respond with exactly four lines, no markdown, no numbering, no brackets or qualifications:
+Line 1 — Title: [best possible title — infer from all signals combined; never append "[full title not available]" or similar; never use a filename or generic phrase like "download pdf", "scan of the original"; commit to your best guess]
+Line 2 — Author: [full name(s), or Unknown]
+Line 3 — Description: [one sentence describing what this document is about]
+Line 4 — Keywords: [3-6 comma-separated topic keywords]`;
+
       const msg = await client.messages.create({
-        model: HAIKU_MODEL, max_tokens: 150,
+        model: HAIKU_MODEL, max_tokens: 200,
         messages: [{ role: 'user', content: prompt }]
       });
       logLlmCall(db, { stage: 'summarize', url: row.url, page_no: null, provider: 'claude', model: HAIKU_MODEL, tokens_in: msg.usage?.input_tokens || 0, tokens_out: msg.usage?.output_tokens || 0, cost_usd: llmCost(HAIKU_MODEL, msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0), ok: 1 });
+
       const text = msg.content[0]?.text || '';
       const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
-      const summary = lines[0] || null;
-      const authorLine = lines.find(l => l.toLowerCase().startsWith('author:'));
-      const author = authorLine ? authorLine.replace(/^author:\s*/i, '').trim() : null;
-      const titleLine = lines.find(l => l.toLowerCase().startsWith('title:'));
-      const aiTitle = titleLine ? titleLine.replace(/^title:\s*/i, '').trim() : null;
+
+      const extract = (prefix) => {
+        const line = lines.find(l => l.toLowerCase().startsWith(prefix.toLowerCase()));
+        return line ? line.slice(prefix.length).trim() : null;
+      };
+
+      const stripBrackets = (s) => s ? s.replace(/\s*\[[^\]]*\]\s*/g, ' ').trim() : null;
+      const aiTitle = stripBrackets(extract('Title:'));
+      const author = extract('Author:');
+      const summary = extract('Description:');
+      const keywords = extract('Keywords:');
+
       db.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_title=?, summary_tier=?, ai_summarized_at=? WHERE url=?')
-        .run(summary, author, aiTitle, 'haiku', new Date().toISOString(), row.url);
+        .run(summary, author === 'Unknown' ? null : author, aiTitle, 'haiku', new Date().toISOString(), row.url);
       done++;
     } catch (e) {
       log(`summarize failed: ${row.url}: ${e.message}`);

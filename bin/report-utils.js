@@ -73,6 +73,17 @@ export const mapDoc = (d, domain) => {
   const score_trail = history.length > 0
     ? [history[0].score_before, ...history.map(h => h.score_after)].filter(x => x != null)
     : [];
+  // PDF type classification from pre-upgrade signals
+  const hasTextLayer = d.has_text_layer === 1;
+  const readablePctRaw = d.readable_pages_pct ?? null;
+  // image = no text layer at all; mixed = has text layer but low readability; text = good text layer
+  const pdf_type = !hasTextLayer ? 'image'
+    : (readablePctRaw != null && readablePctRaw < 0.4) ? 'mixed'
+    : 'text';
+  // Effective before/after scores: use composite_score as before if before_score is null
+  const effective_before = d.before_score ?? d.composite_score ?? null;
+  const effective_after = d.after_score != null ? Math.min(d.after_score, 1) : null;
+  const effective_improvement = (effective_before != null && effective_after != null) ? effective_after - effective_before : null;
 
   // Cost estimates for upgrade options
   const avgChars = d.avg_chars_per_page || 1500;
@@ -88,6 +99,11 @@ export const mapDoc = (d, domain) => {
     lang_key: langKey,
     effort_mins,
     score_trail,
+    upgrade_history_parsed: history,
+    pdf_type,
+    effective_before,
+    effective_after,
+    effective_improvement,
     spell_fix_cost_usd,
     vision_cost_usd,
     archive_url: d.status === 'done' && d.upgraded_pdf_path

@@ -556,49 +556,77 @@ if ('serviceWorker' in navigator) {
                     </div>
                   </template>
 
-                  <!-- Upgraded tab: full improvement panel -->
+                  <!-- Upgraded tab: full report panel -->
                   <template x-if="activeTab==='upgraded' && doc.status==='done'">
-                    <div class="mt-1 mb-1 space-y-1.5">
-                      <!-- Score trail: 0% > 12% > 48% > 87% -->
-                      <template x-if="doc.after_score!=null">
-                        <div class="flex items-center gap-1.5 flex-wrap">
-                          <template x-if="doc.score_improvement">
-                            <span class="text-sm font-bold text-green-600 mono" x-text="'+'+Math.round(doc.score_improvement*100)+'pts'"></span>
-                          </template>
-                          <template x-if="doc.score_trail && doc.score_trail.length > 1">
-                            <span class="flex items-center gap-1 flex-wrap text-xs mono">
-                              <template x-for="(s, i) in doc.score_trail" :key="i">
-                                <span class="flex items-center gap-1">
-                                  <template x-if="i > 0"><span class="text-gray-300">›</span></template>
-                                  <span class="score-pill text-xs" :class="i===doc.score_trail.length-1 ? 'bg-green-100 text-green-800 font-bold' : scorePillCls(s)" x-text="Math.round(s*100)+'%'"></span>
+                    <div class="mt-2 rounded-lg border border-green-200 bg-white overflow-hidden text-xs">
+                      <!-- Header row: PDF type + score trail -->
+                      <div class="flex items-center gap-2 px-3 py-2 bg-green-50 border-b border-green-100 flex-wrap">
+                        <!-- PDF type badge -->
+                        <span class="font-semibold px-2 py-0.5 rounded-full"
+                              :class="doc.pdf_type==='image' ? 'bg-amber-100 text-amber-800' : doc.pdf_type==='mixed' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'"
+                              x-text="doc.pdf_type==='image' ? 'Image PDF' : doc.pdf_type==='mixed' ? 'Mixed PDF' : 'Text PDF'"></span>
+                        <!-- Readable pages before -->
+                        <template x-if="doc.readable_pages_pct != null">
+                          <span class="text-gray-500" x-text="Math.round(doc.readable_pages_pct*100)+'% readable before'"></span>
+                        </template>
+                        <!-- Score: before → after + improvement -->
+                        <template x-if="doc.effective_after != null">
+                          <span class="ml-auto flex items-center gap-1.5 font-mono">
+                            <template x-if="doc.effective_before != null">
+                              <span class="score-pill" :class="scorePillCls(doc.effective_before)" x-text="Math.round(doc.effective_before*100)+'%'"></span>
+                            </template>
+                            <template x-if="doc.effective_before != null"><span class="text-gray-300">›</span></template>
+                            <span class="score-pill bg-green-100 text-green-800 font-bold" x-text="Math.round(doc.effective_after*100)+'%'"></span>
+                            <template x-if="doc.effective_improvement > 0.01">
+                              <span class="text-green-700 font-bold" x-text="'+'+Math.round(doc.effective_improvement*100)+'pts'"></span>
+                            </template>
+                          </span>
+                        </template>
+                      </div>
+                      <!-- Processing details row -->
+                      <div class="px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 text-gray-600 border-b border-gray-100">
+                        <template x-if="doc.method">
+                          <span><span class="text-gray-400">method</span> <span class="font-semibold text-gray-700" x-text="methodLabel(doc.method)"></span></span>
+                        </template>
+                        <template x-if="doc.pages_processed">
+                          <span><span class="font-semibold text-gray-700 mono" x-text="fmt(doc.pages_processed)"></span><span class="text-gray-400"> / <span x-text="fmt(doc.pages)"></span> pages OCR'd</span></span>
+                        </template>
+                        <template x-if="doc.word_quality_estimate != null">
+                          <span><span class="text-gray-400">word quality</span> <span class="font-semibold text-gray-700" x-text="Math.round(doc.word_quality_estimate*100)+'%'"></span></span>
+                        </template>
+                        <template x-if="doc.finished_at">
+                          <span class="text-gray-400" x-text="relTime(doc.finished_at)"></span>
+                        </template>
+                      </div>
+                      <!-- Attempt history (only if > 1 attempt) -->
+                      <template x-if="doc.upgrade_history_parsed && doc.upgrade_history_parsed.length > 1">
+                        <div class="px-3 py-2 border-b border-gray-100 space-y-1">
+                          <div class="text-gray-400 font-semibold uppercase tracking-wide" style="font-size:10px">Attempts</div>
+                          <template x-for="(att, i) in doc.upgrade_history_parsed" :key="i">
+                            <div class="flex items-center gap-2">
+                              <span class="text-gray-300 font-mono">#<span x-text="i+1"></span></span>
+                              <span class="font-medium text-gray-600" x-text="methodLabel(att.method)"></span>
+                              <template x-if="att.score_before != null || att.score_after != null">
+                                <span class="font-mono text-gray-400 flex items-center gap-1">
+                                  <template x-if="att.score_before != null"><span class="score-pill" :class="scorePillCls(att.score_before)" x-text="Math.round(att.score_before*100)+'%'"></span></template>
+                                  <span class="text-gray-200">›</span>
+                                  <template x-if="att.score_after != null"><span class="score-pill bg-green-100 text-green-800" x-text="Math.round(Math.min(att.score_after,1)*100)+'%'"></span></template>
                                 </span>
                               </template>
-                            </span>
-                          </template>
-                          <template x-if="!doc.score_trail || doc.score_trail.length <= 1">
-                            <span class="flex items-center gap-1 text-xs mono">
-                              <template x-if="doc.before_score!=null">
-                                <span class="score-pill" :class="scorePillCls(doc.before_score)" x-text="Math.round(doc.before_score*100)+'%'"></span>
-                              </template>
-                              <template x-if="doc.before_score!=null"><span class="text-gray-300">›</span></template>
-                              <span class="score-pill bg-green-100 text-green-800 font-bold" x-text="Math.round(doc.after_score*100)+'%'"></span>
-                            </span>
-                          </template>
-                          <template x-if="doc.pages_processed">
-                            <span class="text-xs text-gray-400 mono" x-text="'· '+fmt(doc.pages_processed)+'pp'"></span>
-                          </template>
-                          <template x-if="doc.method">
-                            <span class="text-xs text-gray-400 mono" x-text="'via '+doc.method"></span>
+                              <template x-if="att.error"><span class="text-red-500 truncate" x-text="att.error"></span></template>
+                            </div>
                           </template>
                         </div>
                       </template>
-                      <!-- Archival improvements -->
-                      <div class="flex flex-wrap gap-1.5 text-xs">
-                        <span class="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium" title="ISO 32000 compliant text layer added">📄 Searchable text</span>
-                        <span class="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium" title="Content extractable independently of PDF viewer">🗄 Long-term preservation</span>
-                        <span class="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium" title="Screen readers and assistive tools can read the text layer">♿ Accessibility (PDF/UA basis)</span>
-                        <span class="bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium" title="Text can be indexed, searched, and extracted by any tool">🔍 Full-text indexable</span>
-                      </div>
+                      <!-- Download footer -->
+                      <template x-if="doc.upgraded_pdf_path">
+                        <div class="px-3 py-1.5 flex items-center gap-3 bg-green-50/50">
+                          <a :href="`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
+                             @click.stop class="font-semibold text-green-700 hover:underline">↓ Download upgraded PDF</a>
+                          <a :href="`${API_BASE}/api/docs/receipt?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
+                             target="_blank" @click.stop class="text-gray-400 hover:text-indigo-600 hover:underline">receipt ↗</a>
+                        </div>
+                      </template>
                     </div>
                   </template>
 
@@ -623,20 +651,12 @@ if ('serviceWorker' in navigator) {
                       <span :class="(doc.lang_key && doc.lang_key !== 'english' && doc.lang_key !== 'unknown') ? 'text-amber-600 font-bold' : 'text-amber-600 font-medium'"
                             x-text="effortEstimate(doc)"></span>
                     </template>
-                    <template x-if="doc.readable_pages_pct!=null">
+                    <template x-if="doc.readable_pages_pct!=null && activeTab!=='upgraded'">
                       <span x-text="Math.round(doc.readable_pages_pct*100)+'% readable'"></span>
                     </template>
                     <a x-show="doc.source_url" :href="doc.source_url" target="_blank" rel="noopener" @click.stop
                        class="hover:text-blue-500 truncate max-w-xs"
                        x-text="'↗ '+(doc.source_url||'').replace(/^https?:\/\//,'').split('/')[0]"></a>
-                    <template x-if="activeTab==='upgraded' && doc.upgraded_pdf_path">
-                      <span class="ml-auto flex items-center gap-2">
-                        <a :href="`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
-                           @click.stop class="font-semibold text-green-700 hover:underline">↓ upgraded PDF</a>
-                        <a :href="`${API_BASE}/api/docs/receipt?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
-                           target="_blank" @click.stop class="text-xs text-gray-400 hover:text-indigo-600 hover:underline">receipt ↗</a>
-                      </span>
-                    </template>
                     <!-- Card action buttons (admin only) -->
                     <template x-if="adminToken && (activeTab==='original' || activeTab==='all' || activeTab==='adequate' || activeTab==='upgraded')">
                       <div class="ml-auto flex gap-1.5 items-center flex-shrink-0">
@@ -915,6 +935,21 @@ function fmtBytes(b) {
   let i = 0; let v = b;
   while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
   return (i === 0 ? v : v.toFixed(1)) + ' ' + units[i];
+}
+
+function methodLabel(m) {
+  const labels = { 'pipeline-v2': 'Pipeline OCR v2', 'pipeline': 'Pipeline OCR', 'tesseract': 'Tesseract OCR', 'boss': 'Boss Vision', 'spell-fix': 'Spell-fix', 'spell_fix': 'Spell-fix' };
+  return labels[m] || m || '—';
+}
+
+function relTime(ts) {
+  if (!ts) return '';
+  const diff = Date.now() - new Date(ts).getTime();
+  const s = Math.floor(diff / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400) return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
 }
 
 function scorePillCls(s) {

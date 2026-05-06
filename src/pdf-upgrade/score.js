@@ -1,7 +1,7 @@
 // PDF quality scoring -- heuristics only, no AI. Exports: scorePdf, saveQualityScore, maybeQueue, extractBadSample. Re-exports: detectLanguage, LANG_COST, LANG_PRIORITY. Deps: pdf-parse, language
 import pdfParse from 'pdf-parse';
 import { readFileSync } from 'fs';
-import { detectLanguage, LANG_COST, LANG_PRIORITY } from '../language.js';
+import { detectLanguage, detectLanguageFromUrl, LANG_COST, LANG_PRIORITY } from '../language.js';
 export { detectLanguage, LANG_COST, LANG_PRIORITY };
 // Common English function words for word quality estimation
 const COMMON_WORDS = new Set(['the','of','and','to','a','in','is','it','you','that','he','was','for','on','are','as','with','his','they','at','be','this','from','or','had','by','not','but','have','an','were','we','their','one','all','would','there','what','so','up','out','if','about','who','get','which','go','me','when','make','can','like','time','no','just','him','know','take','into','year','your','good','some','could','them','see','other','than','then','now','look','only','come','its','over','think','also','back','after','use','two','how','our','first','well','way','even','new','want','because','any','these','give','day','most','us']);
@@ -92,22 +92,43 @@ export const extractBadSample = (pdfPath, maxChars = 300) => {
 /** Save quality score to DB for a document URL. */
 export const saveQualityScore = (db, url, contentHash, metrics) => {
   try { db.exec('ALTER TABLE pdf_quality ADD COLUMN processing_difficulty REAL'); } catch {}
+  // URL-based language detection overrides text-based: a filename in Arabic/Persian script
+  // is definitive even when the PDF text layer is garbled or uses custom font encoding.
+  const urlLang = detectLanguageFromUrl(url);
+  const language = urlLang || metrics.language || null;
+  // Garbled text-layer detection: has_text_layer=1 but near-zero word quality means the PDF
+  // uses custom font encoding (common in Persian PDFs). The text layer is unreadable noise —
+  // treat it as an image PDF for scoring purposes.
+  let composite = metrics.composite_score;
+  let hasText = metrics.has_text_layer;
+  if (hasText === 1 && (metrics.word_quality_estimate ?? 0) < 0.05) {
+    // Custom-encoded text layer — functionally equivalent to image PDF
+    hasText = 0;
+    composite = Math.min(composite, 0.15); // cap score so it stays in upgrade queue
+  }
   db.prepare(`INSERT OR REPLACE INTO pdf_quality (url, content_hash, scored_at, avg_chars_per_page, readable_pages_pct, has_text_layer, word_quality_estimate, composite_score, pages, pdf_title, excerpt, ai_language, processing_difficulty)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-    .run(url, contentHash, new Date().toISOString(), metrics.avg_chars_per_page, metrics.readable_pages_pct, metrics.has_text_layer, metrics.word_quality_estimate, metrics.composite_score, metrics.pages, metrics.pdf_title || null, metrics.excerpt || null, metrics.language || null, metrics.processing_difficulty ?? null);
+    .run(url, contentHash, new Date().toISOString(), metrics.avg_chars_per_page, metrics.readable_pages_pct, hasText, metrics.word_quality_estimate, composite, metrics.pages, metrics.pdf_title || null, metrics.excerpt || null, language, metrics.processing_difficulty ?? null);
 };
-/** Queue a PDF for upgrade if below score threshold. Priority boosted for English (cheaper to process). */
-export const maybeQueue = (db, url, contentHash, score, threshold = 0.7, language = null) => {
+/** Queue a PDF for upgrade if below score threshold. Text-layer PDFs are top priority (fast pipeline pass). */
+export const maybeQueue = (db, url, contentHash, score, threshold = 0.7, language = null, hasTextLayer = null) => {
   if (score >= threshold) return false;
   const existing = db.prepare('SELECT status FROM pdf_upgrade_queue WHERE url=?').get(url);
   if (existing && existing.status !== 'pending') return false; // already processed or in progress
   // Prefer the DB-stored language (corrected by detectLanguageForImagePdfs) over the
   // text-extraction guess — pdf-parse often detects Persian/Arabic as 'english' due to
   // sparse Latin metadata (title, publisher) outweighing undecodable script characters.
-  const dbLang = db.prepare('SELECT ai_language FROM pdf_quality WHERE url=?').get(url)?.ai_language;
-  const langKey = ((dbLang && dbLang !== 'unknown' ? dbLang : language) || 'unknown').toLowerCase();
+  const dbRow = db.prepare('SELECT ai_language, has_text_layer FROM pdf_quality WHERE url=?').get(url);
+  const dbLang = dbRow?.ai_language;
+  const textLayer = hasTextLayer ?? dbRow?.has_text_layer ?? 0;
+  // URL percent-encoding is definitive for Arabic/Persian — overrides text-extracted guess
+  const urlLang = detectLanguageFromUrl(url);
+  const langKey = (urlLang || (dbLang && dbLang !== 'unknown' ? dbLang : language) || 'unknown').toLowerCase();
   const langMult = LANG_PRIORITY[langKey] ?? LANG_PRIORITY.unknown;
-  const priority = (1 - score) * langMult;
+  // Text-layer PDFs go first: they process in seconds (pipeline skips OCR, just adds clean text layer).
+  // Image PDFs are slower (full OCR). Non-English deeply deprioritized.
+  const textBoost = textLayer ? 100 : 1;
+  const priority = textBoost * (1 - score) * langMult;
   db.prepare(`INSERT OR REPLACE INTO pdf_upgrade_queue (url, content_hash, priority, status, queued_at)
     VALUES (?, ?, ?, 'pending', ?)`)
     .run(url, contentHash, priority, new Date().toISOString());
