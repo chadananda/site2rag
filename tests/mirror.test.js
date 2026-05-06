@@ -96,6 +96,12 @@ describe('inScope', () => {
   it('malformed URL returns false without throwing', () => {
     expect(inScope('not a url', {}, 'example.com')).toBe(false);
   });
+  it('allow_domains permits cross-domain URL even when same_domain_only=true', () => {
+    expect(inScope('https://cdn.example.com/img.png', { same_domain_only: true, allow_domains: ['cdn.example.com'] }, 'example.com')).toBe(true);
+  });
+  it('allow_domains does not permit unlisted cross-domain URL', () => {
+    expect(inScope('https://other.com/page', { same_domain_only: true, allow_domains: ['cdn.example.com'] }, 'example.com')).toBe(false);
+  });
 });
 describe('parseRobots', () => {
   it('matches User-agent: Site2RAG (mixed case)', () => {

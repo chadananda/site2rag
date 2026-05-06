@@ -103,6 +103,19 @@ describe('db', () => {
   it('llmCost returns zero for zero tokens', () => {
     expect(llmCost('claude-haiku-3-5-20241022', 0, 0)).toBe(0);
   });
+  it('llmCost includes output token cost', () => {
+    // 1M output at $4.00/M = $4.00 (haiku output rate)
+    const cost = llmCost('claude-haiku-3-5-20241022', 0, 1000000);
+    expect(cost).toBeCloseTo(4.00, 5);
+  });
+  it('llmCost computes mistral-ocr-latest at $1.00/M in + $1.00/M out', () => {
+    const cost = llmCost('mistral-ocr-latest', 1000000, 1000000);
+    expect(cost).toBeCloseTo(2.00, 5);
+  });
+  it('llmCost computes claude-sonnet-4-5 at $3.00/M input', () => {
+    const cost = llmCost('claude-sonnet-4-5', 1000000, 0);
+    expect(cost).toBeCloseTo(3.00, 5);
+  });
   it('logLlmCall inserts row and cost is retrievable', () => {
     logLlmCall(db, { stage: 'ocr', url: 'https://test.example.com/doc.pdf', page_no: 1, provider: 'anthropic', model: 'claude-haiku-3-5-20241022', tokens_in: 500, tokens_out: 200, cost_usd: 0.001, ok: 1 });
     const row = db.prepare('SELECT * FROM llm_calls WHERE url=?').get('https://test.example.com/doc.pdf');
