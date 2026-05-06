@@ -133,6 +133,14 @@ describe('spellFixWordObjects — prompt construction', () => {
     expect(result.words[0].text).toBe('anticipates');
   });
 
+  it('uncorrected hyphen pair concatenates with hyphen when model skips it', async () => {
+    // Model returns no correction for the merged entry → ¶ stripped, hyphen remains
+    createMock.mockResolvedValueOnce(okResponse(''));
+    const result = await spellFixWordObjects([{ text: 'antici-' }, { text: 'pates' }], 'key', {});
+    expect(result.words).toHaveLength(1);
+    expect(result.words[0].text).toBe('antici-pates');
+  });
+
   it('returns cost_usd, tokens_in, tokens_out', async () => {
     createMock.mockResolvedValueOnce(okResponse('', 20, 8));
     const result = await spellFixWordObjects([{ text: 'hello' }], 'key', {});
