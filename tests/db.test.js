@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 // Patch SITE2RAG_ROOT for tests
 const testRoot = join(tmpdir(), `site2rag-test-${Date.now()}`);
 process.env.SITE2RAG_ROOT = testRoot;
-import { openDb, startRun, finishRun, upsertPage, getMeta, setMeta, upsertSitemap, markGoneUrls, logLlmCall, llmCost } from '../src/db.js';
+import { openDb, startRun, finishRun, upsertPage, getMeta, setMeta, upsertSitemap, markGoneUrls, logLlmCall, llmCost, getOcrPage, saveOcrPage, upsertAsset, addAssetRef, markSitemapRemoved } from '../src/db.js';
 const TEST_DOMAIN = 'test.example.com';
 describe('db', () => {
   let db;
@@ -136,5 +136,90 @@ describe('db', () => {
     upsertPage(db, { url, path_slug: 'uh', content_hash: 'sha256:same', mime_type: 'text/html', status_code: 200, depth: 0 });
     const row2 = db.prepare('SELECT last_changed_at FROM pages WHERE url=?').get(url);
     expect(row2.last_changed_at).toBe('2020-01-01T00:00:00.000Z');
+  });
+});
+
+describe('db — saveOcrPage / getOcrPage', () => {
+  let db;
+  beforeEach(() => { db = openDb(TEST_DOMAIN); });
+  afterEach(() => { db.close(); rmSync(testRoot, { recursive: true, force: true }); });
+
+  it('saves and retrieves an OCR page by url, pageNo, engine', () => {
+    saveOcrPage(db, {
+      docUrl: 'https://example.com/a.pdf', pageNo: 1, engine: 'tesseract',
+      text_md: 'Hello world', confidence: 0.85, bboxes_json: '[]', bytes: 1024,
+    });
+    const row = getOcrPage(db, 'https://example.com/a.pdf', 1, 'tesseract');
+    expect(row).not.toBeNull();
+    expect(row.text_md).toBe('Hello world');
+    expect(row.confidence).toBeCloseTo(0.85, 2);
+  });
+
+  it('returns undefined for unknown url/page/engine', () => {
+    expect(getOcrPage(db, 'https://example.com/missing.pdf', 1, 'tesseract')).toBeUndefined();
+  });
+
+  it('replaces existing row on re-save (same url/page/engine)', () => {
+    saveOcrPage(db, { docUrl: 'https://example.com/b.pdf', pageNo: 1, engine: 'boss', text_md: 'v1', confidence: 0.5, bboxes_json: '[]', bytes: 100 });
+    saveOcrPage(db, { docUrl: 'https://example.com/b.pdf', pageNo: 1, engine: 'boss', text_md: 'v2', confidence: 0.9, bboxes_json: '[]', bytes: 200 });
+    const row = getOcrPage(db, 'https://example.com/b.pdf', 1, 'boss');
+    expect(row.text_md).toBe('v2');
+  });
+});
+
+describe('db — upsertAsset / addAssetRef', () => {
+  let db;
+  beforeEach(() => { db = openDb(TEST_DOMAIN); });
+  afterEach(() => { db.close(); rmSync(testRoot, { recursive: true, force: true }); });
+
+  it('inserts a new asset and retrieves it', () => {
+    upsertAsset(db, { hash: 'sha256:abc', path: '/tmp/a.png', original_url: 'https://example.com/a.png', mime_type: 'image/png', bytes: 500 });
+    const row = db.prepare('SELECT * FROM assets WHERE hash=?').get('sha256:abc');
+    expect(row).not.toBeNull();
+    expect(row.mime_type).toBe('image/png');
+    expect(row.ref_count).toBe(0);
+  });
+
+  it('updates last_seen_at on re-upsert without changing path', () => {
+    upsertAsset(db, { hash: 'sha256:def', path: '/tmp/b.png', original_url: 'https://example.com/b.png', mime_type: 'image/png', bytes: 100 });
+    db.prepare("UPDATE assets SET last_seen_at='2020-01-01T00:00:00.000Z' WHERE hash=?").run('sha256:def');
+    upsertAsset(db, { hash: 'sha256:def', path: '/tmp/b.png', original_url: 'https://example.com/b.png', mime_type: 'image/png', bytes: 100 });
+    const row = db.prepare('SELECT * FROM assets WHERE hash=?').get('sha256:def');
+    expect(row.last_seen_at).not.toBe('2020-01-01T00:00:00.000Z');
+  });
+
+  it('addAssetRef increments ref_count', () => {
+    upsertAsset(db, { hash: 'sha256:ghi', path: '/tmp/c.png', original_url: 'https://example.com/c.png', mime_type: 'image/png', bytes: 200 });
+    addAssetRef(db, 'sha256:ghi', 'https://example.com/page1.html');
+    addAssetRef(db, 'sha256:ghi', 'https://example.com/page2.html');
+    const row = db.prepare('SELECT ref_count FROM assets WHERE hash=?').get('sha256:ghi');
+    expect(row.ref_count).toBe(2);
+  });
+});
+
+describe('db — markSitemapRemoved', () => {
+  let db;
+  beforeEach(() => { db = openDb(TEST_DOMAIN); });
+  afterEach(() => { db.close(); rmSync(testRoot, { recursive: true, force: true }); });
+
+  it('marks URLs not in seenUrls as removed', () => {
+    db.prepare("INSERT INTO sitemaps (url, lastmod, source_sitemap) VALUES (?,NULL,NULL)")
+      .run('https://example.com/old.pdf');
+    db.prepare("INSERT INTO sitemaps (url, lastmod, source_sitemap) VALUES (?,NULL,NULL)")
+      .run('https://example.com/new.pdf');
+    markSitemapRemoved(db, ['https://example.com/new.pdf']);
+    const old = db.prepare('SELECT removed FROM sitemaps WHERE url=?').get('https://example.com/old.pdf');
+    const current = db.prepare('SELECT removed FROM sitemaps WHERE url=?').get('https://example.com/new.pdf');
+    expect(old.removed).toBe(1);
+    expect(current.removed).toBeFalsy();
+  });
+
+  it('marks all as removed when seenUrls is empty', () => {
+    db.prepare("INSERT INTO sitemaps (url, lastmod, source_sitemap) VALUES (?,NULL,NULL)")
+      .run('https://example.com/a.pdf');
+    db.prepare("INSERT INTO sitemaps (url, lastmod, source_sitemap) VALUES (?,NULL,NULL)")
+      .run('https://example.com/b.pdf');
+    const count = markSitemapRemoved(db, []);
+    expect(count).toBe(2);
   });
 });
