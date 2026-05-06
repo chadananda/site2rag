@@ -81,9 +81,14 @@ const DOC_SELECT = `
   SELECT p.url, p.path_slug, p.last_seen_at,
          q.composite_score, q.pages, q.word_quality_estimate, q.readable_pages_pct,
          q.avg_chars_per_page, q.has_text_layer, q.skip,
-         CASE WHEN h.hosted_title IS NOT NULL AND LENGTH(TRIM(h.hosted_title)) > 8
-                   AND LOWER(TRIM(h.hosted_title)) NOT IN ('download pdf','download','click here','pdf','view pdf','open pdf','get pdf','here','this pdf','the pdf','read more','full text','full pdf','view document','open document','read pdf')
-              THEN h.hosted_title ELSE q.pdf_title END as title,
+         COALESCE(
+           q.ai_title,
+           CASE WHEN h.hosted_title IS NOT NULL AND LENGTH(TRIM(h.hosted_title)) > 8
+                     AND LOWER(TRIM(h.hosted_title)) NOT IN ('download pdf','download','click here','pdf','view pdf','open pdf','get pdf','here','this pdf','the pdf','read more','full text','full pdf','view document','open document','read pdf')
+                THEN h.hosted_title ELSE NULL END,
+           CASE WHEN q.pdf_title IS NOT NULL AND q.pdf_title NOT LIKE 'Microsoft Word%' AND q.pdf_title NOT LIKE '%.doc%' AND q.pdf_title NOT LIKE '%.pdf%'
+                THEN q.pdf_title ELSE NULL END
+         ) as title,
          q.excerpt, q.ai_summary, q.ai_author, q.ai_summarized_at,
          q.thumbnail_path, q.summary_tier, q.ai_language,
          h.host_url as source_url,

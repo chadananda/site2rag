@@ -54,7 +54,7 @@ export const summarizeTopPending = async (db, domain) => {
         `URL: ${row.url}`,
         row.source_url && `Source page: ${row.source_url}`,
         row.excerpt && `Excerpt: ${row.excerpt.slice(0, 500)}`
-      ].filter(Boolean).join('\n')}\n\nRespond with exactly two plain-text lines (no markdown, no numbering):\nLine 1: one sentence describing this document.\nLine 2: Author: [full name, or Unknown]`;
+      ].filter(Boolean).join('\n')}\n\nRespond with exactly three plain-text lines (no markdown, no numbering):\nLine 1: one sentence describing this document.\nLine 2: Author: [full name, or Unknown]\nLine 3: Title: [the real document title, not a filename or generic phrase]`;
       const msg = await client.messages.create({
         model: HAIKU_MODEL, max_tokens: 150,
         messages: [{ role: 'user', content: prompt }]
@@ -65,8 +65,10 @@ export const summarizeTopPending = async (db, domain) => {
       const summary = lines[0] || null;
       const authorLine = lines.find(l => l.toLowerCase().startsWith('author:'));
       const author = authorLine ? authorLine.replace(/^author:\s*/i, '').trim() : null;
-      db.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, summary_tier=?, ai_summarized_at=? WHERE url=?')
-        .run(summary, author, 'haiku', new Date().toISOString(), row.url);
+      const titleLine = lines.find(l => l.toLowerCase().startsWith('title:'));
+      const aiTitle = titleLine ? titleLine.replace(/^title:\s*/i, '').trim() : null;
+      db.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_title=?, summary_tier=?, ai_summarized_at=? WHERE url=?')
+        .run(summary, author, aiTitle, 'haiku', new Date().toISOString(), row.url);
       done++;
     } catch (e) {
       log(`summarize failed: ${row.url}: ${e.message}`);

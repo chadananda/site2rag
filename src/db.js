@@ -174,6 +174,7 @@ const migrate = (db) => {
   addCol('pdf_quality', 'thumbnail_path', 'TEXT');
   addCol('pdf_quality', 'summary_tier', 'TEXT');   // 'free' | 'haiku'
   addCol('pdf_quality', 'ai_language', 'TEXT');
+  addCol('pdf_quality', 'ai_title', 'TEXT');         // LLM-extracted clean title
   // Multi-pass upgrade tracking
   addCol('pdf_upgrade_queue', 'pass', 'INT DEFAULT 1');
   addCol('pdf_upgrade_queue', 'marker_md_path', 'TEXT');
