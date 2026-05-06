@@ -30,8 +30,8 @@ export const siteSummary = (domain, siteUrl, description = null) => {
     const pdf = db.prepare(`
       SELECT COUNT(*) as scored,
         SUM(CASE WHEN u.status='done' THEN 1 ELSE 0 END) as upgraded,
-        SUM(CASE WHEN u.status='pending' THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN u.status IN ('processing','submitted') THEN 1 ELSE 0 END) as processing,
+        SUM(CASE WHEN u.status IN ('pending','submitted') THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN u.status='processing' THEN 1 ELSE 0 END) as processing,
         SUM(CASE WHEN u.status='failed' THEN 1 ELSE 0 END) as failed,
         SUM(CASE WHEN q.skip=1 THEN 1 ELSE 0 END) as skipped,
         SUM(CASE WHEN u.url IS NULL AND q.skip=0 AND q.composite_score >= 0.7 THEN 1 ELSE 0 END) as already_ok,
@@ -111,8 +111,8 @@ export const siteDocs = (domain, params) => {
     const vals = [];
 
     if (tab === 'upgraded') {
-      // done = completed; processing = actively running; submitted = waiting in pipeline queue
-      wheres.push("u.status IN ('done','processing','submitted')");
+      // done = completed; processing = actively running in pipeline
+      wheres.push("u.status IN ('done','processing')");
     }
     // 'original' (default/fallback): all PDFs, no quality filter
 
@@ -129,8 +129,8 @@ export const siteDocs = (domain, params) => {
       title_asc: 'COALESCE(h.hosted_title, p.url) ASC',
       improved_desc: 'COALESCE(u.score_improvement, 0) DESC'
     };
-    // Upgraded default: actively processing first, submitted (queued) next, done by newest first
-    const upgradedOrder = `CASE u.status WHEN 'processing' THEN 0 WHEN 'submitted' THEN 1 WHEN 'done' THEN 2 ELSE 3 END ASC, u.finished_at DESC NULLS LAST`;
+    // Upgraded default: currently processing first, then done by newest first
+    const upgradedOrder = `CASE u.status WHEN 'processing' THEN 0 WHEN 'done' THEN 1 ELSE 2 END ASC, u.finished_at DESC NULLS LAST`;
     const orderBy = tab === 'upgraded'
       ? (orderMap[sort] || upgradedOrder)
       : (sort && orderMap[sort])
@@ -148,7 +148,7 @@ export const siteDocs = (domain, params) => {
   } finally { db.close(); }
 };
 
-/** Fast tab counts: original (all PDFs) and upgraded (done+processing+submitted). Single query. */
+/** Fast tab counts: original (all PDFs) and upgraded (done+processing). Single query. */
 export const siteTabCounts = (domain) => {
   const db = safeOpenDb(domain);
   if (!db) return null;
@@ -156,7 +156,7 @@ export const siteTabCounts = (domain) => {
     const row = db.prepare(`
       SELECT
         COUNT(*) as original,
-        SUM(CASE WHEN u.status IN ('done','processing','submitted') THEN 1 ELSE 0 END) as upgraded
+        SUM(CASE WHEN u.status IN ('done','processing') THEN 1 ELSE 0 END) as upgraded
       FROM pages p
       LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
       WHERE p.gone=0 AND p.mime_type='application/pdf' AND LOWER(p.url) LIKE '%.pdf'
