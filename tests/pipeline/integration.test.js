@@ -124,6 +124,79 @@ describe('runPipeline — integration', () => {
       config: { failFast: true },
     })).rejects.toThrow();
   });
+
+  it('onStageStart callback is called for each stage that runs', async () => {
+    const pdfPath = join(tmpDir, 'doc.pdf');
+    writeFileSync(pdfPath, makeTextPdf('callback test'));
+    const stagesStarted = [];
+
+    await runPipeline({
+      docId: 'integ-008',
+      sourcePath: pdfPath,
+      sourceUrl: 'https://example.com/doc.pdf',
+      importance: 1,
+      config: { failFast: false },
+      onStageStart: (stageName) => stagesStarted.push(stageName),
+    });
+
+    expect(stagesStarted).toContain('s0');
+    expect(stagesStarted).toContain('s8');
+    expect(stagesStarted.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('onProgress callback receives stageName and page counts', async () => {
+    const pdfPath = join(tmpDir, 'doc.pdf');
+    writeFileSync(pdfPath, makeTextPdf('progress test'));
+    const progressCalls = [];
+
+    await runPipeline({
+      docId: 'integ-009',
+      sourcePath: pdfPath,
+      sourceUrl: 'https://example.com/doc.pdf',
+      importance: 1,
+      config: { failFast: false },
+      onProgress: (stageName, pagesAffected, total) => progressCalls.push({ stageName, pagesAffected, total }),
+    });
+
+    expect(progressCalls.length).toBeGreaterThan(0);
+    expect(progressCalls[0].stageName).toBe('s0');
+    expect(typeof progressCalls[0].pagesAffected).toBe('number');
+  });
+
+  it('onStageStart errors do not stop the pipeline', async () => {
+    const pdfPath = join(tmpDir, 'doc.pdf');
+    writeFileSync(pdfPath, makeTextPdf('callback error test'));
+
+    const ctx = await runPipeline({
+      docId: 'integ-010',
+      sourcePath: pdfPath,
+      sourceUrl: 'https://example.com/doc.pdf',
+      importance: 1,
+      config: { failFast: false },
+      onStageStart: () => { throw new Error('callback crash'); },
+    });
+
+    // Pipeline must complete despite the callback throwing
+    expect(ctx.quality.final).not.toBeUndefined();
+    expect(ctx.metrics.stages.length).toBeGreaterThan(0);
+  });
+
+  it('config.stages limits which stages run', async () => {
+    const pdfPath = join(tmpDir, 'doc.pdf');
+    writeFileSync(pdfPath, makeTextPdf('partial pipeline'));
+
+    const ctx = await runPipeline({
+      docId: 'integ-011',
+      sourcePath: pdfPath,
+      sourceUrl: 'https://example.com/doc.pdf',
+      importance: 1,
+      config: { failFast: false, stages: ['s0'] },
+    });
+
+    const stagesRun = ctx.metrics.stages.map(s => s.stage);
+    expect(stagesRun).toContain('s0');
+    expect(stagesRun).not.toContain('s8');
+  });
 });
 
 describe('runStage — integration', () => {

@@ -114,3 +114,26 @@ describe('PipelineClient — API key', () => {
     }
   });
 });
+
+describe('PipelineClient — runJob', () => {
+  it('submitJob returns a string id', async () => {
+    const pdfPath = join(tempDir, 'run.pdf');
+    writeFileSync(pdfPath, makeTextPdf('run job test'));
+    const c = client();
+    const jobId = await c.submitJob({ pdfPath, importance: 2 });
+    expect(typeof jobId).toBe('string');
+    expect(jobId.length).toBeGreaterThan(0);
+  });
+});
+
+describe('PipelineClient — constructor defaults', () => {
+  it('uses localhost:49900 as default baseUrl', () => {
+    const c = new PipelineClient();
+    expect(c.baseUrl).toBe('http://localhost:49900');
+  });
+
+  it('strips trailing slash from baseUrl', () => {
+    const c = new PipelineClient({ baseUrl: 'http://localhost:49900/' });
+    expect(c.baseUrl).toBe('http://localhost:49900');
+  });
+});

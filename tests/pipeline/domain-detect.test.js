@@ -270,6 +270,69 @@ describe('detectDomain — pattern matching', () => {
     await detectDomain(ctx);
     expect(ctx.domain.era).toBe('1800-1899');
   });
+
+  it('detects scientific from title keywords', async () => {
+    const ctx = makeCtx({ config: { apiKey: null } });
+    ctx.sourceUrl = 'https://example.com/journal/study-2020.pdf';
+    ctx.meta = { title: 'Clinical Research Study on Molecular Biology and Chemistry' };
+    await detectDomain(ctx);
+    expect(ctx.domain.subject).toBe('scientific');
+  });
+
+  it('detects historical from URL and title keywords', async () => {
+    const ctx = makeCtx({ config: { apiKey: null } });
+    ctx.sourceUrl = 'https://archive.org/manuscripts/colonial-letters.pdf';
+    ctx.meta = { title: 'Colonial Correspondence and Memoirs from 1850' };
+    await detectDomain(ctx);
+    expect(ctx.domain.subject).toBe('historical');
+  });
+
+  it('detects governmental from URL and title keywords', async () => {
+    const ctx = makeCtx({ config: { apiKey: null } });
+    ctx.sourceUrl = 'https://example.gov/commission/annual-report.pdf';
+    ctx.meta = { title: 'Government Commission Annual Report on Policy' };
+    await detectDomain(ctx);
+    expect(ctx.domain.subject).toBe('governmental');
+  });
+
+  it('detects literary from title keywords', async () => {
+    const ctx = makeCtx({ config: { apiKey: null } });
+    ctx.sourceUrl = 'https://example.com/books/poetry-anthology.pdf';
+    ctx.meta = { title: 'An Anthology of Poetry and Verse from the 19th Century' };
+    await detectDomain(ctx);
+    expect(ctx.domain.subject).toBe('literary');
+  });
+
+  it('detects technical from title keywords', async () => {
+    const ctx = makeCtx({ config: { apiKey: null } });
+    ctx.sourceUrl = 'https://example.com/docs/engineering-specification.pdf';
+    ctx.meta = { title: 'Engineering Specification and System Design Manual' };
+    await detectDomain(ctx);
+    expect(ctx.domain.subject).toBe('technical');
+  });
+
+  it('returns near-zero confidence when no keywords match any bucket', async () => {
+    const ctx = makeCtx({ config: { apiKey: null } });
+    ctx.sourceUrl = 'https://example.com/123.pdf';
+    ctx.meta = { title: '' };
+    await detectDomain(ctx);
+    // No keyword matches → confidence effectively 0; 'general' only comes from Haiku
+    expect(ctx.domain.confidence).toBeLessThan(0.1);
+  });
+
+  it('confidence increases with more keyword matches', async () => {
+    const ctx1 = makeCtx({ config: { apiKey: null } });
+    ctx1.sourceUrl = 'https://example.com/law.pdf';
+    ctx1.meta = { title: 'Law' };
+    await detectDomain(ctx1);
+
+    const ctx2 = makeCtx({ config: { apiKey: null } });
+    ctx2.sourceUrl = 'https://legal.example.com/statutes.pdf';
+    ctx2.meta = { title: 'Court Statutes Legislation Judicial Regulation' };
+    await detectDomain(ctx2);
+
+    expect(ctx2.domain.confidence).toBeGreaterThanOrEqual(ctx1.domain.confidence);
+  });
 });
 
 // buildPromptContext unit tests

@@ -117,6 +117,34 @@ describe('DELETE /jobs/:id', () => {
     const getRes = await get(`/jobs/${jobId}`);
     expect(getRes.status).toBe(404);
   });
+
+  it('returns 404 when deleting unknown job id', async () => {
+    const res = await del('/jobs/no-such-job');
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('POST /jobs — field passthrough', () => {
+  it('stores sourceUrl and importance in the job', async () => {
+    const pdfPath = join(tempDir, 'f.pdf');
+    writeFileSync(pdfPath, makeTextPdf());
+    const { jobId } = await (await post('/jobs', {
+      pdfPath,
+      sourceUrl: 'https://example.com/f.pdf',
+      importance: 4,
+    })).json();
+    const jobRes = await get(`/jobs/${jobId}`);
+    const job = await jobRes.json();
+    expect(job.source_url).toBe('https://example.com/f.pdf');
+    expect(job.importance).toBe(4);
+  });
+});
+
+describe('Unknown routes', () => {
+  it('returns 404 for unrecognized path', async () => {
+    const res = await get('/no-such-endpoint');
+    expect(res.status).toBe(404);
+  });
 });
 
 describe('API key auth', () => {

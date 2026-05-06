@@ -115,3 +115,51 @@ describe('JobStore — delete', () => {
     expect(store.get(id)).toBeNull();
   });
 });
+
+describe('JobStore — getProgress', () => {
+  it('returns null when no progress set', () => {
+    const id = store.create({ pdfPath: '/tmp/a.pdf' });
+    expect(store.getProgress(id)).toBeNull();
+  });
+
+  it('returns parsed progress after setProgress', () => {
+    const id = store.create({ pdfPath: '/tmp/a.pdf' });
+    store.setProgress(id, { stage: 's5', pages_affected: 3, total_pages: 10 });
+    expect(store.getProgress(id)).toEqual({ stage: 's5', pages_affected: 3, total_pages: 10 });
+  });
+});
+
+describe('JobStore — importance ordering', () => {
+  it('nextPending returns higher-importance job first when submitted at same time', async () => {
+    const idLow  = store.create({ pdfPath: '/tmp/low.pdf',  importance: 1 });
+    await new Promise(r => setTimeout(r, 5));
+    const idHigh = store.create({ pdfPath: '/tmp/high.pdf', importance: 5 });
+    const next = store.nextPending();
+    expect(next.id).toBe(idHigh);
+  });
+});
+
+describe('JobStore — resetStuck', () => {
+  it('resets processing jobs back to pending', () => {
+    const id = store.create({ pdfPath: '/tmp/a.pdf' });
+    store.setProcessing(id);
+    const count = store.resetStuck(null);
+    expect(count).toBe(1);
+    expect(store.get(id).status).toBe('pending');
+  });
+
+  it('does not reset jobs started after the cutoff time', async () => {
+    const id = store.create({ pdfPath: '/tmp/a.pdf' });
+    const cutoff = new Date().toISOString();  // cutoff before setProcessing
+    await new Promise(r => setTimeout(r, 5));
+    store.setProcessing(id);
+    const count = store.resetStuck(cutoff);
+    expect(count).toBe(0);  // started_at is after cutoff, so not reset
+    expect(store.get(id).status).toBe('processing');
+  });
+
+  it('returns 0 when no stuck jobs exist', () => {
+    store.create({ pdfPath: '/tmp/a.pdf' });  // still pending
+    expect(store.resetStuck(null)).toBe(0);
+  });
+});
