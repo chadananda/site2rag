@@ -47,6 +47,16 @@ describe('detectLanguage', () => {
     expect(detectLanguage(spanish)).toBe('spanish');
   });
 
+  it('detects italian from function words', () => {
+    const italian = 'Il libro che leggo è molto interessante. Non si può leggere tutto in un giorno solo con la sua famiglia.';
+    expect(detectLanguage(italian)).toBe('italian');
+  });
+
+  it('detects portuguese from function words', () => {
+    const portuguese = 'O livro que leio é muito interessante. Não se pode ler tudo em um dia só com a sua família em casa.';
+    expect(detectLanguage(portuguese)).toBe('portuguese');
+  });
+
   it('returns "english" for English text', () => {
     const english = 'The quick brown fox jumps over the lazy dog. This is an example of standard English text for testing purposes.';
     expect(detectLanguage(english)).toBe('english');
@@ -101,6 +111,14 @@ describe('detectLanguageFromUrl', () => {
     expect(detectLanguageFromUrl('https://example.com/ru/document.pdf')).toBe('russian');
   });
 
+  it('detects italian from /it/ path segment', () => {
+    expect(detectLanguageFromUrl('https://example.com/it/documento.pdf')).toBe('italian');
+  });
+
+  it('detects portuguese from /pt/ path segment', () => {
+    expect(detectLanguageFromUrl('https://example.com/pt/documento.pdf')).toBe('portuguese');
+  });
+
   it('returns null for plain English URL', () => {
     expect(detectLanguageFromUrl('https://example.com/documents/report.pdf')).toBeNull();
   });
@@ -128,6 +146,17 @@ describe('detectLanguageFromUrlPath', () => {
 
   it('returns null for short decoded path with too few words', () => {
     expect(detectLanguageFromUrlPath('https://example.com/a.pdf')).toBeNull();
+  });
+
+  it('detects french from decoded French words in path (word-frequency fallback)', () => {
+    // No ISO code; URL decoded path has enough French function words (les, dans, pour) for detection
+    // Note: avoid '-de-' in path as that falsely matches the German ISO pattern [/_-]de[/_-]
+    const url = 'https://example.com/les-jardins-dans-le-monde-pour-les-enfants.pdf';
+    expect(detectLanguageFromUrlPath(url)).toBe('french');
+  });
+
+  it('returns null for invalid/unparsable URL', () => {
+    expect(detectLanguageFromUrlPath('not a url at all')).toBeNull();
   });
 });
 

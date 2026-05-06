@@ -147,6 +147,16 @@ describe('bboxWordsToText', () => {
     expect(text).toContain('Page one.');
     expect(text).toContain('Page two.');
   });
+
+  it('continues paragraph across page break without inserting blank line', () => {
+    // Page boundary is a soft continuation — no forced paragraph break between pages
+    const page1Words = [w('This', 0, 10, 40, 20), w('sentence', 50, 10, 100, 20), w('continues', 110, 10, 180, 20)];
+    const page2Words = [w('on', 0, 10, 20, 20), w('next', 30, 10, 70, 20), w('page.', 80, 10, 120, 20)];
+    const text = bboxWordsToText([page(page1Words, 1), page(page2Words, 2)]);
+    expect(text).not.toContain('\n\n');
+    expect(text).toContain('This sentence continues');
+    expect(text).toContain('on next page.');
+  });
 });
 
 describe('reconstructFromOcrPages', () => {
