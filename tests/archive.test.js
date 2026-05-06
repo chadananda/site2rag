@@ -94,4 +94,50 @@ describe('runArchive', () => {
     expect(stats.failed).toBe(1);
     expect(stats.uploaded).toBe(0);
   });
+
+  it('uploads PDF documents when upload_documents is true', async () => {
+    const pdfPath = join(pagesDir, 'report.pdf');
+    writeFileSync(pdfPath, Buffer.from('%PDF-1.4 fake content'));
+    db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone, content_hash) VALUES (?,?,?,?,?,?)')
+      .run(`${SITE_URL}/report.pdf`, 'report', pdfPath, 'application/pdf', 0, 'hash-pdf');
+    mockSend.mockResolvedValue({ ETag: '"pdf123"' });
+
+    const stats = await runArchive(db, { domain: DOMAIN, archive: { ...archiveCfg, upload_html: false, upload_documents: true } });
+    expect(stats.uploaded).toBe(1);
+    const row = db.prepare('SELECT backup_url FROM pages WHERE url=?').get(`${SITE_URL}/report.pdf`);
+    expect(row.backup_url).toBeTruthy();
+  });
+
+  it('returns empty stats when neither upload_html nor upload_documents is set', async () => {
+    insertPage('page', '<html>hi</html>');
+    const stats = await runArchive(db, { domain: DOMAIN, archive: { enabled: true, s3_bucket: 'test' } });
+    expect(stats.uploaded).toBe(0);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
+
+  it('uploads assets when upload_assets is true', async () => {
+    const assetPath = join(pagesDir, 'image.png');
+    writeFileSync(assetPath, Buffer.from('PNG_FAKE'));
+    // backup_etag NULL means not yet uploaded — will be picked up by archive
+    db.prepare('INSERT INTO assets (hash, path, original_url, mime_type, bytes, ref_count, backup_etag) VALUES (?,?,?,?,?,?,?)')
+      .run('sha256:imgabc', assetPath, `${SITE_URL}/image.png`, 'image/png', 8, 1, null);
+    mockSend.mockResolvedValue({ ETag: '"img123"' });
+
+    const stats = await runArchive(db, { domain: DOMAIN, archive: { ...archiveCfg, upload_html: false, upload_assets: true } });
+    expect(stats.uploaded).toBe(1);
+    const row = db.prepare('SELECT backup_url FROM assets WHERE hash=?').get('sha256:imgabc');
+    expect(row.backup_url).toBeTruthy();
+  });
+
+  it('gone pages are excluded from upload', async () => {
+    const path = join(pagesDir, 'gone.html');
+    writeFileSync(path, '<html>gone</html>');
+    db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone, content_hash) VALUES (?,?,?,?,?,?)')
+      .run(`${SITE_URL}/gone`, 'gone', path, 'text/html', 1, 'hash-gone');
+    mockSend.mockResolvedValue({ ETag: '"etag"' });
+
+    const stats = await runArchive(db, { domain: DOMAIN, archive: archiveCfg });
+    expect(stats.uploaded).toBe(0);
+    expect(mockSend).not.toHaveBeenCalled();
+  });
 });

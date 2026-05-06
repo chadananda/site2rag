@@ -91,7 +91,7 @@ export const runArchive = async (db, siteConfig) => {
   }
   // Upload assets if configured
   if (archiveCfg.upload_assets) {
-    const assets = db.prepare('SELECT * FROM assets WHERE backup_etag IS NULL OR backup_etag != content_hash').all().filter(a => existsSync(a.path));
+    const assets = db.prepare('SELECT * FROM assets WHERE backup_etag IS NULL OR backup_etag != hash').all().filter(a => existsSync(a.path));
     for (const asset of assets) {
       const urlPath = new URL(asset.original_url || '').pathname;
       const s3Key = `${domain}/_assets/${asset.hash.slice(0, 2)}/${asset.hash}`;

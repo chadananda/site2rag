@@ -78,6 +78,52 @@ describe('runRetain', () => {
     expect(stats.frozen).toBe(true);
     expect(stats.gc_deleted).toBe(0);
   });
+  it('deletes expired unreferenced assets (ref_count=0 past grace)', async () => {
+    const assetFile = join(testRoot, 'old-asset.png');
+    writeFileSync(assetFile, 'PNG');
+    const oldDate = new Date(Date.now() - 91 * 86400000).toISOString();
+    db.prepare('INSERT INTO assets (hash, path, original_url, mime_type, bytes, ref_count, gone_since) VALUES (?,?,?,?,?,?,?)')
+      .run('sha256:deadasset', assetFile, 'https://retain.example.com/old-asset.png', 'image/png', 3, 0, oldDate);
+    const stats = await runRetain(db, { domain: DOMAIN, retention: { gone_grace_days: 90, freeze_on_degradation: { enabled: false } } }, DOMAIN);
+    expect(stats.gc_deleted).toBeGreaterThanOrEqual(1);
+    expect(existsSync(assetFile)).toBe(false);
+    const row = db.prepare('SELECT * FROM assets WHERE hash=?').get('sha256:deadasset');
+    expect(row).toBeUndefined();
+  });
+
+  it('does NOT delete assets with ref_count > 0', async () => {
+    const assetFile = join(testRoot, 'referenced-asset.png');
+    writeFileSync(assetFile, 'PNG');
+    const oldDate = new Date(Date.now() - 91 * 86400000).toISOString();
+    db.prepare('INSERT INTO assets (hash, path, original_url, mime_type, bytes, ref_count, gone_since) VALUES (?,?,?,?,?,?,?)')
+      .run('sha256:refasset', assetFile, 'https://retain.example.com/ref-asset.png', 'image/png', 3, 2, oldDate);
+    const stats = await runRetain(db, { domain: DOMAIN, retention: { gone_grace_days: 90, freeze_on_degradation: { enabled: false } } }, DOMAIN);
+    expect(existsSync(assetFile)).toBe(true);
+    const row = db.prepare('SELECT * FROM assets WHERE hash=?').get('sha256:refasset');
+    expect(row).toBeTruthy();
+  });
+
+  it('prunes tombstone rows older than 1 year', async () => {
+    const veryOld = new Date(Date.now() - 366 * 86400000).toISOString();
+    db.prepare('INSERT INTO pages (url, path_slug, gone, gone_since, first_seen_at, last_seen_at, archive_only) VALUES (?,?,?,?,?,?,?)')
+      .run('https://retain.example.com/ancient', 'ancient', 1, veryOld, veryOld, veryOld, 1);
+    const stats = await runRetain(db, { domain: DOMAIN, retention: { gone_grace_days: 90, freeze_on_degradation: { enabled: false } } }, DOMAIN);
+    expect(stats.tombstones_pruned).toBeGreaterThanOrEqual(1);
+    const row = db.prepare('SELECT * FROM pages WHERE url=?').get('https://retain.example.com/ancient');
+    expect(row).toBeUndefined();
+  });
+
+  it('clears frozen_since when no longer frozen', async () => {
+    // Set frozen_since in db to simulate previously frozen
+    const { setMeta, getMeta } = await import('../src/db.js');
+    setMeta(db, 'frozen_since', '2025-01-01T00:00:00.000Z');
+    // Run retain with no freeze conditions
+    await runRetain(db, { domain: DOMAIN, retention: { gone_grace_days: 90, freeze_on_degradation: { enabled: false } } }, DOMAIN);
+    // frozen_since should be cleared (set to '')
+    const val = getMeta(db, 'frozen_since');
+    expect(val).toBeFalsy();
+  });
+
   it('pages in pdf_upgrade_queue with status=done are NOT deleted even past grace period', async () => {
     const { writeFileSync } = await import('fs');
     const { join } = await import('path');
