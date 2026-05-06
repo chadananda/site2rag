@@ -77,6 +77,22 @@ describe('runExportHtml', () => {
     const exp = db.prepare('SELECT source_hash FROM exports WHERE url=?').get('https://export.example.com/classified');
     expect(exp.source_hash).toBe('sha256:classified123');
   });
+  it('archive_only=true appears as boolean true in frontmatter', () => {
+    const htmlPath = join(htmlDir, 'archived.html');
+    writeFileSync(htmlPath, pageHtml('Archived', Array(20).fill('<p>Some archived content.</p>').join('')));
+    const page = {
+      url: 'https://export.example.com/archived', path_slug: 'archived', local_path: htmlPath,
+      content_hash: 'sha256:arc', mime_type: 'text/html', depth: 1,
+      page_role: 'content', last_seen_at: new Date().toISOString(), backup_url: null,
+      backup_archived_at: null, archive_only: 1, last_changed_at: null, from_sitemap: 0
+    };
+    const html = readFileSync(htmlPath, 'utf8');
+    exportHtmlPage(db, { domain: DOMAIN, assets: { rewrite_links: false } }, page, html);
+    const mdPath = join(mdDir(DOMAIN), 'archived.md');
+    const mdContent = readFileSync(mdPath, 'utf8');
+    expect(mdContent).toContain('archive_only: true');
+  });
+
   it('frontmatter with title containing colon+space produces valid parseable YAML', () => {
     const htmlPath = join(htmlDir, 'colontest.html');
     writeFileSync(htmlPath, pageHtml('Site: A Title With Colon', Array(20).fill('<p>Content text paragraph.</p>').join('')));
