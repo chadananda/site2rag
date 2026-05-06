@@ -85,9 +85,12 @@ const ensurePipelineJobIdColumn = (db) => {
 /** Submit one doc to the pipeline service and mark it processing. No waiting — checkPipelineJobs polls. */
 const submitViaPipeline = async (db, domain, row, page, siteConfig) => {
   const quality = db.prepare('SELECT * FROM pdf_quality WHERE url=?').get(row.url) ?? {};
-  // Difficulty-based ordering: use stored processing_difficulty (0=trivial, 1=hardest).
-  // Text-layer PDFs skip OCR (seconds); dense non-Latin image scans take hours.
-  const difficulty = quality.processing_difficulty ?? (quality.has_text_layer === 1 ? 0.05 : 0.5);
+  // Difficulty-based ordering: text PDFs (spell-fix only, seconds) → high importance;
+  // image PDFs (need OCR, minutes) → lower importance. Min difficulty 0.3 for image PDFs
+  // so they never outrank text PDFs regardless of page count.
+  const isImagePdf = !quality.has_text_layer;
+  const rawDiff = quality.processing_difficulty || null;
+  const difficulty = isImagePdf ? Math.max(0.3, rawDiff ?? 0.5) : (rawDiff ?? 0.05);
   const importance = Math.max(1, Math.round((1 - difficulty) * 200));
   try {
     const jobId = await pipelineClient.submitJob({

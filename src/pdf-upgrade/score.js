@@ -72,9 +72,9 @@ export const scorePdf = async (pdfPath) => {
     // Handwritten non-Latin scripts (Persian/Arabic image PDFs) are hardest → OCR nearly always fails.
     const scriptHard = ['persian','arabic','hebrew','hindi','chinese','japanese','korean'].includes(language);
     const processing_difficulty = hasText === 1
-      ? 0.05                                                          // text layer: skip OCR, trivially easy
-      : pages === 0 ? 1.0                                             // unreadable/failed: assume worst
-      : Math.min(1.0, (pages / 400) * (scriptHard ? 2.0 : 1.0));    // image PDF: page count + script penalty
+      ? 0.05                                                                   // text layer: skip OCR, trivially easy
+      : pages === 0 ? 1.0                                                      // unreadable/failed: assume worst
+      : Math.max(0.3, Math.min(1.0, (pages / 400) * (scriptHard ? 2.0 : 1.0))); // image PDF: min 0.3 (needs OCR)
     return { avg_chars_per_page: Math.round(avgChars), readable_pages_pct: Math.round(readablePct * 100) / 100, has_text_layer: hasText, word_quality_estimate: Math.round(wq * 100) / 100, composite_score: Math.round(composite * 100) / 100, pages, pdf_title, excerpt, language, processing_difficulty: Math.round(processing_difficulty * 100) / 100 };
   } catch { return empty; }
 };
