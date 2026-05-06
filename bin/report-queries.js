@@ -111,8 +111,8 @@ export const siteDocs = (domain, params) => {
     const vals = [];
 
     if (tab === 'upgraded') {
-      // submitted = handed to pipeline OCR queue; processing = actively running; done/failed = terminal
-      wheres.push("u.status IN ('done','processing','submitted','failed')");
+      // done = completed; processing = actively running in pipeline
+      wheres.push("u.status IN ('done','processing')");
     }
     // 'original' (default/fallback): all PDFs, no quality filter
 
@@ -130,7 +130,7 @@ export const siteDocs = (domain, params) => {
       improved_desc: 'COALESCE(u.score_improvement, 0) DESC'
     };
     // Upgraded default: currently processing first, then done by newest first
-    const upgradedOrder = `CASE u.status WHEN 'processing' THEN 0 WHEN 'submitted' THEN 0 WHEN 'done' THEN 1 ELSE 2 END ASC, u.finished_at DESC NULLS LAST`;
+    const upgradedOrder = `CASE u.status WHEN 'processing' THEN 0 WHEN 'done' THEN 1 ELSE 2 END ASC, u.finished_at DESC NULLS LAST`;
     const orderBy = tab === 'upgraded'
       ? (orderMap[sort] || upgradedOrder)
       : (sort && orderMap[sort])
@@ -156,7 +156,7 @@ export const siteTabCounts = (domain) => {
     const row = db.prepare(`
       SELECT
         COUNT(*) as original,
-        SUM(CASE WHEN u.status IN ('done','processing','submitted') THEN 1 ELSE 0 END) as upgraded
+        SUM(CASE WHEN u.status IN ('done','processing') THEN 1 ELSE 0 END) as upgraded
       FROM pages p
       LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
       WHERE p.gone=0 AND p.mime_type='application/pdf' AND LOWER(p.url) LIKE '%.pdf'

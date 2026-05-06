@@ -556,24 +556,6 @@ if ('serviceWorker' in navigator) {
                     </div>
                   </template>
 
-                  <!-- Submitted panel: show what will be processed -->
-                  <template x-if="activeTab==='upgraded' && doc.status==='submitted'">
-                    <div class="mt-2 rounded-lg border border-gray-100 bg-gray-50/50 px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-600 items-center">
-                      <span class="font-semibold px-2 py-0.5 rounded-full"
-                            :class="doc.pdf_type==='image' ? 'bg-amber-100 text-amber-800' : doc.pdf_type==='mixed' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'"
-                            x-text="doc.pdf_type==='image' ? 'Image PDF' : doc.pdf_type==='mixed' ? 'Mixed PDF' : 'Text PDF'"></span>
-                      <template x-if="doc.effective_before != null">
-                        <span><span class="text-gray-400">score</span> <span class="score-pill font-mono ml-1" :class="scorePillCls(doc.effective_before)" x-text="Math.round(doc.effective_before*100)+'%'"></span></span>
-                      </template>
-                      <template x-if="doc.pages">
-                        <span class="text-gray-500 font-mono"><span x-text="fmt(doc.pages)"></span> pp</span>
-                      </template>
-                      <template x-if="doc.ai_language && doc.lang_key !== 'english' && doc.lang_key !== 'unknown'">
-                        <span class="text-gray-400" x-text="doc.ai_language"></span>
-                      </template>
-                    </div>
-                  </template>
-
                   <!-- Upgraded tab: full report panel for done docs -->
                   <template x-if="activeTab==='upgraded' && doc.status==='done'">
                     <div class="mt-2 rounded-lg border border-green-200 bg-white overflow-hidden text-xs">
