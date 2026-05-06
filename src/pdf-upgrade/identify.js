@@ -29,10 +29,11 @@ const SCRIPT_TO_LANG = {
 };
 
 // Tesseract script name → our canonical language key
+// Latin is intentionally 'unknown' here — Haiku must discriminate English/French/Spanish/German/etc.
 const SCRIPT_TO_KEY = {
   arabic: 'arabic', Persian: 'persian', Hebrew: 'hebrew',
   Cyrillic: 'russian', Han: 'chinese', Japanese: 'japanese',
-  Latin: 'english',
+  Latin: 'unknown',
 };
 
 /** Rasterize one PDF page to a temp PPM using pdftoppm. Returns file path or null. */
@@ -126,8 +127,8 @@ Script detected by OCR: ${script}
 
 ${context}
 
-Respond with exactly these 4 lines (use "Unknown" if you cannot determine):
-Language: [English/Arabic/Persian/Hebrew/Russian/Japanese/Chinese/other]
+Respond with exactly these 4 lines (use "Unknown" if you genuinely cannot determine):
+Language: [English/French/Spanish/German/Arabic/Persian/Hebrew/Russian/Japanese/Chinese/other — be specific]
 Title: [document title]
 Author: [author name or organization]
 Summary: [one sentence describing what this document is about]`;
@@ -159,6 +160,9 @@ const normalizeLanguageKey = (lang) => {
   if (!lang) return 'unknown';
   const l = lang.toLowerCase();
   if (l.includes('english')) return 'english';
+  if (l.includes('french') || l.includes('français')) return 'french';
+  if (l.includes('spanish') || l.includes('español') || l.includes('castellano')) return 'spanish';
+  if (l.includes('german') || l.includes('deutsch')) return 'german';
   if (l.includes('arabic')) return 'arabic';
   if (l.includes('persian') || l.includes('farsi')) return 'persian';
   if (l.includes('hebrew')) return 'hebrew';
@@ -201,8 +205,8 @@ export const identifyDocument = async (pdfPath, metadata, db, docUrl, apiKey) =>
     }
   }
 
-  // Stage 3: Vision LLM (boss or Claude fallback) — only escalate if both above yielded nothing
-  if (!result && langKey === 'unknown') {
+  // Stage 3: Vision LLM — escalate whenever language is still unknown (even if Haiku got title/author)
+  if (langKey === 'unknown') {
     try {
       const backend = await ocrAvailableBackend();
       if (backend) {
@@ -210,11 +214,15 @@ export const identifyDocument = async (pdfPath, metadata, db, docUrl, apiKey) =>
         if (language || topic) {
           const normalized = normalizeLanguageKey(language);
           langKey = normalized !== 'unknown' ? normalized : langKey;
-          result = { language: language || null, title: null, author: null, summary: topic || null, langKey, stage: backend };
+          result = { ...(result || {}), language: language || null, summary: topic || result?.summary || null, langKey, stage: backend };
         }
       }
     } catch {}
   }
+
+  // Final fallback: Latin script detected → almost certainly a European language; default to 'english'
+  // rather than leaving 'unknown' (which triggers deprioritization as unknown)
+  if (langKey === 'unknown' && script === 'Latin') langKey = 'english';
 
   // Save to DB
   const updates = [];
