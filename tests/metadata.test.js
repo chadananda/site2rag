@@ -111,4 +111,38 @@ describe('extractMetadata', () => {
     expect(meta.title).toBe('Meta Title');
     expect(meta.title_source).toBe('meta');
   });
+
+  it('uses JSON-LD name when headline is absent', () => {
+    const page = html('<script type="application/ld+json">{"@type":"WebPage","name":"Page Name"}</script>');
+    const meta = extractMetadata(page, 'https://example.com/test');
+    expect(meta.title).toBe('Page Name');
+    expect(meta.title_source).toBe('json_ld');
+  });
+
+  it('title_source is "filename" when no title found in HTML', () => {
+    const page = `<!DOCTYPE html><html><head></head><body></body></html>`;
+    const meta = extractMetadata(page, 'https://example.com/my-article');
+    expect(meta.title).toBe('my-article');
+    expect(meta.title_source).toBe('filename');
+  });
+
+  it('extracts author from .byline element', () => {
+    const page = html('<div class="byline">Jane Smith</div>');
+    const meta = extractMetadata(page, 'https://example.com/test');
+    expect(meta.authors).toHaveLength(1);
+    expect(meta.authors[0].name).toBe('Jane Smith');
+  });
+
+  it('extracts date_modified from article:modified_time meta', () => {
+    const page = html('<meta property="article:modified_time" content="2024-06-15T12:00:00Z">');
+    const meta = extractMetadata(page, 'https://example.com/test');
+    expect(meta.date_modified).toMatch(/^2024-06-15/);
+  });
+
+  it('extracts author from meta[name="DC.Creator"]', () => {
+    const page = html('<meta name="DC.Creator" content="Dublin Core Author">');
+    const meta = extractMetadata(page, 'https://example.com/test');
+    expect(meta.authors).toHaveLength(1);
+    expect(meta.authors[0].name).toBe('Dublin Core Author');
+  });
 });
