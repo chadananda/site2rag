@@ -184,6 +184,30 @@ describe('spellFixWordObjects — hyphen merge edge cases', () => {
     expect(result.words[0]._srcIdx).toBe(0);
     expect(result.words[0]._mergedSrcIdx).toBe(1);
   });
+
+  it('extends bbox when hyphen pair is on the same line', async () => {
+    // Same line: next.y1 <= obj.y2
+    createMock.mockResolvedValueOnce(okResponse('1:anticipates\n'));
+    const words = [
+      { text: 'antici-', x1: 10, y1: 100, x2: 80, y2: 120 },
+      { text: 'pates',   x1: 90, y1: 100, x2: 150, y2: 120 },
+    ];
+    const result = await spellFixWordObjects(words, 'key', {});
+    expect(result.words[0].x2).toBe(150); // extended to cover second word
+    expect(result.words[0].y2).toBe(120);
+  });
+
+  it('does NOT extend bbox for cross-line hyphen (second word below first)', async () => {
+    // Cross-line: next.y1 (200) > obj.y2 (120)
+    createMock.mockResolvedValueOnce(okResponse('1:continuation\n'));
+    const words = [
+      { text: 'con-',        x1: 10, y1: 100, x2: 80, y2: 120 },
+      { text: 'tinuation',   x1: 10, y1: 200, x2: 150, y2: 220 }, // next line
+    ];
+    const result = await spellFixWordObjects(words, 'key', {});
+    expect(result.words[0].x2).toBe(80); // NOT extended — bbox stays at first word
+    expect(result.words[0].y2).toBe(120);
+  });
 });
 
 describe('spellFixMarkdown', () => {

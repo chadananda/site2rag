@@ -350,4 +350,27 @@ describe('s3Ocr stage', () => {
     expect(ctx.pages[0]._bucketed.fuzzy).toBe(1);
     expect(ctx.pages[0]._bucketed.dirty).toBe(1);
   });
+
+  it('records quality.perStage.s3 when pages have words', async () => {
+    mockExecFile();
+    const ctx = makeCtx();
+    ctx.setBaseline({ composite_score: 0.3 });
+    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
+    await s3Ocr(ctx);
+    expect(ctx.quality.perStage['s3']).toBeDefined();
+    expect(ctx.quality.perStage['s3']).toBeGreaterThan(0);
+  });
+
+  it('does NOT record quality.perStage.s3 when no pages have words', async () => {
+    // execFile always returns empty hOCR → no words
+    execFile.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      callback(null, { stdout: '', stderr: '' });
+    });
+    const ctx = makeCtx();
+    ctx.setBaseline({ composite_score: 0.3 });
+    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
+    await s3Ocr(ctx);
+    expect(ctx.quality.perStage['s3']).toBeUndefined();
+  });
 });
