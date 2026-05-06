@@ -112,6 +112,70 @@ describe('analyzeRun — model_config suggestion', () => {
   });
 });
 
+describe('analyzeRun — threshold suggestion', () => {
+  it('inserts threshold suggestion when baseline is within 0.05 of goodDoc threshold', () => {
+    const ctx = makeCtx();
+    ctx.sourceUrl = 'https://example.com/doc.pdf';
+    ctx.domain = { subject: 'legal', confidence: 0.8, source: 'pattern_match' };
+    // goodDoc default is 0.75; set baseline to 0.73 (within 0.05)
+    ctx.setBaseline({ composite_score: 0.73 });
+
+    analyzeRun(ctx, db);
+
+    const s = db.prepare("SELECT * FROM improvement_suggestions WHERE category='threshold'").get();
+    expect(s).toBeDefined();
+    expect(s.suggestion).toBe('consider_adjusting_goodDoc_threshold');
+    expect(s.priority).toBe('low');
+  });
+
+  it('does NOT insert threshold suggestion when baseline is far from goodDoc threshold', () => {
+    const ctx = makeCtx();
+    ctx.sourceUrl = 'https://example.com/doc.pdf';
+    ctx.domain = { subject: 'legal', confidence: 0.8, source: 'pattern_match' };
+    // baseline 0.30 is far from default goodDoc 0.75
+    ctx.setBaseline({ composite_score: 0.30 });
+
+    analyzeRun(ctx, db);
+
+    const s = db.prepare("SELECT * FROM improvement_suggestions WHERE category='threshold'").get();
+    expect(s).toBeFalsy();
+  });
+});
+
+describe('analyzeRun — stage_value suggestion', () => {
+  it('inserts stage_value suggestion when s6 runs with cost but no quality delta', () => {
+    const ctx = makeCtx();
+    ctx.sourceUrl = 'https://example.com/doc.pdf';
+    ctx.domain = { subject: 'legal', confidence: 0.8, source: 'pattern_match' };
+    ctx.setBaseline({ composite_score: 0.5 });
+    // s6 ran and recorded cost, but no quality improvement
+    ctx.beginStage('s6');
+    ctx.endStage('s6', { cost_usd: 0.005, tokens_in: 200, tokens_out: 100 });
+    ctx.recordStageQuality('s6', 0.5); // same as baseline → delta = 0
+
+    analyzeRun(ctx, db);
+
+    const s = db.prepare("SELECT * FROM improvement_suggestions WHERE category='stage_value'").get();
+    expect(s).toBeDefined();
+    expect(s.signal).toBe('s6_zero_delta');
+  });
+
+  it('does NOT insert stage_value when stage has negligible cost', () => {
+    const ctx = makeCtx();
+    ctx.sourceUrl = 'https://example.com/doc.pdf';
+    ctx.domain = { subject: 'legal', confidence: 0.8, source: 'pattern_match' };
+    ctx.setBaseline({ composite_score: 0.5 });
+    ctx.beginStage('s6');
+    ctx.endStage('s6', { cost_usd: 0.0005 }); // below 0.001 threshold
+    ctx.recordStageQuality('s6', 0.5);
+
+    analyzeRun(ctx, db);
+
+    const s = db.prepare("SELECT * FROM improvement_suggestions WHERE category='stage_value'").get();
+    expect(s).toBeFalsy();
+  });
+});
+
 describe('reviewSuggestions', () => {
   it('returns runStats, stageStats, normFreq, suggestions arrays', () => {
     const result = reviewSuggestions(db);

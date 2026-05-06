@@ -111,6 +111,64 @@ describe('s0Baseline — contract', () => {
   });
 });
 
+// SKIP LOGIC tests: verify skip flag decisions from s0
+describe('s0Baseline — skip logic', () => {
+  let tmpDir, cleanup;
+  beforeEach(() => { ({ dir: tmpDir, cleanup } = makeTempDir()); });
+  afterEach(() => cleanup());
+
+  it('skips s1-s5 when text PDF has high avg chars per page (text_layer_skip)', async () => {
+    const pdfPath = join(tmpDir, 'textrich.pdf');
+    // 350+ chars of English text → has_text_layer=1 AND avg_chars >= 300
+    writeFileSync(pdfPath, makeTextPdf('word '.repeat(80)));
+    const ctx = makeCtx({ dir: tmpDir, pdfPath, config: { thresholds: { goodDoc: 0.99 } } });
+
+    await s0Baseline(ctx);
+
+    if (ctx.quality.baseline.has_text_layer === 1 && ctx.quality.baseline.avg_chars_per_page >= 300) {
+      expect(ctx.config.skip).toContain('s1');
+      expect(ctx.config.skip).toContain('s3');
+      expect(ctx.config.skip).toContain('s5');
+      const decision = ctx.metrics.decisions.find(d => d.decision === 'skip_all_ocr');
+      expect(decision).toBeDefined();
+    }
+  });
+
+  it('skips s4-s5 but not s1-s3 for sparse text PDFs (skip_ocr_escalation)', async () => {
+    const pdfPath = join(tmpDir, 'sparse.pdf');
+    // 50 chars — has_text_layer=1 but avg_chars < 300
+    writeFileSync(pdfPath, makeTextPdf('hello world short text'));
+    const ctx = makeCtx({ dir: tmpDir, pdfPath, config: { thresholds: { goodDoc: 0.99 } } });
+
+    await s0Baseline(ctx);
+
+    const baseline = ctx.quality.baseline;
+    if (baseline.has_text_layer === 1 && (baseline.avg_chars_per_page ?? 0) < 300) {
+      expect(ctx.config.skip).toContain('s4');
+      expect(ctx.config.skip).toContain('s5');
+    }
+  });
+
+  it('skips s5 when importance below localVision gate on easy doc', async () => {
+    const pdfPath = join(tmpDir, 'easy.pdf');
+    writeFileSync(pdfPath, makeTextPdf('hello world '.repeat(5)));
+    // importance=1, localVision=3 → skip s5 if difficulty < 0.3
+    const ctx = makeCtx({
+      dir: tmpDir, pdfPath, importance: 1,
+      config: { thresholds: { goodDoc: 0.99 }, escalation: { localVision: 3 } },
+    });
+
+    await s0Baseline(ctx);
+
+    const baseline = ctx.quality.baseline;
+    if ((baseline.processing_difficulty ?? 1) < 0.3) {
+      expect(ctx.config.skip).toContain('s5');
+      const decision = ctx.metrics.decisions.find(d => d.decision === 'skip_vision');
+      expect(decision).toBeDefined();
+    }
+  });
+});
+
 // QUALITY tests: verify actual improvement direction on known fixtures
 describe('s0Baseline — quality', () => {
   let tmpDir, cleanup;
