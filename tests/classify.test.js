@@ -37,6 +37,18 @@ describe('runClassify', () => {
     const row = db.prepare('SELECT * FROM pages WHERE url=?').get('https://classify.example.com/redirect');
     expect(row.page_role).toBe('redirect');
   });
+  it('classifies index pages (many links, low text-to-link ratio)', async () => {
+    const path = join(tmpDir, 'navindex.html');
+    // Few words but many outbound links → ttr < 5 and outbound_link_count > 10 → index
+    const links = Array(15).fill(0).map((_, i) =>
+      `<a href="https://classify.example.com/topic-${i}">Topic ${i}</a>`
+    ).join('');
+    writeFileSync(path, pageHtml(`<p>Browse topics:</p>${links}`, 'Topics'));
+    db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone) VALUES (?,?,?,?,?)').run('https://classify.example.com/navindex', 'navindex', path, 'text/html', 0);
+    await runClassify(db, { domain: DOMAIN, classify: { word_threshold: 200 } });
+    const row = db.prepare('SELECT * FROM pages WHERE url=?').get('https://classify.example.com/navindex');
+    expect(row.page_role).toBe('index');
+  });
   it('applies classify_overrides from rules', async () => {
     const path = join(tmpDir, 'manual.html');
     writeFileSync(path, pageHtml('<p>Some content</p>', 'Manual'));
