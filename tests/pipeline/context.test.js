@@ -124,6 +124,24 @@ describe('PipelineContext', () => {
     expect(restored.pageCount).toBe(12);
   });
 
+  it('toJSON/fromJSON round-trip preserves metrics, domain, and outputs', () => {
+    const ctx = makeCtx();
+    ctx.setBaseline({ composite_score: 0.5 });
+    ctx.beginStage('s3');
+    ctx.endStage('s3', { cost_usd: 0.01, tokens_in: 100, tokens_out: 50 });
+    ctx.addDecision('s3', 'routing_summary', '{"eng":1}');
+    ctx.domain = { subject: 'religious-texts', confidence: 0.9, source: 'pattern_match' };
+    ctx.outputs.mdPath = '/tmp/out.md';
+
+    const restored = PipelineContext.fromJSON(ctx.toJSON());
+
+    expect(restored.metrics.stages).toHaveLength(1);
+    expect(restored.metrics.stages[0].stage).toBe('s3');
+    expect(restored.domain.subject).toBe('religious-texts');
+    expect(restored.outputs.mdPath).toBe('/tmp/out.md');
+    expect(restored.sourceUrl).toBe(ctx.sourceUrl);
+  });
+
   it('toReceipt cost_efficiency suggestion is high priority when cost > 0.10', () => {
     const ctx = makeCtx();
     ctx.beginStage('s5');
