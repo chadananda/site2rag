@@ -134,6 +134,30 @@ describe('maybeQueue', () => {
     const result = maybeQueue(db, 'https://example.com/d.pdf', 'h6', 0.35, 0.7);
     expect(result).toBe(true);
   });
+
+  it('Arabic percent-encoded URL gets very low priority (LANG_PRIORITY.arabic = 0.02)', () => {
+    // Arabic URL — detectLanguageFromUrl returns 'arabic' → priority multiplier 0.02
+    const arabicUrl = 'https://example.com/%D8%A8%D8%B3%D9%85.pdf';
+    maybeQueue(db, arabicUrl, 'ha', 0.4, 0.7, 'english', 0);
+    maybeQueue(db, 'https://example.com/english.pdf', 'he', 0.4, 0.7, 'english', 0);
+    const arabic = db.prepare('SELECT priority FROM pdf_upgrade_queue WHERE url=?').get(arabicUrl);
+    const english = db.prepare("SELECT priority FROM pdf_upgrade_queue WHERE url=?").get('https://example.com/english.pdf');
+    // Arabic priority should be ~50× lower than English (0.02 vs 1.0)
+    expect(arabic.priority).toBeLessThan(english.priority * 0.1);
+  });
+
+  it('prefers db-stored ai_language over passed language parameter', () => {
+    // Insert db row with ai_language='persian'
+    db.prepare('INSERT INTO pdf_quality (url, ai_language, has_text_layer) VALUES (?,?,?)')
+      .run('https://example.com/persian.pdf', 'persian', 0);
+    // Pass 'english' as language parameter — db should win
+    maybeQueue(db, 'https://example.com/persian.pdf', 'hp', 0.4, 0.7, 'english', 0);
+    maybeQueue(db, 'https://example.com/english.pdf', 'he', 0.4, 0.7, 'english', 0);
+    const persian = db.prepare('SELECT priority FROM pdf_upgrade_queue WHERE url=?').get('https://example.com/persian.pdf');
+    const english = db.prepare("SELECT priority FROM pdf_upgrade_queue WHERE url=?").get('https://example.com/english.pdf');
+    // Persian (LANG_PRIORITY=0.02) should have lower priority than English (1.0)
+    expect(persian.priority).toBeLessThan(english.priority * 0.1);
+  });
 });
 
 describe('extractBadSample', () => {
