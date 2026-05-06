@@ -128,13 +128,18 @@ const checkPipelineJobs = async (db) => {
       const job = await pipelineClient.getJob(jobId);
       if (job.status === 'done') {
         const receipt = job.receipt ?? {};
+        const afterScore = receipt.quality?.final ?? null;
         db.prepare(`UPDATE pdf_upgrade_queue
           SET status='done', finished_at=?, upgraded_pdf_path=?,
               after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL
           WHERE url=?`)
           .run(now(), job.pdf_out_path ?? null,
-            receipt.quality?.final ?? null, receipt.quality?.gain ?? null,
+            afterScore, receipt.quality?.gain ?? null,
             receipt.page_count ?? null, 'pipeline-v2', JSON.stringify(receipt), url);
+        // Update pdf_quality so the score badge reflects post-upgrade quality
+        if (afterScore != null) {
+          db.prepare('UPDATE pdf_quality SET composite_score=? WHERE url=?').run(afterScore, url);
+        }
         logUpgradeHistory(db, url, { method: 'pipeline-v2', score_before: before_score,
           score_after: receipt.quality?.final ?? null, pages_processed: receipt.page_count ?? null });
         log(`Pipeline done: ${url.split('/').pop()}`);
@@ -443,6 +448,20 @@ const tick = async () => {
       log(`Pre-warming boss for ${pass2plus.length} pending OCR job(s)`);
     }
 
+    // Poll pipeline for completed/failed jobs unconditionally — even when no new submissions are needed.
+    // checkPipelineJobs was previously inside runPass1, so it only ran when there were pending items.
+    // With all items submitted (status='submitted'), pass1 would be empty and completions were never detected.
+    if (pipelineClient) {
+      let pipelineReachable = true;
+      try {
+        await pipelineClient.health();
+        await Promise.all(openDbs.map(({ db }) => checkPipelineJobs(db)));
+      } catch (err) {
+        pipelineReachable = false;
+        log(`ERROR: Pipeline service unreachable (${err.message}) — skipping pass-1 this tick. Fix PIPELINE_URL or start pipeline-server.`);
+      }
+    }
+
     // Pass 1 (Marker) and Pass 2+ (boss/Claude) run concurrently — CPU and GPU are independent
     const [markerOk, ocrBackend] = await Promise.all([markerAvailable(), ocrAvailableBackend()]);
 
@@ -450,17 +469,12 @@ const tick = async () => {
       if (!pass1.length) return;
 
       // When PIPELINE_URL is set, all pass-1 work goes through the pipeline service.
-      // If the service is unreachable, skip this tick rather than silently falling back —
-      // a hidden fallback would mask deployment problems and mix upgrade methods unexpectedly.
       if (pipelineClient) {
         try {
           await pipelineClient.health();
         } catch (err) {
-          log(`ERROR: Pipeline service unreachable (${err.message}) — skipping pass-1 this tick. Fix PIPELINE_URL or start pipeline-server.`);
-          return;
+          return; // already logged above
         }
-        // Poll already-submitted jobs first — update done/failed without blocking
-        await Promise.all(openDbs.map(({ db }) => checkPipelineJobs(db)));
         // Submit only newly-pending docs (not already in pipeline)
         pass1.sort((a,b) => (b.row.priority||0) - (a.row.priority||0));
         const batch = pass1.slice(0, MARKER_CONCURRENCY);
@@ -534,7 +548,9 @@ const resetStuckProcessing = () => {
       let db;
       try {
         db = openDb(domain);
-        const n = db.prepare("UPDATE pdf_upgrade_queue SET status='pending', started_at=NULL WHERE status IN ('processing','submitted')").run().changes;
+        // Only reset 'processing' (in-flight local jobs) — NOT 'submitted' (queued in pipeline service).
+        // Submitted jobs are stable: the pipeline holds them and checkPipelineJobs will update them when done.
+        const n = db.prepare("UPDATE pdf_upgrade_queue SET status='pending', started_at=NULL WHERE status='processing'").run().changes;
         if (n) log(`Reset ${n} stuck docs to pending`);
         // Reset failed docs whose failure was a pipeline timeout (not a real processing error).
         // These docs never got a fair chance — they were just waiting in a queue when the old
