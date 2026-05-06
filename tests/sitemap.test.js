@@ -14,7 +14,7 @@ vi.mock('undici', () => ({
 
 import { fetch } from 'undici';
 import { openDb } from '../src/db.js';
-import { runSitemap, parseSitemapXml } from '../src/sitemap.js';
+import { runSitemap, parseSitemapXml, hasSitemapOrFallback } from '../src/sitemap.js';
 
 const DOMAIN = 'sitemap.example.com';
 const SITE_URL = `https://${DOMAIN}`;
@@ -222,5 +222,35 @@ describe('parseSitemapXml', () => {
     expect(result.type).toBe('index');
     expect(result.urls).toHaveLength(2);
     expect(result.urls[0].url).toBe('https://example.com/sitemap1.xml');
+  });
+});
+
+describe('hasSitemapOrFallback', () => {
+  afterEach(() => vi.clearAllMocks());
+
+  it('returns true when sitemap.enabled is false (defaults to fallback_to_crawl)', async () => {
+    const result = await hasSitemapOrFallback({ sitemap: { enabled: false } });
+    expect(result).toBe(true);
+  });
+
+  it('returns false when sitemap.enabled is false AND fallback_to_crawl is explicitly false', async () => {
+    const result = await hasSitemapOrFallback({ sitemap: { enabled: false, fallback_to_crawl: false } });
+    expect(result).toBe(false);
+  });
+
+  it('returns true when sitemap.enabled is true and sitemap.xml responds OK', async () => {
+    fetch.mockImplementation(async () => ({
+      ok: true, status: 200,
+      text: async () => sitemapXml([{ url: `${SITE_URL}/page` }]),
+      headers: { get: () => null }
+    }));
+    const result = await hasSitemapOrFallback({ url: SITE_URL, domain: DOMAIN, sitemap: { enabled: true } });
+    expect(result).toBe(true);
+  });
+
+  it('returns fallback_to_crawl value when no sitemap found and enabled=true', async () => {
+    fetch.mockResolvedValue({ ok: false, status: 404, text: async () => '', headers: { get: () => null } });
+    const result = await hasSitemapOrFallback({ url: SITE_URL, domain: DOMAIN, sitemap: { enabled: true, fallback_to_crawl: true } });
+    expect(result).toBe(true);
   });
 });
