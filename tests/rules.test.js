@@ -31,6 +31,27 @@ describe('applyFollowOverride', () => {
     expect(applyFollowOverride(compiled, 'https://example.com/docs')).toBeNull();
   });
 });
+describe('applyOcrOverride', () => {
+  it('returns override config object for matching URL', () => {
+    const compiled = compileRules({ ocr_overrides: [{ pattern: '/arabic/.*', language: 'ara', engines: ['tesseract'] }] });
+    const result = applyOcrOverride(compiled, 'https://example.com/arabic/doc.pdf');
+    // Returns the original rule object (minus the compiled pattern) — just check key fields
+    expect(result).toBeDefined();
+    expect(result.language).toBe('ara');
+    expect(result.engines).toEqual(['tesseract']);
+  });
+
+  it('returns null when no pattern matches', () => {
+    const compiled = compileRules({ ocr_overrides: [{ pattern: '/arabic/.*', language: 'ara' }] });
+    expect(applyOcrOverride(compiled, 'https://example.com/english/doc.pdf')).toBeNull();
+  });
+
+  it('returns null for empty ocr_overrides', () => {
+    const compiled = compileRules({});
+    expect(applyOcrOverride(compiled, 'https://example.com/any.pdf')).toBeNull();
+  });
+});
+
 describe('stripQueryParams', () => {
   it('strips listed query params', () => {
     const compiled = compileRules({ canonical_strip_query: ['utm_source', 'ref'] });
