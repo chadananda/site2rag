@@ -153,3 +153,15 @@ describe('summarizeTopPending — language detection fallback', () => {
     expect(row.ai_summarized_at).toBeTruthy();
   });
 });
+
+describe('summarizeTopPending — error handling', () => {
+  it('leaves ai_summarized_at null when API throws — no re-throw', async () => {
+    createMock.mockRejectedValueOnce(new Error('API overloaded'));
+    const db = makeDb([{ url: 'https://example.com/err.pdf', excerpt: 'Some content here.' }]);
+    // Should resolve without throwing
+    await expect(summarizeTopPending(db, {})).resolves.toBeUndefined();
+    // ai_summarized_at must NOT be set (doc should be retried next run)
+    const row = db.prepare('SELECT ai_summarized_at FROM pdf_quality').get();
+    expect(row.ai_summarized_at).toBeNull();
+  });
+});
