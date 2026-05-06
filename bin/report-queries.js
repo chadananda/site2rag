@@ -129,8 +129,8 @@ export const siteDocs = (domain, params) => {
       title_asc: 'COALESCE(h.hosted_title, p.url) ASC',
       improved_desc: 'COALESCE(u.score_improvement, 0) DESC'
     };
-    // Upgraded default: actively processing first, failed second, done last; then by importance/score
-    const upgradedOrder = `CASE u.status WHEN 'processing' THEN 0 WHEN 'failed' THEN 1 ELSE 2 END ASC, COALESCE(u.importance,3) DESC, COALESCE(q.composite_score,1) ASC`;
+    // Upgraded default: highest-priority (easy text-layer) first, then by status (done before processing), then newest first
+    const upgradedOrder = `COALESCE(u.priority, 0) DESC, CASE u.status WHEN 'done' THEN 0 WHEN 'processing' THEN 1 ELSE 2 END ASC, u.finished_at DESC NULLS LAST`;
     const orderBy = tab === 'upgraded'
       ? (orderMap[sort] || upgradedOrder)
       : (sort && orderMap[sort])
