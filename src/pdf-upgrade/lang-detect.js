@@ -94,7 +94,8 @@ export const detectLanguageForImagePdfs = async (db, domain) => {
     JOIN pages p ON pq.url=p.url
     LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title FROM hosts GROUP BY hosted_url) h ON pq.url=h.hosted_url
     LEFT JOIN pages hp ON h.host_url=hp.url
-    WHERE pq.ai_language='unknown'
+    WHERE (pq.ai_language='unknown'
+           OR (pq.ai_language='english' AND pq.has_text_layer=0 AND (pq.word_quality_estimate IS NULL OR pq.word_quality_estimate < 0.1)))
       AND (pq.has_text_layer=0 OR pq.has_text_layer IS NULL
            OR (pq.has_text_layer=1 AND (pq.word_quality_estimate IS NULL OR pq.word_quality_estimate < 0.05)))
       AND p.local_path IS NOT NULL

@@ -241,7 +241,7 @@ createServer(async (req, res) => {
     }
     try {
       mkdirSync(thumbDir, { recursive: true });
-      await generateThumb(pdfPath, thumbPath, w, pageNo, h);
+      await generateThumb(row.local_path, thumbPath, w, pageNo, h);
       if (w === 144 && h === 192 && pageNo === 1) {
         const db2 = safeOpenDb(domain);
         if (db2) { try { db2.prepare('UPDATE pdf_quality SET thumbnail_path=? WHERE url=?').run(thumbPath, docUrl); } finally { db2.close(); } }
