@@ -276,7 +276,7 @@ if ('serviceWorker' in navigator) {
             <div class="seg-fill bg-blue-200" :style="'width:'+upgradeSegPct(activeSite,'ok')+'%'" :title="fmt(activeSite.already_ok||0)+' already readable'"></div>
             <div class="seg-fill bg-green-400" :style="'width:'+upgradeSegPct(activeSite,'done')+'%'" :title="fmt(activeSite.upgraded)+' upgraded'"></div>
             <div class="seg-fill bg-amber-400" :style="'width:'+upgradeSegPct(activeSite,'processing')+'%'" :title="fmt(activeSite.processing||0)+' in progress'"></div>
-            <div class="seg-fill-rest bg-red-300" :title="fmt((activeSite.pending||0)+(activeSite.failed||0))+' pending'"></div>
+            <div class="seg-fill-rest bg-red-300" :title="fmt((activeSite.total_pdfs||0)-(activeSite.upgraded||0)-(activeSite.already_ok||0)-(activeSite.processing||0))+' remaining'"></div>
           </div>
           <div class="flex justify-between text-xs mt-1">
             <span class="text-blue-400" x-text="fmt(activeSite.already_ok||0)+' OK'"></span>
@@ -284,7 +284,7 @@ if ('serviceWorker' in navigator) {
             <template x-if="(activeSite.processing||0) > 0">
               <span class="text-amber-600 font-medium" x-text="fmt(activeSite.processing||0)+' processing'"></span>
             </template>
-            <span class="text-red-400 font-medium" x-text="fmt((activeSite.pending||0)+(activeSite.failed||0))+' pending'"></span>
+            <span class="text-red-400 font-medium" x-text="fmt(Math.max(0,(activeSite.total_pdfs||0)-(activeSite.upgraded||0)-(activeSite.already_ok||0)-(activeSite.processing||0)))+' remain'"></span>
           </div>
         </div>
 
