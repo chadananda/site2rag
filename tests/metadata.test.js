@@ -78,4 +78,37 @@ describe('extractMetadata', () => {
     const meta = extractMetadata(page, 'https://example.com/test');
     expect(meta.canonical_url).toBe('https://example.com/canonical-path');
   });
+
+  it('extracts author from meta[name="author"]', () => {
+    const page = html('<meta name="author" content="Jane Doe">');
+    const meta = extractMetadata(page, 'https://example.com/test');
+    expect(meta.authors).toHaveLength(1);
+    expect(meta.authors[0].name).toBe('Jane Doe');
+  });
+
+  it('extracts keywords from JSON-LD', () => {
+    const page = html('<script type="application/ld+json">{"@type":"Article","headline":"X","keywords":["history","religion"]}</script>');
+    const meta = extractMetadata(page, 'https://example.com/test');
+    expect(meta.keywords).toContain('history');
+    expect(meta.keywords).toContain('religion');
+  });
+
+  it('extracts schema_org_type from JSON-LD @type', () => {
+    const page = html('<script type="application/ld+json">{"@type":"NewsArticle","headline":"Breaking News"}</script>');
+    const meta = extractMetadata(page, 'https://example.com/test');
+    expect(meta.schema_org_type).toBe('NewsArticle');
+  });
+
+  it('uses httpHeaders last-modified as fallback for date_published', () => {
+    const page = html('<title>No Date Article</title>');
+    const meta = extractMetadata(page, 'https://example.com/test', { 'last-modified': 'Mon, 01 Jan 2024 00:00:00 GMT' });
+    expect(meta.date_published).not.toBeNull();
+  });
+
+  it('title_source is "meta" when <title> is used', () => {
+    const page = `<!DOCTYPE html><html><head><title>Meta Title</title></head><body></body></html>`;
+    const meta = extractMetadata(page, 'https://example.com/test');
+    expect(meta.title).toBe('Meta Title');
+    expect(meta.title_source).toBe('meta');
+  });
 });
