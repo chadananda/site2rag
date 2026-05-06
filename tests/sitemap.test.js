@@ -22,8 +22,9 @@ const SITE_URL = `https://${DOMAIN}`;
 const mockFetch = (responses) => {
   fetch.mockImplementation(async (url) => {
     const entry = responses[url] ?? responses['*'];
-    if (!entry) return { ok: false, status: 404, text: async () => '' };
-    return { ok: true, status: 200, text: async () => entry };
+    const headers = { get: () => null };
+    if (!entry) return { ok: false, status: 404, text: async () => '', headers };
+    return { ok: true, status: 200, text: async () => entry, headers };
   });
 };
 

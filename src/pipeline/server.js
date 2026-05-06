@@ -98,11 +98,12 @@ export async function startPipelineServer({
   };
 
   // Poll every 2 s; process multiple pending jobs per poll up to concurrency limit
+  let pollTimer;
   const poll = () => {
     for (let i = 0; i < concurrency; i++) processNext().catch(() => {});
-    setTimeout(poll, 2000);
+    pollTimer = setTimeout(poll, 2000);
   };
-  setTimeout(poll, 100);
+  pollTimer = setTimeout(poll, 100);
 
   const server = createServer(async (req, res) => {
     // Optional API key auth
@@ -196,7 +197,11 @@ export async function startPipelineServer({
   return {
     server,
     jobs,
-    close: () => new Promise(r => server.close(() => { jobs.close(); r(); })),
+    close: () => {
+      clearTimeout(pollTimer);
+      if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+      return new Promise(r => server.close(() => { jobs.close(); r(); }));
+    },
   };
 }
 

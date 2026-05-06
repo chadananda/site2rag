@@ -54,28 +54,42 @@ export async function s6SpellFix(ctx) {
 
       const result = await spellFixWordObjects(fuzzyWords, apiKey, {
         title: ctx.meta?.title,
+        language: ctx.meta?.language,
+        domainContext: ctx.domain?.prompt_context,
         pageNo: page.pageNo,
         totalPages: ctx.pageCount,
+        visionDraft: page._visionDraft ?? null,
       });
 
       // Merge corrections back into page.words by rebuilding the list.
-      // result.words has corrected text + adjusted bboxes for same-line merges.
-      // Build a lookup from original text position via srcIdx tracking.
-      const correctedByText = new Map();
-      for (const w of result.words) correctedByText.set(w._srcIdx, w);
+      // result.words uses _srcIdx (position in fuzzyWords) and _mergedSrcIdx (second-half to drop).
+      // Hyphen-merged pairs: first-half word gets the merged correction; second-half is dropped.
+      const correctedBySrcIdx = new Map();
+      const droppedSrcIdx = new Set();
+      for (const w of result.words) {
+        if (w._srcIdx !== undefined) correctedBySrcIdx.set(w._srcIdx, w);
+        if (w._mergedSrcIdx !== undefined) droppedSrcIdx.add(w._mergedSrcIdx);
+      }
 
       // Replace fuzzy words with corrections; leave non-fuzzy words untouched
       let fixedCount = 0;
       const nextWords = [];
-      let fuzzyIdx = 0;
+      let fuzzyCount = 0;
       for (const w of page.words) {
         const conf = w.conf ?? 100;
         if (conf >= fuzzyLow && conf < cleanHigh) {
-          const corrected = result.words[fuzzyIdx++];
-          if (corrected) {
-            nextWords.push({ ...corrected, source: `${w.source ?? 'ocr'}+spellfix` });
-            if (corrected.text !== w.text) fixedCount++;
+          if (droppedSrcIdx.has(fuzzyCount)) {
+            // Second half of a merged hyphen pair — the preceding word already contains it
+          } else {
+            const corrected = correctedBySrcIdx.get(fuzzyCount);
+            if (corrected) {
+              nextWords.push({ ...corrected, source: `${w.source ?? 'ocr'}+spellfix` });
+              if (corrected.text !== w.text) fixedCount++;
+            } else {
+              nextWords.push(w); // fallback: keep original if correction missing
+            }
           }
+          fuzzyCount++;
         } else {
           nextWords.push(w);
         }
@@ -91,6 +105,19 @@ export async function s6SpellFix(ctx) {
 
     ctx.addDecision('s6', 'completed',
       `${pagesFixed} pages fixed, $${totalCost.toFixed(4)} cost`, totalCost);
+
+    // Record quality after spell-fix: prior score + correction bonus
+    if (pagesFixed > 0) {
+      const prior = ctx.quality.perStage['s5'] ?? ctx.quality.perStage['s3'] ?? ctx.quality.baseline?.composite_score ?? 0;
+      const totalFuzzy = ctx.pages.reduce((s, p) => s + (p.words?.filter(w => {
+        const conf = w.conf ?? 100;
+        return conf >= (ctx.config.thresholds?.fuzzyWord ?? 0.60) * 100 &&
+               conf < (ctx.config.thresholds?.cleanPage ?? 0.90) * 100;
+      }).length ?? 0), 0);
+      const totalFixed = ctx.pages.reduce((s, p) => s + (p._spellFixCount ?? 0), 0);
+      const fixRate = totalFuzzy > 0 ? totalFixed / totalFuzzy : 0;
+      ctx.recordStageQuality('s6', Math.min(1, Math.round((prior + fixRate * (1 - prior) * 0.5) * 1000) / 1000));
+    }
 
   } catch (err) {
     ctx.addError('s6', err, true);

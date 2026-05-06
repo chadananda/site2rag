@@ -199,4 +199,106 @@ describe('s6SpellFix — contract', () => {
     expect(spellFixWordObjects).not.toHaveBeenCalled();
     expect(ctx.metrics.stages.find(s => s.stage === 's6')).toBeUndefined();
   });
+
+  it('forwards page._visionDraft to spellFixWordObjects', async () => {
+    const ctx = makeCtx({ config: { apiKey: 'test-key' } });
+    ctx.quality.baseline = { composite_score: 0.7 };
+    const draft = { boss: 'Boss sees: world history text', marker: null };
+    ctx.pages = [{
+      pageNo: 1,
+      _visionDraft: draft,
+      words: [{ text: 'wrold', conf: 72, x1: 10, y1: 10, x2: 50, y2: 20, source: 'ocr', pageNo: 1 }],
+      regions: [],
+      quality: {},
+    }];
+    spellFixWordObjects.mockResolvedValue({
+      words: [{ text: 'world', conf: 72, x1: 10, y1: 10, x2: 50, y2: 20, _srcIdx: 0 }],
+      tokens_in: 5, tokens_out: 3, cost_usd: 0.00005,
+    });
+
+    await s6SpellFix(ctx);
+
+    const ctxArg = spellFixWordObjects.mock.calls[0][2];
+    expect(ctxArg.visionDraft).toEqual(draft);
+  });
+
+  it('passes null visionDraft when page has no _visionDraft', async () => {
+    const ctx = makeCtx({ config: { apiKey: 'test-key' } });
+    ctx.quality.baseline = { composite_score: 0.7 };
+    ctx.pages = [{
+      pageNo: 1,
+      words: [{ text: 'wrold', conf: 72, x1: 10, y1: 10, x2: 50, y2: 20, source: 'ocr', pageNo: 1 }],
+      regions: [],
+      quality: {},
+    }];
+    spellFixWordObjects.mockResolvedValue({
+      words: [{ text: 'world', conf: 72, x1: 10, y1: 10, x2: 50, y2: 20, _srcIdx: 0 }],
+      tokens_in: 5, tokens_out: 3, cost_usd: 0.00005,
+    });
+
+    await s6SpellFix(ctx);
+
+    const ctxArg = spellFixWordObjects.mock.calls[0][2];
+    expect(ctxArg.visionDraft).toBeNull();
+  });
+
+  it('correctly drops second-half of hyphen-merged pair from page.words', async () => {
+    // spellFixWordObjects merges "antici-" + "pates" into one entry and returns 2 result words
+    // for 3 input words. The second-half "pates" must be dropped, not replace the next word.
+    const ctx = makeCtx({ config: { apiKey: 'test-key' } });
+    ctx.quality.baseline = { composite_score: 0.7 };
+    ctx.pages = [{
+      pageNo: 1,
+      words: [
+        { text: 'antici-', conf: 72, x1: 0, y1: 0, x2: 40, y2: 10, source: 'ocr', pageNo: 1 },
+        { text: 'pates', conf: 71, x1: 0, y1: 15, x2: 30, y2: 25, source: 'ocr', pageNo: 1 },
+        { text: 'good', conf: 75, x1: 0, y1: 30, x2: 30, y2: 40, source: 'ocr', pageNo: 1 },
+      ],
+      regions: [], quality: {},
+    }];
+    // Simulate spellFixWordObjects merging "antici-¶pates" → "anticipates" (srcIdx=0, mergedSrcIdx=1)
+    // and returning "good" unchanged (srcIdx=2)
+    spellFixWordObjects.mockResolvedValue({
+      words: [
+        { text: 'anticipates', conf: 72, x1: 0, y1: 0, x2: 40, y2: 25, _srcIdx: 0, _mergedSrcIdx: 1 },
+        { text: 'good', conf: 75, x1: 0, y1: 30, x2: 30, y2: 40, _srcIdx: 2 },
+      ],
+      tokens_in: 10, tokens_out: 5, cost_usd: 0.0001,
+    });
+
+    await s6SpellFix(ctx);
+
+    const words = ctx.pages[0].words;
+    // "antici-" becomes "anticipates", "pates" is dropped (merged), "good" stays
+    expect(words).toHaveLength(2);
+    expect(words[0].text).toBe('anticipates');
+    expect(words[1].text).toBe('good');
+  });
+
+  it('passes title, language, and domainContext to spellFixWordObjects', async () => {
+    const ctx = makeCtx({ config: { apiKey: 'test-key' } });
+    ctx.quality.baseline = { composite_score: 0.7 };
+    ctx.meta = { title: 'Ottoman History Journal', language: 'turkish' };
+    ctx.domain = { prompt_context: 'Expert context about Ottoman history.' };
+    ctx.pageCount = 5;
+    ctx.pages = [{
+      pageNo: 2,
+      words: [{ text: 'wrold', conf: 72, x1: 10, y1: 10, x2: 50, y2: 20, source: 'ocr', pageNo: 2 }],
+      regions: [],
+      quality: {},
+    }];
+    spellFixWordObjects.mockResolvedValue({
+      words: [{ text: 'world', conf: 72, x1: 10, y1: 10, x2: 50, y2: 20, _srcIdx: 0 }],
+      tokens_in: 5, tokens_out: 3, cost_usd: 0.00005,
+    });
+
+    await s6SpellFix(ctx);
+
+    const ctxArg = spellFixWordObjects.mock.calls[0][2];
+    expect(ctxArg.title).toBe('Ottoman History Journal');
+    expect(ctxArg.language).toBe('turkish');
+    expect(ctxArg.domainContext).toBe('Expert context about Ottoman history.');
+    expect(ctxArg.pageNo).toBe(2);
+    expect(ctxArg.totalPages).toBe(5);
+  });
 });

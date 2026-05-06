@@ -1,18 +1,90 @@
-// Stage 4: Re-OCR at 600 DPI for pages with many dirty words; marks remaining dirty as needs_vision.
+// Stage 4: Re-OCR at 600 DPI for dirty pages; fetches boss+marker vision drafts for broker spell-fix.
 // Exports: s4Escalate. Deps: pdftoppm CLI, tesseract CLI, config.js
 // CONTRACT:
-//   Reads:  ctx.pages[n].words, ctx.pages[n]._lang, ctx.pages[n]._bucketed
+//   Reads:  ctx.pages[n].words, ctx.pages[n]._lang, ctx.pages[n]._bucketed, ctx.pages[n]._pngPath
 //   Writes: may replace page.words; sets w.needs_vision=true on remaining dirty; updates _bucketed.needs_vision
+//           sets page._visionDraft = { boss: string|null, marker: string|null } for dirty pages
 
 import { shouldRun } from '../config.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { mkdirSync, existsSync } from 'fs';
+import { mkdirSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createHash } from 'crypto';
 
 const execFileAsync = promisify(execFile);
+
+// ── vision draft helpers (boss + marker, run in parallel) ─────────────────────
+
+function buildDraftPrompt(ctx) {
+  const parts = [];
+  if (ctx.meta?.title) parts.push(`Document: "${ctx.meta.title}"`);
+  if (ctx.meta?.language) parts.push(`Language: ${ctx.meta.language}`);
+  if (ctx.domain?.prompt_context) parts.push(ctx.domain.prompt_context);
+  parts.push('Transcribe all text from this page exactly as it appears. Output only the transcribed text. Do not add commentary.');
+  return parts.join('\n');
+}
+
+async function fetchBossDraft(pngPath, ctx) {
+  const bossUrl = ctx.config.bossUrl;
+  if (!bossUrl) return null;
+  try {
+    const b64 = readFileSync(pngPath).toString('base64');
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 60000);
+    const res = await fetch(`${bossUrl}/chat/completions`, {
+      method: 'POST', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'vision',
+        messages: [{ role: 'user', content: [
+          { type: 'image_url', image_url: { url: `data:image/png;base64,${b64}` } },
+          { type: 'text', text: buildDraftPrompt(ctx) },
+        ]}],
+        max_tokens: 1024, temperature: 0,
+      }),
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.choices?.[0]?.message?.content?.trim() || null;
+  } catch { return null; }
+}
+
+// Marker service (POST /convert) takes the PDF file path and returns full-document markdown.
+// Called once per document (not per page) and cached in ctx._markerDoc.
+async function fetchMarkerDoc(ctx) {
+  if (ctx._markerDoc !== undefined) return ctx._markerDoc;
+  const markerUrl = ctx.config.markerUrl;
+  if (!markerUrl) { ctx._markerDoc = null; return null; }
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 120000);
+    const res = await fetch(`${markerUrl}/convert`, {
+      method: 'POST', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pdf_path: ctx.sourcePath }),
+    });
+    clearTimeout(timer);
+    if (!res.ok) { ctx._markerDoc = null; return null; }
+    const data = await res.json();
+    ctx._markerDoc = data.markdown?.trim() || null;
+    return ctx._markerDoc;
+  } catch { ctx._markerDoc = null; return null; }
+}
+
+async function fetchPageDrafts(page, ctx) {
+  const pngPath = page._pngPath;
+  const bossPromise = (pngPath && existsSync(pngPath))
+    ? fetchBossDraft(pngPath, ctx)
+    : Promise.resolve(null);
+  // Marker is a doc-level draft (full PDF → markdown), not page-specific; cache in ctx
+  const [boss, marker] = await Promise.all([bossPromise, fetchMarkerDoc(ctx)]);
+  return { boss, marker };
+}
+
+// ── hOCR parser ───────────────────────────────────────────────────────────────
 
 function parseHocr(hocr, pageNo) {
   const words = [];
@@ -74,13 +146,25 @@ export async function s4Escalate(ctx) {
 
       const lang = page._lang ?? 'eng';
       try {
-        if (!noOutput) {
-          // Re-rasterize at 600 DPI and re-OCR
-          const pngPath600 = await rasterizeAt(ctx.sourcePath, page.pageNo, tmpDir, 600);
-          const { stdout } = await execFileAsync('tesseract', [pngPath600, 'stdout', 'hocr', '-l', lang, '--psm', '3'], {
-            timeout: 120000, maxBuffer: 20 * 1024 * 1024,
-          });
-          const words600 = parseHocr(stdout, page.pageNo);
+        // Fan out: re-OCR at 600dpi + vision drafts from boss+marker, all in parallel
+        const [reOcrResult, visionDraft] = await Promise.all([
+          noOutput ? Promise.resolve(null) : (async () => {
+            const pngPath600 = await rasterizeAt(ctx.sourcePath, page.pageNo, tmpDir, 600);
+            const { stdout } = await execFileAsync('tesseract', [pngPath600, 'stdout', 'hocr', '-l', lang, '--psm', '3'], {
+              timeout: 120000, maxBuffer: 20 * 1024 * 1024,
+            });
+            return parseHocr(stdout, page.pageNo);
+          })(),
+          fetchPageDrafts(page, ctx),
+        ]);
+
+        page._visionDraft = visionDraft;
+        if (visionDraft.boss || visionDraft.marker)
+          ctx.addDecision('s4', `draft_p${page.pageNo}`,
+            `boss=${!!visionDraft.boss} marker=${!!visionDraft.marker}`);
+
+        if (!noOutput && reOcrResult) {
+          const words600 = reOcrResult;
           const oldMean = meanConf(words);
           const newMean = meanConf(words600);
           const delta = newMean - oldMean;
@@ -94,7 +178,7 @@ export async function s4Escalate(ctx) {
           for (const w of page.words) {
             if ((w.conf ?? 100) < dirtyT) w.needs_vision = true;
           }
-        } else {
+        } else if (noOutput) {
           // No tesseract output at all — mark page for full vision
           page._needsFullVision = true;
           ctx.addDecision('s4', `page_${page.pageNo}`, 'needs-full-vision', 0);

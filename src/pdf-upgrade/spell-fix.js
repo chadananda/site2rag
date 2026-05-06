@@ -25,13 +25,21 @@ Fix only:
 Do NOT fix proper nouns, names, numbers, dates, foreign terms, or anything uncertain.
 Output: one correction per line as N:corrected text. Emit nothing for correct words.`;
 
-/** Build system prompt with optional document context for better accuracy. */
-const buildSystem = ({ title, pageNo, totalPages, prevPageTail } = {}) => {
+/** Build system prompt with optional document context and vision drafts for broker mode. */
+const buildSystem = ({ title, pageNo, totalPages, prevPageTail, language, domainContext, visionDraft } = {}) => {
   const lines = [];
   if (title) lines.push(`Document: "${title}"`);
+  if (language) lines.push(`Language: ${language}`);
   if (pageNo && totalPages) lines.push(`Page: ${pageNo} of ${totalPages}`);
   else if (pageNo) lines.push(`Page: ${pageNo}`);
+  if (domainContext) lines.push(domainContext);
   if (prevPageTail) lines.push(`Previous page ends with: "...${prevPageTail.slice(-200).trim()}"`);
+  if (visionDraft?.boss || visionDraft?.marker) {
+    lines.push('');
+    lines.push('Independent vision readings of this page (use as reference — they may have different errors):');
+    if (visionDraft.boss)   lines.push(`Vision A: ${visionDraft.boss.slice(0, 800)}`);
+    if (visionDraft.marker) lines.push(`Vision B: ${visionDraft.marker.slice(0, 800)}`);
+  }
   return lines.length ? `${lines.join('\n')}\n\n${BASE_SYSTEM}` : BASE_SYSTEM;
 };
 
@@ -96,11 +104,14 @@ const fixChunk = async (client, entries, system) => {
  *
  * @param {Array<{text: string, [k: string]: any}>} bboxWords
  * @param {string} apiKey
- * @param {object} [ctx]              - Document context for better accuracy
+ * @param {object} [ctx]                    - Document context for better accuracy
  * @param {string} [ctx.title]
+ * @param {string} [ctx.language]
+ * @param {string} [ctx.domainContext]      - domain.prompt_context (2-4 sentence expert briefing)
  * @param {number} [ctx.pageNo]
  * @param {number} [ctx.totalPages]
- * @param {string} [ctx.prevPageTail] - Last ~200 chars of previous page
+ * @param {string} [ctx.prevPageTail]       - Last ~200 chars of previous page
+ * @param {{boss:string|null, marker:string|null}} [ctx.visionDraft] - parallel vision readings
  * @returns {{ words: Array, cost_usd: number, tokens_in: number, tokens_out: number }}
  */
 export const spellFixWordObjects = async (bboxWords, apiKey, ctx = {}) => {
@@ -125,13 +136,17 @@ export const spellFixWordObjects = async (bboxWords, apiKey, ctx = {}) => {
   }
 
   // Apply corrections back to bbox objects; merge hyphen-pair bboxes; drop second-half objects
+  // _srcIdx: index in original bboxWords this result word came from
+  // _mergedSrcIdx: index of the second-half word that was consumed (for callers to skip it)
   const result = [];
   for (const { idx, display, srcIdx, mergedSrcIdx } of entries) {
     const corrected = corrections.get(idx);
     const obj = { ...bboxWords[srcIdx] };
     // Use corrected text, or strip ¶ from uncorrected merged display
     obj.text = corrected !== undefined ? corrected : display.replace(/¶/g, '');
+    obj._srcIdx = srcIdx;
     if (mergedSrcIdx !== null) {
+      obj._mergedSrcIdx = mergedSrcIdx;
       const next = bboxWords[mergedSrcIdx];
       // Only extend bbox when both words are on the same line (cross-line hyphen splits
       // keep the first word's bbox — the continuation is on the next line).

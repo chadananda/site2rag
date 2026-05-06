@@ -61,6 +61,196 @@ describe('parseHocr', () => {
     const words = parseHocr(hocr, 1);
     expect(words).toHaveLength(0);
   });
+
+  it('decodes &#NNN; numeric entities', () => {
+    // &#233; = é (latin small letter e with acute)
+    const hocr = `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 90'>caf&#233;</span>`;
+    const words = parseHocr(hocr, 1);
+    expect(words[0].text).toBe('café');
+  });
+
+  it('accepts ocr_word class (not just ocrx_word)', () => {
+    const hocr = `<span class='ocr_word' id='w1' title='bbox 10 20 80 40; x_wconf 88'>Test</span>`;
+    const words = parseHocr(hocr, 1);
+    expect(words).toHaveLength(1);
+    expect(words[0].text).toBe('Test');
+    expect(words[0].conf).toBe(88);
+  });
+
+  it('assigns correct pageNo to each word', () => {
+    const words = parseHocr(SAMPLE_HOCR, 7);
+    expect(words.every(w => w.pageNo === 7)).toBe(true);
+  });
+
+  it('assigns source=tesseract to each word', () => {
+    const words = parseHocr(SAMPLE_HOCR, 1);
+    expect(words.every(w => w.source === 'tesseract')).toBe(true);
+  });
+
+  it('handles spans with nested markup (bold, italic) by stripping tags', () => {
+    const hocr = `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 90'><strong>bold</strong></span>`;
+    const words = parseHocr(hocr, 1);
+    expect(words[0].text).toBe('bold');
+  });
+
+  it('returns empty array for empty hOCR string', () => {
+    expect(parseHocr('', 1)).toHaveLength(0);
+  });
+});
+
+const HIGH_HOCR = `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 95'>good</span>
+<span class='ocrx_word' id='w2' title='bbox 60 0 120 20; x_wconf 92'>great</span>
+<span class='ocrx_word' id='w3' title='bbox 130 0 180 20; x_wconf 91'>word</span>`;
+
+describe('s3Ocr stage — contrast enhancement', () => {
+  it('uses enhanced version when python3+tesseract improves clean ratio', async () => {
+    // 3 calls: pdftoppm, tesseract(original=low), python3(enhance success), tesseract(enhanced=high)
+    let callIdx = 0;
+    execFile.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      callIdx++;
+      if (_cmd === 'pdftoppm') {
+        callback(null, { stdout: '', stderr: '' });
+      } else if (_cmd === 'tesseract' && callIdx === 2) {
+        // First tesseract: low-conf original
+        callback(null, { stdout: `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 30'>bad</span>`, stderr: '' });
+      } else if (_cmd === 'python3') {
+        callback(null, { stdout: JSON.stringify({ enhanced: true, applied: ['clahe'] }), stderr: '' });
+      } else if (_cmd === 'tesseract') {
+        // Second tesseract: high-conf enhanced
+        callback(null, { stdout: HIGH_HOCR, stderr: '' });
+      } else {
+        callback(null, { stdout: '', stderr: '' });
+      }
+    });
+
+    const ctx = makeCtx({ config: { preprocessing: { forceContrast: false } } });
+    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
+    await s3Ocr(ctx);
+
+    // Enhanced words should have source 'tesseract+contrast'
+    expect(ctx.pages[0].words.some(w => w.source === 'tesseract+contrast')).toBe(true);
+    const dec = ctx.metrics.decisions.find(d => d.decision?.startsWith('contrast_p'));
+    expect(dec).toBeDefined();
+    expect(dec.reason).toContain('clahe');
+  });
+
+  it('keeps original when enhanced version does not improve clean ratio', async () => {
+    let callIdx = 0;
+    execFile.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      callIdx++;
+      if (_cmd === 'pdftoppm') {
+        callback(null, { stdout: '', stderr: '' });
+      } else if (_cmd === 'python3') {
+        callback(null, { stdout: JSON.stringify({ enhanced: true, applied: ['clahe'] }), stderr: '' });
+      } else if (_cmd === 'tesseract') {
+        // Both tesseract calls return same low-conf hOCR — enhanced doesn't help
+        callback(null, { stdout: SAMPLE_HOCR, stderr: '' });
+      } else {
+        callback(null, { stdout: '', stderr: '' });
+      }
+    });
+
+    const ctx = makeCtx();
+    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
+    await s3Ocr(ctx);
+
+    // Should keep original source words (tesseract, not tesseract+contrast)
+    const words = ctx.pages[0].words;
+    expect(words.every(w => w.source === 'tesseract')).toBe(true);
+    const dec = ctx.metrics.decisions.find(d => d.decision?.startsWith('contrast_p'));
+    expect(dec).toBeDefined();
+    expect(dec.reason).toContain('kept original');
+  });
+
+  it('passes --force flag to python3 when forceContrast=true', async () => {
+    const capturedArgs = [];
+    execFile.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      if (_cmd === 'python3') {
+        capturedArgs.push([..._args]);
+        callback(null, { stdout: JSON.stringify({ enhanced: true, applied: ['clahe'] }), stderr: '' });
+      } else if (_cmd === 'tesseract') {
+        callback(null, { stdout: SAMPLE_HOCR, stderr: '' });
+      } else {
+        callback(null, { stdout: '', stderr: '' });
+      }
+    });
+
+    const ctx = makeCtx({ config: { preprocessing: { forceContrast: true } } });
+    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
+    await s3Ocr(ctx);
+
+    expect(capturedArgs.length).toBeGreaterThan(0);
+    expect(capturedArgs[0]).toContain('--force');
+  });
+
+  it('passes --method to python3 when preprocessing.method is set', async () => {
+    const capturedArgs = [];
+    execFile.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      if (_cmd === 'python3') {
+        capturedArgs.push([..._args]);
+        callback(null, { stdout: JSON.stringify({ enhanced: false }), stderr: '' });
+      } else if (_cmd === 'tesseract') {
+        callback(null, { stdout: SAMPLE_HOCR, stderr: '' });
+      } else {
+        callback(null, { stdout: '', stderr: '' });
+      }
+    });
+
+    const ctx = makeCtx({ config: { preprocessing: { forceContrast: true, method: 'otsu' } } });
+    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
+    await s3Ocr(ctx);
+
+    expect(capturedArgs[0]).toContain('--method');
+    expect(capturedArgs[0]).toContain('otsu');
+  });
+
+  it('keeps original when python3 enhancement fails (returns { enhanced: false })', async () => {
+    execFile.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      if (_cmd === 'python3') {
+        callback(null, { stdout: JSON.stringify({ enhanced: false }), stderr: '' });
+      } else if (_cmd === 'tesseract') {
+        callback(null, { stdout: SAMPLE_HOCR, stderr: '' });
+      } else {
+        callback(null, { stdout: '', stderr: '' });
+      }
+    });
+
+    const ctx = makeCtx();
+    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
+    await s3Ocr(ctx);
+
+    // No contrast decision should be logged — enhancement not attempted
+    const dec = ctx.metrics.decisions.find(d => d.decision?.startsWith('contrast_p'));
+    expect(dec).toBeUndefined();
+    // Words should be from original OCR
+    expect(ctx.pages[0].words).toHaveLength(3);
+  });
+
+  it('keeps original when python3 throws (subprocess error)', async () => {
+    execFile.mockImplementation((_cmd, _args, _opts, cb) => {
+      const callback = typeof _opts === 'function' ? _opts : cb;
+      if (_cmd === 'python3') {
+        callback(new Error('python3 not found'), null);
+      } else if (_cmd === 'tesseract') {
+        callback(null, { stdout: SAMPLE_HOCR, stderr: '' });
+      } else {
+        callback(null, { stdout: '', stderr: '' });
+      }
+    });
+
+    const ctx = makeCtx();
+    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
+    await s3Ocr(ctx);
+
+    // No crash, original words kept
+    expect(ctx.pages[0].words).toHaveLength(3);
+    expect(ctx.metrics.errors.filter(e => e.stage === 's3')).toHaveLength(0);
+  });
 });
 
 describe('s3Ocr stage', () => {
@@ -97,6 +287,45 @@ describe('s3Ocr stage', () => {
     expect(ctx.metrics.errors.some(e => e.stage === 's3' && e.recoverable)).toBe(true);
     const stage = ctx.metrics.stages.find(s => s.stage === 's3');
     expect(stage).toBeDefined();
+  });
+
+  it('routes ISO 639-1 language code "fr" to fra', async () => {
+    mockExecFile();
+    const ctx = makeCtx();
+    ctx.meta = { language: 'fr' };
+    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
+    await s3Ocr(ctx);
+    const summary = JSON.parse(ctx.metrics.decisions.find(d => d.decision === 'routing_summary').reason);
+    expect(summary.fra).toBe(1);
+  });
+
+  it('routes full language name "french" to fra', async () => {
+    mockExecFile();
+    const ctx = makeCtx();
+    ctx.meta = { language: 'french' };
+    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
+    await s3Ocr(ctx);
+    const summary = JSON.parse(ctx.metrics.decisions.find(d => d.decision === 'routing_summary').reason);
+    expect(summary.fra).toBe(1);
+  });
+
+  it('falls back to eng when language is unknown', async () => {
+    mockExecFile();
+    const ctx = makeCtx();
+    ctx.meta = { language: 'klingon' };
+    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
+    await s3Ocr(ctx);
+    const summary = JSON.parse(ctx.metrics.decisions.find(d => d.decision === 'routing_summary').reason);
+    expect(summary.eng).toBe(1);
+  });
+
+  it('routes printed_cjk region type to chi_sim+jpn', async () => {
+    mockExecFile();
+    const ctx = makeCtx();
+    ctx.pages = [{ pageNo: 1, regions: [{ type: 'printed_cjk' }], quality: {} }];
+    await s3Ocr(ctx);
+    const summary = JSON.parse(ctx.metrics.decisions.find(d => d.decision === 'routing_summary').reason);
+    expect(summary['chi_sim+jpn']).toBe(1);
   });
 
   it('routes printed_arabic region type to ara lang', async () => {
