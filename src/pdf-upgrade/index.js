@@ -115,8 +115,10 @@ const submitViaPipeline = async (db, domain, row, page, siteConfig) => {
 
 /** Poll all in-flight pipeline jobs and update site DB when done/failed. */
 const checkPipelineJobs = async (db) => {
+  // Include any status with a pipeline_job_id — catches rows where status was
+  // accidentally left at 'pending' but the job is actually running in the pipeline.
   const running = db.prepare(
-    "SELECT url, pipeline_job_id, before_score FROM pdf_upgrade_queue WHERE status IN ('processing','submitted') AND pipeline_job_id IS NOT NULL"
+    "SELECT url, pipeline_job_id, before_score FROM pdf_upgrade_queue WHERE pipeline_job_id IS NOT NULL AND status NOT IN ('done','failed')"
   ).all();
   for (const { url, pipeline_job_id: jobId, before_score } of running) {
     try {
@@ -138,17 +140,19 @@ const checkPipelineJobs = async (db) => {
           .run(now(), (job.error || 'pipeline failed').slice(0, 300), url);
         log(`Pipeline failed: ${url.split('/').pop()}: ${job.error}`);
       } else if (job.status === 'processing') {
-        // Mark as actively running (was 'submitted' = waiting in queue)
-        db.prepare("UPDATE pdf_upgrade_queue SET status='processing' WHERE url=? AND status='submitted'")
+        db.prepare("UPDATE pdf_upgrade_queue SET status='processing', started_at=COALESCE(started_at,?) WHERE url=? AND status != 'processing'")
+          .run(now(), url);
+      } else if (job.status === 'pending') {
+        // Still waiting in pipeline queue — ensure our status reflects submitted
+        db.prepare("UPDATE pdf_upgrade_queue SET status='submitted' WHERE url=? AND status='pending'")
           .run(url);
       }
-      // 'pending' = still waiting in queue, stays 'submitted'
     } catch (err) {
       if (err.message?.includes('404') || err.message?.includes('HTTP 404')) {
         db.prepare("UPDATE pdf_upgrade_queue SET status='failed', error=?, pipeline_job_id=NULL WHERE url=?")
           .run('pipeline job record expired', url);
       }
-      // other errors (network) → leave in processing, retry next tick
+      // other errors (network) → leave as-is, retry next tick
     }
   }
 };

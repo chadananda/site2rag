@@ -1279,7 +1279,11 @@ function app() {
         this.sites = data.sites || (Array.isArray(data) ? data : []);
         this._updateSumRates(this.sites); this._updateCrawlRates(this.sites);
         this.apiStatus = 'connected'; this.apiError = '';
-        if (!this.activeSite && this.sites.length) await this.selectSite(this.sites[0]);
+        if (!this.activeSite && this.sites.length) {
+          const saved = localStorage.getItem('selectedDomain');
+          const match = saved && this.sites.find(s => s.domain === saved);
+          await this.selectSite(match || this.sites[0]);
+        }
         else if (this.activeSite) {
           const u = this.sites.find(s => s.domain === this.activeSite.domain);
           if (u) this.activeSite = u;
@@ -1318,6 +1322,7 @@ function app() {
       this.docsPage = 1;
       this.tabTotals = { original: null, upgraded: null };
       this.filters = { q: '', status: '', score_max: 1, sort: 'score_asc' };
+      localStorage.setItem('selectedDomain', s.domain);
       // Selecting a site in admin mode focuses all upgrade processing on it
       if (this.adminToken) await this.setFocus(s.domain);
       await Promise.all([this.loadDocs(), this.refreshTabCounts()]);
