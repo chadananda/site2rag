@@ -144,4 +144,20 @@ describe('runAssets', () => {
     expect(asset).toBeTruthy();
     expect(asset.original_url).toMatch(/^https:\/\//);
   });
+  it('types:["image"] config skips documents (PDF links)', async () => {
+    insertPage('mixed', `<html><body><img src="${SITE_URL}/photo.png"><a href="${SITE_URL}/report.pdf">PDF</a></body></html>`);
+    fetch.mockResolvedValue(mockAsset('image/png', fakePng));
+
+    const stats = await runAssets(db, { domain: DOMAIN, assets: { types: ['image'] } });
+    expect(stats.new_assets).toBe(1); // only image, not document
+    const pdf = db.prepare('SELECT * FROM assets WHERE original_url=?').get(`${SITE_URL}/report.pdf`);
+    expect(pdf).toBeUndefined();
+  });
+  it('skips asset when server returns 404', async () => {
+    insertPage('notfound', `<html><body><img src="${SITE_URL}/missing.png"></body></html>`);
+    fetch.mockResolvedValue({ ok: false, status: 404, headers: { get: () => null } });
+    const stats = await runAssets(db, { domain: DOMAIN });
+    expect(stats.new_assets).toBe(0);
+    expect(stats.skipped).toBe(1);
+  });
 });
