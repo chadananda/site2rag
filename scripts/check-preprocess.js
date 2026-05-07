@@ -56,14 +56,28 @@ try {
   process.exit(1);
 }
 
-// Step 3: contrast + sharpen + resize to fit API (5MB limit)
-console.log('[3] Applying contrast normalization + sharpening...');
-execFileSync('convert', [cleanPpm, '-normalize', '-contrast-stretch', '2%x1%', '-sharpen', '0x1', cleanPng]);
-// Also resize raw PNG for API (full-res 300dpi can exceed 5MB)
+// Step 3: try multiple enhancement strategies, pick best via vision
+console.log('[3] Applying preprocessing variants...');
+const variants = {
+  mild:      join(base, 'v-mild.jpg'),
+  contrast:  join(base, 'v-contrast.jpg'),
+  binarize:  join(base, 'v-binarize.jpg'),
+  adaptive:  join(base, 'v-adaptive.jpg'),
+};
+// mild: normalize only
+execFileSync('convert', [cleanPpm, '-normalize', '-sharpen', '0x0.5', '-resize', '1400x>', '-quality', '85', variants.mild]);
+// contrast: aggressive stretch + sharpen
+execFileSync('convert', [cleanPpm, '-normalize', '-contrast-stretch', '5%x2%', '-sharpen', '0x1.5', '-resize', '1400x>', '-quality', '85', variants.contrast]);
+// binarize: Otsu threshold for yellowed paper
+execFileSync('convert', [cleanPpm, '-colorspace', 'Gray', '-normalize', '-threshold', '45%', '-resize', '1400x>', '-quality', '85', variants.binarize]);
+// adaptive: local adaptive threshold — best for uneven lighting
+execFileSync('convert', [cleanPpm, '-colorspace', 'Gray', '-normalize', '-adaptiveThreshold', '21x21+5%', '-resize', '1400x>', '-quality', '85', variants.adaptive]);
+// raw for comparison
 const rawApiPng   = join(base, 'page-raw-api.jpg');
-const cleanApiPng = join(base, 'page-clean-api.jpg');
-execFileSync('convert', [rawPng,   '-resize', '1400x>', '-quality', '85', rawApiPng]);
-execFileSync('convert', [cleanPng, '-resize', '1400x>', '-quality', '85', cleanApiPng]);
+const cleanPng    = join(base, 'page-clean.png');
+execFileSync('convert', [cleanPpm, '-normalize', '-contrast-stretch', '2%x1%', '-sharpen', '0x1', cleanPng]);
+execFileSync('convert', [rawPng, '-resize', '1400x>', '-quality', '85', rawApiPng]);
+const cleanApiPng = variants.contrast; // default clean for assessment
 console.log(`  clean PNG: ${cleanPng}`);
 
 // Step 4: send both to Haiku for readability assessment
@@ -101,34 +115,54 @@ Be concise. One line per point.`,
   return resp.content[0].text;
 }
 
-const rawAssessment   = await assessImage('RAW (before preprocessing)', rawApiPng);
-const cleanAssessment = await assessImage('CLEANED (after unpaper+contrast)', cleanApiPng);
-
-console.log('─'.repeat(60));
-console.log('RAW IMAGE ASSESSMENT:');
-console.log(rawAssessment);
-console.log('\n' + '─'.repeat(60));
-console.log('CLEANED IMAGE ASSESSMENT:');
-console.log(cleanAssessment);
-console.log('\n' + '─'.repeat(60));
-
-// Compare scores
 const extractScore = (text) => {
   const m = text.match(/OCR SUITABILITY[^:]*:\s*(\d+)/i);
   return m ? parseInt(m[1]) : null;
 };
-const rawScore   = extractScore(rawAssessment);
-const cleanScore = extractScore(cleanAssessment);
-if (rawScore !== null && cleanScore !== null) {
-  const delta = cleanScore - rawScore;
-  console.log(`\nOCR suitability: raw=${rawScore}/10  clean=${cleanScore}/10  delta=${delta >= 0 ? '+' : ''}${delta}`);
-  if (cleanScore < 6) {
-    console.log('⚠  WARNING: cleaned image still below threshold — further preprocessing tuning needed');
-  } else if (delta < 0) {
-    console.log('⚠  WARNING: preprocessing made things worse — review unpaper settings');
-  } else {
-    console.log('✓  Preprocessing improved readability');
-  }
+
+const rawAssessment = await assessImage('RAW (before preprocessing)', rawApiPng);
+const rawScore = extractScore(rawAssessment);
+
+console.log('─'.repeat(60));
+console.log('RAW IMAGE ASSESSMENT:');
+console.log(rawAssessment);
+
+// Assess all 4 variants
+console.log('\n[5] Assessing all preprocessing variants...\n');
+const variantResults = [];
+for (const [name, path] of Object.entries(variants)) {
+  console.log(`  Assessing variant: ${name}`);
+  const assessment = await assessImage(`VARIANT:${name}`, path);
+  const score = extractScore(assessment);
+  variantResults.push({ name, path, assessment, score });
+  console.log(`─`.repeat(60));
+  console.log(`VARIANT [${name.toUpperCase()}] ASSESSMENT:`);
+  console.log(assessment);
 }
 
-console.log(`\nImages saved to: ${base}`);
+// Rank variants
+const scored = variantResults.filter(v => v.score !== null).sort((a, b) => b.score - a.score);
+
+console.log('\n' + '═'.repeat(60));
+console.log('VARIANT RANKING:');
+scored.forEach((v, i) => {
+  const delta = rawScore !== null ? v.score - rawScore : null;
+  const dStr = delta !== null ? ` (${delta >= 0 ? '+' : ''}${delta} vs raw)` : '';
+  console.log(`  ${i + 1}. ${v.name.padEnd(10)} score=${v.score}/10${dStr}`);
+});
+
+const best = scored[0];
+if (best) {
+  const delta = rawScore !== null ? best.score - rawScore : null;
+  console.log(`\nBest variant: ${best.name} (score=${best.score}/10)`);
+  if (best.score < 6) {
+    console.log('⚠  WARNING: best variant still below threshold — more aggressive preprocessing needed');
+  } else if (delta !== null && delta < 0) {
+    console.log('⚠  WARNING: all variants worse than raw — review unpaper settings');
+  } else {
+    console.log('✓  Best variant is an improvement over raw');
+  }
+  console.log(`   Image path: ${best.path}`);
+}
+
+console.log(`\nAll images saved to: ${base}`);
