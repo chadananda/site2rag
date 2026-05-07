@@ -47,17 +47,19 @@ if (!existsSync(rawPpm)) { console.error('No ppm output'); process.exit(1); }
 execFileSync('convert', [rawPpm, rawPng]);
 console.log(`  raw PNG: ${rawPng}`);
 
-// Step 2: unpaper
+// Step 2: unpaper (non-fatal — falls back to raw if output missing)
 console.log('[2] Running unpaper...');
 try {
-  execFileSync('unpaper', [rawPpm, cleanPpm]);
+  execFileSync('unpaper', [rawPpm, cleanPpm], { stdio: ['ignore', 'ignore', 'ignore'] });
 } catch (e) {
-  console.error('unpaper failed:', e.message);
-  process.exit(1);
+  console.warn('  unpaper warning:', e.message.split('\n')[0]);
 }
 
 // Step 3: try multiple enhancement strategies, pick best via vision
 console.log('[3] Applying preprocessing variants...');
+// Fall back to raw ppm if unpaper produced no output
+const srcPpm = existsSync(cleanPpm) ? cleanPpm : rawPpm;
+if (srcPpm === rawPpm) console.log('  WARNING: unpaper output missing, using raw ppm for variants');
 const variants = {
   mild:      join(base, 'v-mild.jpg'),
   contrast:  join(base, 'v-contrast.jpg'),
@@ -65,18 +67,18 @@ const variants = {
   adaptive:  join(base, 'v-adaptive.jpg'),
 };
 // mild: normalize only
-execFileSync('convert', [cleanPpm, '-normalize', '-sharpen', '0x0.5', '-resize', '1400x>', '-quality', '85', variants.mild]);
+execFileSync('convert', [srcPpm, '-normalize', '-sharpen', '0x0.5', '-resize', '1400x>', '-quality', '85', variants.mild]);
 // contrast: aggressive stretch + sharpen
-execFileSync('convert', [cleanPpm, '-normalize', '-contrast-stretch', '5%x2%', '-sharpen', '0x1.5', '-resize', '1400x>', '-quality', '85', variants.contrast]);
+execFileSync('convert', [srcPpm, '-normalize', '-contrast-stretch', '5%x2%', '-sharpen', '0x1.5', '-resize', '1400x>', '-quality', '85', variants.contrast]);
 // binarize: Otsu threshold for yellowed paper
-execFileSync('convert', [cleanPpm, '-colorspace', 'Gray', '-normalize', '-threshold', '45%', '-resize', '1400x>', '-quality', '85', variants.binarize]);
-// adaptive: local adaptive threshold — best for uneven lighting
-execFileSync('convert', [cleanPpm, '-colorspace', 'Gray', '-normalize', '-adaptiveThreshold', '21x21+5%', '-resize', '1400x>', '-quality', '85', variants.adaptive]);
+execFileSync('convert', [srcPpm, '-colorspace', 'Gray', '-normalize', '-threshold', '45%', '-resize', '1400x>', '-quality', '85', variants.binarize]);
+// adaptive: local adaptive threshold — IM6 uses hyphenated form
+execFileSync('convert', [srcPpm, '-colorspace', 'Gray', '-normalize', '-adaptive-threshold', '21x21+5%', '-resize', '1400x>', '-quality', '85', variants.adaptive]);
 // raw for comparison
 const rawApiPng = join(base, 'page-raw-api.jpg');
-execFileSync('convert', [cleanPpm, '-normalize', '-contrast-stretch', '2%x1%', '-sharpen', '0x1', cleanPng]);
+execFileSync('convert', [srcPpm, '-normalize', '-contrast-stretch', '2%x1%', '-sharpen', '0x1', cleanPng]);
 execFileSync('convert', [rawPng, '-resize', '1400x>', '-quality', '85', rawApiPng]);
-console.log(`  clean PNG: ${cleanPng}`);
+console.log(`  src ppm: ${srcPpm}`);
 
 // Step 4: send both to Haiku for readability assessment
 console.log('[4] Sending before/after to Haiku for readability assessment...\n');
