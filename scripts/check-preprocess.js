@@ -49,10 +49,12 @@ console.log(`  raw PNG: ${rawPng}`);
 
 // Step 2: unpaper (non-fatal — falls back to raw if output missing)
 console.log('[2] Running unpaper...');
+// Remove stale output — unpaper refuses to overwrite and exits non-zero
+if (existsSync(cleanPpm)) rmSync(cleanPpm);
 try {
-  execFileSync('unpaper', [rawPpm, cleanPpm], { stdio: ['ignore', 'ignore', 'ignore'] });
+  execFileSync('unpaper', [rawPpm, cleanPpm]);
 } catch (e) {
-  console.warn('  unpaper warning:', e.message.split('\n')[0]);
+  if (!existsSync(cleanPpm)) console.warn('  unpaper warning:', e.message.split('\n')[0]);
 }
 
 // Step 3: try multiple enhancement strategies, pick best via vision
