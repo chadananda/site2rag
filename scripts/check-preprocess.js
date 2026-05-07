@@ -116,7 +116,8 @@ Be concise. One line per point.`,
 }
 
 const extractScore = (text) => {
-  const m = text.match(/OCR SUITABILITY[^:]*:\s*(\d+)/i);
+  // Match formats: "OCR SUITABILITY (7/10)", "OCR SUITABILITY: 7", "OCR SUITABILITY (7/10):"
+  const m = text.match(/OCR SUITABILITY[^(]*\((\d+)/i) || text.match(/OCR SUITABILITY[^:]*:\s*(\d+)/i);
   return m ? parseInt(m[1]) : null;
 };
 
