@@ -128,6 +128,22 @@ describe('detectLanguageFromUrl', () => {
     const url = 'https://example.com/%D7%A9%D7%9C%D7%95%D7%9D.pdf';
     expect(detectLanguageFromUrl(url)).toBe('hebrew');
   });
+
+  it('detects dutch from /nl/ path segment', () => {
+    expect(detectLanguageFromUrl('https://example.com/nl/document.pdf')).toBe('dutch');
+  });
+
+  it('detects polish from /pl/ path segment', () => {
+    expect(detectLanguageFromUrl('https://example.com/pl/dokument.pdf')).toBe('polish');
+  });
+
+  it('detects turkish from /tr/ path segment', () => {
+    expect(detectLanguageFromUrl('https://example.com/tr/belge.pdf')).toBe('turkish');
+  });
+
+  it('detects korean from /ko/ path segment', () => {
+    expect(detectLanguageFromUrl('https://example.com/ko/document.pdf')).toBe('korean');
+  });
 });
 
 describe('detectLanguageFromUrlPath', () => {

@@ -1,61 +1,57 @@
-// Stage 1: PDF normalization + image preprocessing. Pixel ops only; coords are preserved.
-// Exports: s1Preprocess. Deps: pdftoppm (CLI), gs (CLI), sharp or imagemagick (CLI)
-//
+// Stage 1: PDF normalization + per-page image preprocessing (deskew/despeckle via unpaper).
+// Exports: s1Preprocess, CORRUPT_PATTERN
+//   s1Preprocess(ctx) → ctx  — normalizes PDF if JPEG2000 non-conformant; runs unpaper per page
+//   CORRUPT_PATTERN           — regex matching pdftoppm stderr on corrupt codestreams
+// CONFIG: gsNormalize:true    — false skips gs normalization entirely
+//         s1Preprocess:true   — false skips unpaper per-page preprocessing
+//         toolBackends        — route pdftoppm|gs|unpaper|convert to http backend
+//         toolPaths           — override binary paths
+// ERRORS: pdftoppm ENOENT → recoverable (s1 preprocessing error surfaced, pipeline continues)
+//         gs normalize fail   → recoverable (gs_normalize_error in notes)
+//         unpaper ENOENT      → recoverable (halts per-page loop, surfaces error)
+//         convert ENOENT      → recoverable
 // CONTRACT:
-//   Reads:  ctx.sourcePath, ctx.pageCount, ctx.config.implementations.binarization
+//   Reads:  ctx.sourcePath, ctx.pageCount, ctx.config.gsNormalize, ctx.config.s1Preprocess
 //   Writes: ctx.sourcePath        — may replace with gs-normalized copy (JPEG2000 fix)
 //           ctx._gsNormalized     — true if gs normalization ran
 //           ctx._originalSourcePath — original path before normalization
 //           ctx.pages[n]._preprocessedPath (temp path, deleted after s3-ocr)
 //           ctx.pages[n]._deskewAngle (if deskew was applied, for coord correction)
 //   Never:  modifies the original PDF file on disk
-
-import { shouldRun } from '../config.js';
+import { shouldRun } from '../config.js';                            // shouldRun(stage,ctx)→bool
 import { existsSync } from 'fs';
 import { mkdtemp, rm } from 'fs/promises';
-import { exec as execCb } from 'child_process';
-import { promisify } from 'util';
 import { createHash } from 'crypto';
 import { tmpdir } from 'os';
 import { join } from 'path';
-
-const exec = promisify(execCb);
+// ── config defaults ──────────────────────────────────────────────────────────
+const D_PREPROCESS_DPI = 300;   // rasterDpi for unpaper input
 
 // Stderr patterns indicating pypdfium2-incompatible streams (JPEG2000 non-conformant, etc.)
-const CORRUPT_PATTERN = /TPsot|non.?conformant|data.?format.?error|image.?file.?is.?truncated/i;
+export const CORRUPT_PATTERN = /TPsot|non.?conformant|data.?format.?error|image.?file.?is.?truncated/i;
 
-/**
- * Detect non-conformant PDFs by doing a low-res probe render via pdftoppm.
- * Returns true if gs normalization is warranted.
- */
-async function probeNeedsNormalization(sourcePath) {
+/** Detect non-conformant PDFs by doing a low-res probe render via pdftoppm. Returns true if gs normalization is warranted. */
+async function probeNeedsNormalization(sourcePath, ctx) {
   const tmpDir = await mkdtemp(join(tmpdir(), 's1-probe-'));
   try {
-    const { stderr } = await exec(
-      `pdftoppm -r 8 -png -f 1 -l 1 "${sourcePath}" "${join(tmpDir, 'p')}"`,
-      { timeout: 15000 }
-    );
-    return CORRUPT_PATTERN.test(stderr);
-  } catch {
-    // pdftoppm failed entirely — definitely warrants normalization attempt
-    return true;
+    const { stderr } = await ctx.run('pdftoppm', ['-r', '8', '-png', '-f', '1', '-l', '1', sourcePath, join(tmpDir, 'p')], { timeout: 15000 });
+    return CORRUPT_PATTERN.test(stderr ?? '');
+  } catch (e) {
+    if (e.code === 'ENOENT') throw e;
+    return true; // pdftoppm failed → try normalization
   } finally {
     await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-/**
- * Run ghostscript PDF normalization to fix non-conformant JPEG2000 codestreams.
- * Writes to a temp file; caller is responsible for cleanup (tracked via ctx._gsNormalized).
- */
-async function gsNormalize(sourcePath) {
+/** Run ghostscript PDF normalization to fix non-conformant JPEG2000 codestreams. Writes to a temp file; caller tracks via ctx._gsNormalized. */
+async function gsNormalize(sourcePath, ctx) {
   const hash = createHash('sha1').update(sourcePath).digest('hex').slice(0, 8);
   const outPath = join(tmpdir(), `site2rag_gs_${hash}.pdf`);
-  await exec(
-    `gs -dBATCH -dNOPAUSE -dQUIET -sDEVICE=pdfwrite -dCompatibilityLevel=1.4 ` +
-    `-sOutputFile="${outPath}" "${sourcePath}"`,
-    { timeout: 180000 }
-  );
+  await ctx.run('gs', [
+    '-dBATCH', '-dNOPAUSE', '-dQUIET', '-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.4',
+    `-sOutputFile=${outPath}`, sourcePath,
+  ], { timeout: 180000 });
   if (!existsSync(outPath)) throw new Error('gs produced no output');
   return outPath;
 }
@@ -77,9 +73,9 @@ export async function s1Preprocess(ctx) {
     // Browsers/poppler tolerate these; pypdfium2 (used by boss vision) does not.
     if (ctx.config.gsNormalize !== false) {
       try {
-        const needs = await probeNeedsNormalization(ctx.sourcePath);
+        const needs = await probeNeedsNormalization(ctx.sourcePath, ctx);
         if (needs) {
-          const normalized = await gsNormalize(ctx.sourcePath);
+          const normalized = await gsNormalize(ctx.sourcePath, ctx);
           ctx._originalSourcePath = ctx.sourcePath;
           ctx.sourcePath = normalized;
           ctx._gsNormalized = true;
@@ -105,13 +101,44 @@ export async function s1Preprocess(ctx) {
       pagesAffected = ctx.pageCount;
     }
 
-    // TODO: per-page image preprocessing
-    //   1. pdftoppm -r 300 -png -f N -l N → temp PNG
-    //   2. Detect skew (imagemagick / opencv)
-    //   3. Sauvola binarization, despeckling, contrast stretch
-    //   4. If skew > 0.5°: deskew, record in page._deskewAngle
-    //   5. Store in page._preprocessedPath; revert if tesseract confidence drops
-    ctx.addDecision('s1', 'preprocess_stub', 'image preprocessing not yet implemented');
+    // Per-page unpaper preprocessing (skipped if s1Preprocess === false)
+    if (ctx.config.s1Preprocess !== false && ctx.pages.length > 0) {
+      let preprocessed = 0;
+      let toolMissing = null;
+      for (const page of ctx.pages) {
+        if (toolMissing) break; // stop retrying once a tool is confirmed absent
+        try {
+          const hash = createHash('sha1').update(ctx.sourcePath + page.pageNo).digest('hex');
+          const outBase = join(tmpdir(), 'site2rag-s1-' + hash.slice(0, 12) + '-p' + page.pageNo);
+          const ppmPath = `${outBase}.ppm`;
+          const cleanPpmPath = `${outBase}_clean.ppm`;
+          const cleanPngPath = `${outBase}_clean.png`;
+          await ctx.run('pdftoppm', ['-r', String(D_PREPROCESS_DPI), '-f', String(page.pageNo), '-l', String(page.pageNo), '-singlefile', ctx.sourcePath, outBase], { timeout: 60000 });
+          if (existsSync(ppmPath)) {
+            await ctx.run('unpaper', [ppmPath, cleanPpmPath], { timeout: 60000 });
+            if (existsSync(cleanPpmPath)) {
+              await ctx.run('convert', [cleanPpmPath, cleanPngPath], { timeout: 30000 });
+              if (existsSync(cleanPngPath)) {
+                page._preprocessedPath = cleanPngPath;
+                preprocessed++;
+              }
+            }
+          }
+        } catch (err) {
+          if (err.code === 'ENOENT') {
+            toolMissing = err.path ?? err.message;
+            ctx.addError('s1', new Error(`required tool not found: ${toolMissing} — install unpaper and imagemagick`), true);
+          } else {
+            ctx.addError('s1', new Error(`page ${page.pageNo} preprocessing failed: ${err.message}`), true);
+          }
+        }
+      }
+      ctx.addDecision('s1', 'preprocess', toolMissing
+        ? `preprocessing halted: ${toolMissing} not installed`
+        : `unpaper: ${preprocessed}/${ctx.pages.length} pages`);
+    } else {
+      ctx.addDecision('s1', 'preprocess', 'preprocessing skipped (s1Preprocess=false or no pages)');
+    }
 
   } catch (err) {
     ctx.addError('s1', err, false);

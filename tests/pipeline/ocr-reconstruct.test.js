@@ -4,6 +4,8 @@ import {
   markHeadersFooters,
   bboxWordsToText,
   reconstructFromOcrPages,
+  median,
+  groupIntoLines,
 } from '../../src/pdf-upgrade/ocr-reconstruct.js';
 
 /** Build a word object with a simple bbox. */
@@ -187,5 +189,75 @@ describe('reconstructFromOcrPages', () => {
 
   it('returns empty string for empty ocrPages array', () => {
     expect(reconstructFromOcrPages([])).toBe('');
+  });
+});
+
+describe('median', () => {
+  it('returns 0 for empty array', () => {
+    expect(median([])).toBe(0);
+  });
+
+  it('returns single element', () => {
+    expect(median([7])).toBe(7);
+  });
+
+  it('returns middle element for odd-length array', () => {
+    expect(median([3, 1, 2])).toBe(2);
+  });
+
+  it('returns average of two middle elements for even-length array', () => {
+    expect(median([4, 1, 3, 2])).toBe(2.5);
+  });
+
+  it('does not mutate the input array', () => {
+    const arr = [5, 2, 8, 1];
+    median(arr);
+    expect(arr).toEqual([5, 2, 8, 1]);
+  });
+});
+
+describe('groupIntoLines', () => {
+  const makeWord = (text, x0, y0, x1, y1) => ({ text, bbox: { x0, y0, x1, y1 }, conf: 90 });
+
+  it('returns empty array for empty input', () => {
+    expect(groupIntoLines([], 10)).toEqual([]);
+  });
+
+  it('groups words on same y-band into one line', () => {
+    const words = [
+      makeWord('Hello', 10, 20, 60, 35),
+      makeWord('world', 70, 22, 130, 37),
+    ];
+    const lines = groupIntoLines(words, 20);
+    expect(lines).toHaveLength(1);
+    expect(lines[0].words.map(w => w.text)).toEqual(['Hello', 'world']);
+  });
+
+  it('separates words on different y-bands into distinct lines', () => {
+    const words = [
+      makeWord('First', 10, 10, 60, 25),
+      makeWord('Second', 10, 100, 80, 115),
+    ];
+    const lines = groupIntoLines(words, 20);
+    expect(lines).toHaveLength(2);
+  });
+
+  it('sorts words left-to-right within a line', () => {
+    const words = [
+      makeWord('B', 100, 20, 150, 35),
+      makeWord('A', 10, 20, 60, 35),
+    ];
+    const lines = groupIntoLines(words, 20);
+    expect(lines[0].words.map(w => w.text)).toEqual(['A', 'B']);
+  });
+
+  it('sorts lines top-to-bottom', () => {
+    const words = [
+      makeWord('Bottom', 10, 200, 100, 215),
+      makeWord('Top', 10, 10, 60, 25),
+    ];
+    const lines = groupIntoLines(words, 20);
+    expect(lines[0].words[0].text).toBe('Top');
+    expect(lines[1].words[0].text).toBe('Bottom');
   });
 });

@@ -260,13 +260,13 @@ function makeRunId(ctx) {
     .slice(0, 16);
 }
 
-function safeHost(url) {
+export function safeHost(url) {
   try {
     return new URL(url?.startsWith('http') ? url : 'https://unknown.invalid').hostname.replace(/^www\./, '');
   } catch { return null; }
 }
 
-function classifyDocType(baseline) {
+export function classifyDocType(baseline) {
   if (!baseline.has_text_layer) return 'unknown';
   if (baseline.has_text_layer === 1 && baseline.readable_pages_pct > 0.7) return 'text_pdf';
   if (baseline.has_text_layer === 0) return 'image_pdf';
@@ -274,7 +274,7 @@ function classifyDocType(baseline) {
 }
 
 /** Get quality score from the stage immediately before the given stage. */
-function prevStageScore(ctx, stageName) {
+export function prevStageScore(ctx, stageName) {
   const stages = Object.keys(ctx.quality.perStage);
   const idx = stages.indexOf(stageName);
   if (idx <= 0) return ctx.quality.baseline?.composite_score ?? null;
@@ -282,21 +282,21 @@ function prevStageScore(ctx, stageName) {
 }
 
 /** Extract structured code from notes string. Returns first colon-delimited token or null. */
-function extractNotesCode(notes) {
+export function extractNotesCode(notes) {
   if (!notes) return null;
   const code = notes.split(':')[0].trim().toLowerCase().replace(/\s+/g, '_');
   return code.length <= 32 ? code : code.slice(0, 32);
 }
 
 /** Extract reason code (first alphanumeric token). Discards free text. */
-function extractReasonCode(reason) {
+export function extractReasonCode(reason) {
   if (!reason) return null;
   const match = String(reason).match(/^[\w.-]+/);
   return match?.[0]?.slice(0, 32) ?? null;
 }
 
 /** Map raw error messages to structured codes without logging content. */
-function classifyError(message) {
+export function classifyError(message) {
   const m = String(message ?? '').toLowerCase();
   if (m.includes('not found') || m.includes('enoent') || m.includes('no such file')) return 'file_not_found';
   if (m.includes('timeout')) return 'timeout';

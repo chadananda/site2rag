@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { PipelineContext, PIPELINE_VERSION } from '../../src/pipeline/context.js';
+import { PipelineContext, PIPELINE_VERSION, _buildAssessment, _buildSuggestions } from '../../src/pipeline/context.js';
 import { makeCtx } from './helpers.js';
 
 describe('PipelineContext', () => {
@@ -193,5 +193,95 @@ describe('PipelineContext', () => {
     expect(r.totals.cost_usd).toBeCloseTo(0.015, 4);
     expect(r.totals.tokens_in).toBe(300);
     expect(r.totals.tokens_out).toBe(150);
+  });
+});
+
+describe('_buildAssessment', () => {
+  it('returns image_pdf doc_type when no text layer', () => {
+    const ctx = makeCtx();
+    ctx.quality.baseline = { has_text_layer: 0 };
+    const result = _buildAssessment(ctx, 0.2);
+    expect(result.doc_type).toBe('image_pdf');
+  });
+
+  it('returns text_pdf doc_type when has_text_layer is 1', () => {
+    const ctx = makeCtx();
+    ctx.quality.baseline = { has_text_layer: 1 };
+    const result = _buildAssessment(ctx, 0.2);
+    expect(result.doc_type).toBe('text_pdf');
+  });
+
+  it('returns quality_gain_pct as 0 when gain <= 0', () => {
+    const ctx = makeCtx();
+    ctx.quality.baseline = { has_text_layer: 0 };
+    expect(_buildAssessment(ctx, 0).quality_gain_pct).toBe(0);
+    expect(_buildAssessment(ctx, -0.1).quality_gain_pct).toBe(0);
+  });
+
+  it('returns quality_gain_pct rounded to integer percent', () => {
+    const ctx = makeCtx();
+    ctx.quality.baseline = { has_text_layer: 0 };
+    expect(_buildAssessment(ctx, 0.357).quality_gain_pct).toBe(36);
+  });
+
+  it('includes correction_summary from ran stages', () => {
+    const ctx = makeCtx();
+    ctx.quality.baseline = { has_text_layer: 0 };
+    ctx.beginStage('s3'); ctx.endStage('s3', { pages_affected: 1 });
+    ctx.beginStage('s6'); ctx.endStage('s6', { pages_affected: 1 });
+    const result = _buildAssessment(ctx, 0.1);
+    expect(result.correction_summary).toContain('OCR');
+    expect(result.correction_summary).toContain('spell-fix');
+  });
+
+  it('returns "no processing stages ran" when only s0 ran', () => {
+    const ctx = makeCtx();
+    ctx.quality.baseline = { has_text_layer: 0 };
+    ctx.beginStage('s0'); ctx.endStage('s0', { pages_affected: 0 });
+    const result = _buildAssessment(ctx, 0);
+    expect(result.correction_summary).toBe('no processing stages ran');
+  });
+});
+
+describe('_buildSuggestions', () => {
+  it('returns empty array for normal low-cost run', () => {
+    const ctx = makeCtx();
+    ctx.quality.baseline = { composite_score: 0.5 };
+    const suggestions = _buildSuggestions(ctx, { cost_usd: 0.001 }, 0.2);
+    expect(suggestions).toEqual([]);
+  });
+
+  it('flags high cost with low quality gain', () => {
+    const ctx = makeCtx();
+    ctx.quality.baseline = { composite_score: 0.5 };
+    const suggestions = _buildSuggestions(ctx, { cost_usd: 0.05 }, 0.01);
+    const flag = suggestions.find(s => s.category === 'cost_efficiency');
+    expect(flag).toBeDefined();
+    expect(flag.priority).toBe('medium');
+  });
+
+  it('flags high priority when cost > 0.10 and gain < 0.05', () => {
+    const ctx = makeCtx();
+    ctx.quality.baseline = { composite_score: 0.5 };
+    const suggestions = _buildSuggestions(ctx, { cost_usd: 0.15 }, 0.01);
+    const flag = suggestions.find(s => s.category === 'cost_efficiency');
+    expect(flag?.priority).toBe('high');
+  });
+
+  it('flags score near goodDoc threshold', () => {
+    const ctx = makeCtx();
+    ctx.config = { thresholds: { goodDoc: 0.75 } };
+    ctx.quality.baseline = { composite_score: 0.76 };
+    const suggestions = _buildSuggestions(ctx, { cost_usd: 0 }, 0);
+    const flag = suggestions.find(s => s.category === 'threshold');
+    expect(flag).toBeDefined();
+  });
+
+  it('adds normalization suggestion when gs normalized', () => {
+    const ctx = makeCtx();
+    ctx.quality.baseline = { composite_score: 0.5 };
+    ctx._gsNormalized = true;
+    const suggestions = _buildSuggestions(ctx, { cost_usd: 0 }, 0);
+    expect(suggestions.some(s => s.category === 'normalization')).toBe(true);
   });
 });

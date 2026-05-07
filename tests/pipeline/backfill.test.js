@@ -129,4 +129,42 @@ describe('backfillHostsFromMirror — insertion', () => {
     const hosts = db.prepare('SELECT * FROM hosts').all();
     expect(hosts).toHaveLength(3);
   });
+
+  it('strips URL fragments from PDF href before inserting', async () => {
+    const htmlPath = join(tmpDir, 'page.html');
+    writeFileSync(htmlPath, '<a href="https://example.com/doc.pdf#page=5">Document</a>');
+    db.prepare('INSERT INTO pages (url, local_path, mime_type) VALUES (?,?,?)').run(
+      'https://example.com/', htmlPath, 'text/html'
+    );
+    await backfillHostsFromMirror(db, {});
+    const host = db.prepare('SELECT * FROM hosts').get();
+    expect(host?.hosted_url).toBe('https://example.com/doc.pdf');
+  });
+
+  it('skips gone=1 HTML pages (excluded by SQL query)', async () => {
+    const htmlPath = join(tmpDir, 'page.html');
+    writeFileSync(htmlPath, '<a href="https://example.com/doc.pdf">Document</a>');
+    db.prepare('INSERT INTO pages (url, local_path, mime_type, gone) VALUES (?,?,?,?)').run(
+      'https://example.com/', htmlPath, 'text/html', 1
+    );
+    await backfillHostsFromMirror(db, {});
+    const hosts = db.prepare('SELECT * FROM hosts').all();
+    expect(hosts).toHaveLength(0);
+  });
+
+  it('does not insert duplicate PDF links from the same host', async () => {
+    const htmlPath = join(tmpDir, 'page.html');
+    // Same PDF linked twice on the same page
+    writeFileSync(htmlPath, `
+      <a href="https://example.com/doc.pdf">Link 1</a>
+      <a href="https://example.com/doc.pdf">Link 2</a>
+    `);
+    db.prepare('INSERT INTO pages (url, local_path, mime_type) VALUES (?,?,?)').run(
+      'https://example.com/', htmlPath, 'text/html'
+    );
+    await backfillHostsFromMirror(db, {});
+    const hosts = db.prepare('SELECT * FROM hosts').all();
+    // INSERT OR IGNORE means only one row per (host_url, hosted_url) pair
+    expect(hosts).toHaveLength(1);
+  });
 });

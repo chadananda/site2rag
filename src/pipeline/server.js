@@ -2,7 +2,7 @@
 // Exports: startPipelineServer. Deps: job-store.js, index.js, context.js
 //
 // Routes:
-//   GET  /health              → { status, version, queue_depth }
+//   GET  /health              → { status, version, queue_depth, deps, missing_required }
 //   POST /jobs                → { jobId }        body: { pdfPath, sourceUrl, meta, config, importance }
 //   GET  /jobs/:id            → { status, progress, receipt, error, ... }
 //   GET  /jobs/:id/md         → text/markdown
@@ -15,11 +15,40 @@
 
 import { createServer } from 'http';
 import { readFileSync, existsSync } from 'fs';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
 import { PIPELINE_VERSION } from './context.js';
 import { runPipeline } from './index.js';
 import { openJobStore } from './job-store.js';
 
+const execFileAsync = promisify(execFile);
 const log = (msg) => console.log(`[pipeline-server] ${new Date().toISOString().slice(0,19)} ${msg}`);
+
+const REQUIRED_TOOLS = ['pdftoppm', 'tesseract', 'gs'];
+const OPTIONAL_TOOLS = ['unpaper', 'convert', 'surya_ocr'];
+
+async function probeTool(cmd) {
+  try {
+    await execFileAsync(cmd, ['--version'], { timeout: 5000 });
+    return { ok: true };
+  } catch (e) {
+    if (e.code === 'ENOENT') return { ok: false, error: 'not found' };
+    // Many tools exit non-zero for --version but still write to stdout/stderr — treat as present
+    return { ok: true };
+  }
+}
+
+async function checkDeps() {
+  const [required, optional] = await Promise.all([
+    Promise.all(REQUIRED_TOOLS.map(async t => [t, await probeTool(t)])),
+    Promise.all(OPTIONAL_TOOLS.map(async t => [t, await probeTool(t)])),
+  ]);
+  const deps = {};
+  for (const [t, r] of required) deps[t] = { ...r, required: true };
+  for (const [t, r] of optional) deps[t] = { ...r, required: false };
+  const missing_required = required.filter(([, r]) => !r.ok).map(([t]) => t);
+  return { deps, missing_required, healthy: missing_required.length === 0 };
+}
 
 export async function startPipelineServer({
   port        = 49900,
@@ -34,13 +63,14 @@ export async function startPipelineServer({
   // Reset jobs stuck in 'processing' from a previous instance. Use server start time as the
   // cutoff so jobs started by THIS instance (after startup) are never reset.
   const serverStartedAt = new Date().toISOString();
-  setTimeout(() => {
+  const resetStuckTimer = setTimeout(() => {
     const resetCount = jobs.resetStuck(serverStartedAt);
     if (resetCount > 0) log(`startup: reset ${resetCount} stuck processing jobs to pending`);
   }, 5000);
 
   // Worker: pick up next pending job and run it
   const processNext = async () => {
+    if (jobs.isClosed()) return;
     if (running >= concurrency) return;
     const job = jobs.nextPending();
     if (!job) return;
@@ -61,6 +91,7 @@ export async function startPipelineServer({
         config:     { ...baseConfig, ...job.config },
         onStageStart: (stage) => {
           stageStartedAt = Date.now();
+          if (jobs.isClosed()) return;
           const prev = jobs.getProgress(job.id) || {};
           jobs.setProgress(job.id, {
             stage,
@@ -73,6 +104,7 @@ export async function startPipelineServer({
         onProgress: (stage, pagesAffected, totalPages) => {
           const duration_ms = stageStartedAt ? Date.now() - stageStartedAt : 0;
           completedStages.push({ stage, pages: pagesAffected, ms: duration_ms });
+          if (jobs.isClosed()) return;
           jobs.setProgress(job.id, {
             stage: null,
             stage_started_at: null,
@@ -83,14 +115,14 @@ export async function startPipelineServer({
         },
       });
 
-      jobs.setDone(job.id, {
+      if (!jobs.isClosed()) jobs.setDone(job.id, {
         mdPath:     ctx.outputs.mdPath ?? null,
         pdfOutPath: ctx.outputs.archivalPdfPath ?? null,
         receipt:    ctx.toReceipt(),
       });
       log(`done job=${job.id}`);
     } catch (err) {
-      jobs.setFailed(job.id, err.message);
+      if (!jobs.isClosed()) jobs.setFailed(job.id, err.message);
       log(`failed job=${job.id}: ${err.message}`);
     } finally {
       running--;
@@ -100,6 +132,7 @@ export async function startPipelineServer({
   // Poll every 2 s; process multiple pending jobs per poll up to concurrency limit
   let pollTimer;
   const poll = () => {
+    if (jobs.isClosed()) return;
     for (let i = 0; i < concurrency; i++) processNext().catch(() => {});
     pollTimer = setTimeout(poll, 2000);
   };
@@ -118,7 +151,26 @@ export async function startPipelineServer({
     try {
       // GET /health
       if (req.method === 'GET' && path === '/health') {
-        return reply(res, 200, { status: 'ok', version: PIPELINE_VERSION, queue_depth: jobs.queueDepth() });
+        const { deps, missing_required, healthy } = await checkDeps();
+        return reply(res, healthy ? 200 : 503, {
+          status: healthy ? 'ok' : 'degraded',
+          version: PIPELINE_VERSION,
+          queue_depth: jobs.queueDepth(),
+          deps,
+          missing_required,
+        });
+      }
+
+      // POST /tools/run — execute a CLI tool on this host (for remote tool backend usage)
+      if (req.method === 'POST' && path === '/tools/run') {
+        const { tool, args, timeout = 120000 } = await readBody(req);
+        if (!tool || !Array.isArray(args)) return reply(res, 400, { error: 'tool and args required' });
+        try {
+          const { stdout, stderr } = await execFileAsync(tool, args, { timeout, maxBuffer: 50 * 1024 * 1024 });
+          return reply(res, 200, { stdout, stderr });
+        } catch (e) {
+          return reply(res, 500, { error: e.message, code: e.code ?? null });
+        }
       }
 
       // POST /jobs
@@ -198,9 +250,13 @@ export async function startPipelineServer({
     server,
     jobs,
     close: () => {
+      clearTimeout(resetStuckTimer);
       clearTimeout(pollTimer);
-      if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
-      return new Promise(r => server.close(() => { jobs.close(); r(); }));
+      jobs._closed = true; // prevent background worker from writing to DB after close
+      // closeIdleConnections releases keep-alive sockets without killing active requests;
+      // closeAllConnections would abort in-flight responses causing 'other side closed' errors.
+      if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections();
+      return new Promise(r => server.close(() => { try { jobs.db.close(); } catch {} r(); }));
     },
   };
 }

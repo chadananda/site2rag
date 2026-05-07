@@ -255,3 +255,84 @@ describe('s5Vision — stage record', () => {
     expect(stage.duration_ms).toBeGreaterThanOrEqual(0);
   });
 });
+
+// ── shouldVisionPage unit tests ───────────────────────────────────────────────
+
+describe('shouldVisionPage', () => {
+  let shouldVisionPage;
+  beforeEach(async () => {
+    vi.resetModules();
+    ({ shouldVisionPage } = await import('../../src/pipeline/stages/s5-vision.js'));
+  });
+
+  const makePage = (overrides = {}) => ({
+    pageNo: 1,
+    words: [],
+    regions: [],
+    _bucketed: { clean: 0, fuzzy: 0, dirty: 0, needs_vision: 0 },
+    _needsFullVision: false,
+    ...overrides,
+  });
+
+  it('returns shouldVision=true when _needsFullVision is true', () => {
+    const page = makePage({ _needsFullVision: true });
+    expect(shouldVisionPage(page).shouldVision).toBe(true);
+    expect(shouldVisionPage(page).needsFull).toBe(true);
+  });
+
+  it('returns shouldVision=true when page has no words and non-figure region', () => {
+    const page = makePage({
+      words: [],
+      regions: [{ type: 'printed_arabic' }],
+    });
+    expect(shouldVisionPage(page).shouldVision).toBe(true);
+    expect(shouldVisionPage(page).needsFull).toBe(true);
+  });
+
+  it('returns shouldVision=false when page has no words but all regions are figures', () => {
+    const page = makePage({
+      words: [],
+      regions: [{ type: 'figure' }],
+    });
+    expect(shouldVisionPage(page).shouldVision).toBe(false);
+  });
+
+  it('returns shouldVision=true when dirty words > 50% of total', () => {
+    const words = [
+      { text: 'a', conf: 20, needs_vision: false },
+      { text: 'b', conf: 20, needs_vision: false },
+      { text: 'c', conf: 20, needs_vision: false },
+      { text: 'd', conf: 95, needs_vision: false },
+    ];
+    const page = makePage({ words, _bucketed: { dirty: 3, clean: 1, fuzzy: 0, needs_vision: 0 } });
+    expect(shouldVisionPage(page).shouldVision).toBe(true);
+  });
+
+  it('returns shouldVision=false when dirty <= 50% of total', () => {
+    const words = Array.from({ length: 4 }, () => ({ text: 'w', conf: 95, needs_vision: false }));
+    words[0].conf = 20; // 1 dirty out of 4
+    const page = makePage({ words, _bucketed: { dirty: 1, clean: 3, fuzzy: 0, needs_vision: 0 } });
+    expect(shouldVisionPage(page).shouldVision).toBe(false);
+  });
+
+  it('returns shouldVision=true when >10 words need vision', () => {
+    const words = Array.from({ length: 11 }, () => ({ text: 'w', conf: 30, needs_vision: true }));
+    const page = makePage({ words, _bucketed: { dirty: 0, clean: 0, fuzzy: 0, needs_vision: 11 } });
+    expect(shouldVisionPage(page).shouldVision).toBe(true);
+  });
+
+  it('returns shouldVision=false when exactly 10 words need vision (not >10)', () => {
+    const words = Array.from({ length: 10 }, () => ({ text: 'w', conf: 30, needs_vision: true }));
+    const page = makePage({ words, _bucketed: { dirty: 0, clean: 0, fuzzy: 0, needs_vision: 10 } });
+    expect(shouldVisionPage(page).shouldVision).toBe(false);
+  });
+
+  it('returns needsFull=false when _needsFullVision is false and words present', () => {
+    const words = Array.from({ length: 20 }, () => ({ text: 'w', conf: 95, needs_vision: false }));
+    const page = makePage({ words, _bucketed: { dirty: 15, clean: 5, fuzzy: 0, needs_vision: 0 } });
+    // dirty/total = 0.75 > 0.5 → shouldVision=true, but needsFull=false (not _needsFullVision)
+    const result = shouldVisionPage(page);
+    expect(result.shouldVision).toBe(true);
+    expect(result.needsFull).toBe(false);
+  });
+});

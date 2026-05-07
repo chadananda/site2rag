@@ -9,7 +9,7 @@ vi.mock('../../src/pipeline/config.js', async (importOriginal) => {
 
 import { execFile } from 'child_process';
 import { shouldRun } from '../../src/pipeline/config.js';
-import { s4Escalate } from '../../src/pipeline/stages/s4-escalate.js';
+import { s4Escalate, parseHocr, meanConf, buildDraftPrompt } from '../../src/pipeline/stages/s4-escalate.js';
 
 const LOW_HOCR = `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 20'>bad</span>
 <span class='ocrx_word' id='w2' title='bbox 60 0 120 20; x_wconf 25'>worse</span>`;
@@ -339,5 +339,107 @@ describe('s4Escalate — vision broker path', () => {
     expect(userText).toContain('The Journal of History');
     expect(userText).toContain('french');
     expect(userText).toContain('Expert context about history.');
+  });
+});
+
+describe('parseHocr (s4)', () => {
+  it('returns empty array for empty string', () => {
+    expect(parseHocr('', 1)).toEqual([]);
+  });
+
+  it('parses a single word with bbox and conf', () => {
+    const hocr = `<span class='ocrx_word' id='w1' title='bbox 10 20 80 40; x_wconf 85'>hello</span>`;
+    const words = parseHocr(hocr, 3);
+    expect(words).toHaveLength(1);
+    expect(words[0].text).toBe('hello');
+    expect(words[0].x1).toBe(10);
+    expect(words[0].y1).toBe(20);
+    expect(words[0].conf).toBe(85);
+    expect(words[0].pageNo).toBe(3);
+    expect(words[0].source).toBe('tesseract-600');
+  });
+
+  it('skips words with no bbox', () => {
+    const hocr = `<span class='ocrx_word' id='w1' title='x_wconf 90'>nobox</span>`;
+    expect(parseHocr(hocr, 1)).toEqual([]);
+  });
+
+  it('skips words with empty text after stripping tags', () => {
+    const hocr = `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 90'>   </span>`;
+    expect(parseHocr(hocr, 1)).toEqual([]);
+  });
+
+  it('decodes HTML entities', () => {
+    const hocr = `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 90'>&amp;&lt;&gt;</span>`;
+    const words = parseHocr(hocr, 1);
+    expect(words[0].text).toBe('&<>');
+  });
+
+  it('uses conf=0 when x_wconf is missing', () => {
+    const hocr = `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20'>word</span>`;
+    const words = parseHocr(hocr, 1);
+    expect(words[0].conf).toBe(0);
+  });
+});
+
+describe('meanConf', () => {
+  it('returns 0 for empty array', () => {
+    expect(meanConf([])).toBe(0);
+  });
+
+  it('returns the average conf of all words', () => {
+    expect(meanConf([{ conf: 80 }, { conf: 100 }])).toBe(90);
+  });
+
+  it('treats missing conf as 0', () => {
+    expect(meanConf([{ conf: 60 }, {}])).toBe(30);
+  });
+
+  it('returns exact conf for single-element array', () => {
+    expect(meanConf([{ conf: 75 }])).toBe(75);
+  });
+});
+
+describe('buildDraftPrompt', () => {
+  it('returns base transcription instruction alone when ctx has no meta/domain', () => {
+    const ctx = makeCtx();
+    const prompt = buildDraftPrompt(ctx);
+    expect(prompt).toContain('Transcribe all text');
+    expect(prompt).toContain('Do not add commentary');
+  });
+
+  it('prepends document title when meta.title is set', () => {
+    const ctx = makeCtx();
+    ctx.meta = { title: 'Annual Report 2024' };
+    const prompt = buildDraftPrompt(ctx);
+    expect(prompt).toContain('Document: "Annual Report 2024"');
+  });
+
+  it('includes language when meta.language is set', () => {
+    const ctx = makeCtx();
+    ctx.meta = { language: 'Persian' };
+    const prompt = buildDraftPrompt(ctx);
+    expect(prompt).toContain('Language: Persian');
+  });
+
+  it('includes domain prompt_context when set', () => {
+    const ctx = makeCtx();
+    ctx.domain = { prompt_context: 'This is a Bahá\'í religious text from 1890.' };
+    const prompt = buildDraftPrompt(ctx);
+    expect(prompt).toContain('Bahá\'í religious text');
+  });
+
+  it('assembles all fields in order: title, language, domain, instruction', () => {
+    const ctx = makeCtx();
+    ctx.meta = { title: 'Doc', language: 'English' };
+    ctx.domain = { prompt_context: 'Historical text.' };
+    const prompt = buildDraftPrompt(ctx);
+    const titleIdx = prompt.indexOf('Document:');
+    const langIdx = prompt.indexOf('Language:');
+    const domainIdx = prompt.indexOf('Historical text.');
+    const instrIdx = prompt.indexOf('Transcribe');
+    expect(titleIdx).toBeLessThan(langIdx);
+    expect(langIdx).toBeLessThan(domainIdx);
+    expect(domainIdx).toBeLessThan(instrIdx);
   });
 });

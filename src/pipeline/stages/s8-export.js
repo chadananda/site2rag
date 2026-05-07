@@ -1,17 +1,19 @@
 // Stage 8: Export corrected text as Markdown with page anchors and paragraph reconstruction.
-// Exports: s8Export. Deps: ocr-reconstruct.js
+// Exports: s8Export, adaptWord
+//   s8Export(ctx) → ctx     — assembles Markdown from visionMd + bbox words; writes .md file
+//   adaptWord(w) → bboxWord — converts pipeline word {x1,y1,x2,y2} → ocr-reconstruct {bbox:{x0,y0,x1,y1}}
 // CONTRACT:
-//   Reads:  ctx.outputs.archivalPdfPath (or ctx.sourcePath as fallback), ctx.pages[n].words, ctx.pages[n].visionMd
-//   Writes: ctx.outputs.mdPath
-//   Format: Markdown with <!-- p.N --> anchors, joined paragraphs, stripped headers/footers
-//   Bbox note: pipeline words use {x1,y1,x2,y2}; ocr-reconstruct expects {x0,y0,x1,y1} — adapted here
-
-import { shouldRun } from '../config.js';
-import { markHeadersFooters, bboxWordsToText } from '../../pdf-upgrade/ocr-reconstruct.js';
+//   Reads:  ctx.outputs.archivalPdfPath (fallback: ctx.sourcePath), ctx.pages[n].words, ctx.pages[n].visionMd
+//   Writes: ctx.outputs.mdPath — Markdown with <!-- p.N --> anchors per page
+//   Format: paragraphs joined across lines; headers/footers stripped; visionMd pages output verbatim
+// ERRORS: writeFileSync fail → recoverable; no content → writes anchor stubs only
+// NOTE:   Pipeline words use {x1,y1,x2,y2}; ocr-reconstruct expects {bbox:{x0,y0,x1,y1}} — adaptWord converts
+import { shouldRun } from '../config.js';                                           // shouldRun(stage,ctx)→bool
+import { markHeadersFooters, bboxWordsToText } from '../../pdf-upgrade/ocr-reconstruct.js'; // markHeadersFooters(pages) mutates words.isHeader/isFooter; bboxWordsToText(pages)→string
 import { writeFileSync } from 'fs';
 
 // Pipeline stores words as {text,x1,y1,x2,y2,conf}; ocr-reconstruct expects {text,bbox:{x0,y0,x1,y1},conf}
-const adaptWord = (w) => ({
+export const adaptWord = (w) => ({
   text: w.text,
   bbox: { x0: w.x1, y0: w.y1, x1: w.x2, y1: w.y2 },
   conf: w.conf,

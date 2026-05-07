@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { s8Export } from '../../src/pipeline/stages/s8-export.js';
+import { s8Export, adaptWord } from '../../src/pipeline/stages/s8-export.js';
 import { makeTempDir, makeTextPdf, makeCtx, makePageWords } from './helpers.js';
 
 let tempDir, cleanup;
@@ -153,5 +153,29 @@ describe('s8Export — skip logic', () => {
     await s8Export(ctx);
     expect(ctx.outputs.mdPath).toBeNull();
     expect(ctx.metrics.stages.find(s => s.stage === 's8')).toBeUndefined();
+  });
+});
+
+describe('adaptWord', () => {
+  it('converts pipeline word format to bboxWordsToText format', () => {
+    const w = { text: 'hello', x1: 10, y1: 20, x2: 80, y2: 40, conf: 85 };
+    const result = adaptWord(w);
+    expect(result.text).toBe('hello');
+    expect(result.bbox).toEqual({ x0: 10, y0: 20, x1: 80, y1: 40 });
+    expect(result.conf).toBe(85);
+  });
+
+  it('preserves conf=0 for low-confidence words', () => {
+    const w = { text: 'junk', x1: 0, y1: 0, x2: 50, y2: 10, conf: 0 };
+    expect(adaptWord(w).conf).toBe(0);
+  });
+
+  it('maps x1→x0, y1→y0, x2→x1, y2→y1 correctly', () => {
+    const w = { text: 'A', x1: 1, y1: 2, x2: 3, y2: 4, conf: 99 };
+    const { bbox } = adaptWord(w);
+    expect(bbox.x0).toBe(1);
+    expect(bbox.y0).toBe(2);
+    expect(bbox.x1).toBe(3);
+    expect(bbox.y1).toBe(4);
   });
 });

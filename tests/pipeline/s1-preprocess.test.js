@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { s1Preprocess } from '../../src/pipeline/stages/s1-preprocess.js';
+import { s1Preprocess, CORRUPT_PATTERN } from '../../src/pipeline/stages/s1-preprocess.js';
 import { makeCtx, makeTextPdf, makeTempDir } from './helpers.js';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
@@ -8,6 +8,10 @@ import { join } from 'path';
 vi.mock('child_process', () => ({
   exec: vi.fn((cmd, opts, cb) => {
     // Handle both (cmd, cb) and (cmd, opts, cb) signatures
+    const callback = typeof opts === 'function' ? opts : cb;
+    callback(null, { stdout: '', stderr: '' });
+  }),
+  execFile: vi.fn((cmd, args, opts, cb) => {
     const callback = typeof opts === 'function' ? opts : cb;
     callback(null, { stdout: '', stderr: '' });
   }),
@@ -47,6 +51,7 @@ afterEach(() => {
 
 // CONTRACT tests
 
+// tests: skip list, stage record shape, page init, no-overwrite, return value
 describe('s1Preprocess — contract', () => {
   it('skips when s1 is in skip list', async () => {
     const ctx = makeCtx({ config: { skip: ['s1'] } });
@@ -98,6 +103,7 @@ describe('s1Preprocess — contract', () => {
 
 // GS NORMALIZATION tests
 
+// tests: clean path, disabled normalization, missing source, error handling, notes field
 describe('s1Preprocess — gs normalization', () => {
   it('does not modify ctx.sourcePath when probe reports clean PDF', async () => {
     const pdfPath = join(tempDir, 'clean.pdf');
@@ -175,12 +181,15 @@ describe('s1Preprocess — gs normalization', () => {
 
 // CORRUPT PATTERN tests (unit test the regex detection logic)
 
+// tests: TPsot match, non-conformant variants, data format error, truncated, case-insensitive, no-match clean output
 describe('s1Preprocess — corrupt pattern detection', () => {
-  const CORRUPT_PATTERN = /TPsot|non.?conformant|data.?format.?error|image.?file.?is.?truncated/i;
-
   it('matches TPsot warning from pdftoppm', () => {
     const stderr = 'Syntax Warning: Non conformant codestream TPsot==TNsot';
     expect(CORRUPT_PATTERN.test(stderr)).toBe(true);
+  });
+
+  it('matches non-conformant (space variant)', () => {
+    expect(CORRUPT_PATTERN.test('non conformant JPEG2000 codestream')).toBe(true);
   });
 
   it('matches data format error', () => {
@@ -191,8 +200,14 @@ describe('s1Preprocess — corrupt pattern detection', () => {
     expect(CORRUPT_PATTERN.test('image file is truncated')).toBe(true);
   });
 
+  it('matches case-insensitively', () => {
+    expect(CORRUPT_PATTERN.test('DATA FORMAT ERROR')).toBe(true);
+    expect(CORRUPT_PATTERN.test('Image File Is Truncated')).toBe(true);
+  });
+
   it('does not match clean pdftoppm output', () => {
     expect(CORRUPT_PATTERN.test('')).toBe(false);
     expect(CORRUPT_PATTERN.test('Page 1 rendered OK')).toBe(false);
+    expect(CORRUPT_PATTERN.test('converting page 3 of 10')).toBe(false);
   });
 });

@@ -25,7 +25,7 @@ export class PipelineClient {
     this.timeout      = timeout;
   }
 
-  /** Check service health. Returns { status, version, queue_depth } or throws on unreachable. */
+  /** Check service health. Returns { status, version, queue_depth, deps, missing_required } or throws on unreachable. */
   health() { return this._get('/health'); }
 
   /**
@@ -55,8 +55,8 @@ export class PipelineClient {
   }
 
   /** Poll until the job is done or failed. Returns the final job record. */
-  async waitForJob(jobId) {
-    const deadline = Date.now() + this.timeout;
+  async waitForJob(jobId, { timeout } = {}) {
+    const deadline = Date.now() + (timeout ?? this.timeout);
     while (Date.now() < deadline) {
       const job = await this.getJob(jobId);
       if (job.status === 'done')   return job;

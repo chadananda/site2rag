@@ -121,7 +121,7 @@ export async function detectDomain(ctx) {
  * Gather metadata signals from ctx. Never reads document body.
  * pageText is capped at 500 chars — enough to understand context, not enough to be content.
  */
-function gatherSignals(ctx) {
+export function gatherSignals(ctx) {
   const url = ctx.sourceUrl ?? '';
   const host = safeHost(url);
   const urlPath = url.split('/').slice(3).join(' ');
@@ -154,7 +154,7 @@ function gatherSignals(ctx) {
 }
 
 /** Score each subject bucket against combined thin-signal text. */
-function matchPatterns(signals) {
+export function matchPatterns(signals) {
   const text = signals.combined;
   const scores = {};
   for (const [bucket, keywords] of Object.entries(SUBJECT_BUCKETS)) {
@@ -247,7 +247,7 @@ async function distillWithHaiku(signals, apiKey) {
   return { domain, tokens_in, tokens_out, cost_usd };
 }
 
-function buildDomainFromProfile(profile, source) {
+export function buildDomainFromProfile(profile, source) {
   return {
     subject:        profile.subject,
     subdomains:     JSON.parse(profile.subdomains ?? '[]'),

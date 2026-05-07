@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { detectDomain, buildPromptContext, SUBJECT_BUCKETS } from '../../src/pipeline/domain-detect.js';
+import { detectDomain, buildPromptContext, SUBJECT_BUCKETS, matchPatterns, buildDomainFromProfile, gatherSignals } from '../../src/pipeline/domain-detect.js';
 import { makeCtx } from './helpers.js';
 
 // CONTRACT tests
@@ -378,5 +378,147 @@ describe('SUBJECT_BUCKETS', () => {
       expect(typeof key).toBe('string');
       expect(Array.isArray(val) && val.length > 0).toBe(true);
     }
+  });
+});
+
+describe('matchPatterns', () => {
+  function makeSignals(text, extras = {}) {
+    return { combined: text, pdfTitle: '', urlPath: '', language: 'english', ...extras };
+  }
+
+  it('returns an object with required domain fields', () => {
+    const result = matchPatterns(makeSignals('history medieval ancient document'));
+    expect(result).toHaveProperty('subject');
+    expect(result).toHaveProperty('confidence');
+    expect(result).toHaveProperty('source', 'pattern_match');
+    expect(result).toHaveProperty('subdomains');
+    expect(result).toHaveProperty('script_context');
+  });
+
+  it('detects historical subject from keywords', () => {
+    const result = matchPatterns(makeSignals('historical medieval ancient manuscript archive'));
+    expect(result.subject).toBe('historical');
+  });
+
+  it('detects religious-texts subject from keywords', () => {
+    const result = matchPatterns(makeSignals('scripture theology religious prayer liturgy'));
+    expect(result.subject).toBe('religious-texts');
+  });
+
+  it('confidence scales with keyword density', () => {
+    const few = matchPatterns(makeSignals('one keyword historical'));
+    const many = matchPatterns(makeSignals('historical medieval ancient archive manuscript document era timeline'));
+    expect(many.confidence).toBeGreaterThanOrEqual(few.confidence);
+  });
+
+  it('confidence is capped at 0.95', () => {
+    const result = matchPatterns(makeSignals('historical medieval ancient archive manuscript document period era century epoch'));
+    expect(result.confidence).toBeLessThanOrEqual(0.95);
+  });
+
+  it('includes language in subdomains when not unknown', () => {
+    const result = matchPatterns(makeSignals('history', { language: 'french' }));
+    expect(result.subdomains).toContain('french');
+  });
+
+  it('defaults to latin script when no script signals found', () => {
+    const result = matchPatterns(makeSignals('normal english text with legal law court'));
+    expect(result.script_context).toContain('Latin');
+  });
+});
+
+describe('buildDomainFromProfile', () => {
+  it('maps profile fields to domain object', () => {
+    const profile = {
+      subject: 'religious-texts',
+      subdomains: '["bahai","persian"]',
+      era: '1844-1921',
+      script_context: 'Mixed Latin and Persian script',
+      confidence: 0.85,
+      prompt_context: 'This is a Bahá\'í text.',
+    };
+    const result = buildDomainFromProfile(profile, 'db_profile');
+    expect(result.subject).toBe('religious-texts');
+    expect(result.subdomains).toEqual(['bahai', 'persian']);
+    expect(result.era).toBe('1844-1921');
+    expect(result.script_context).toBe('Mixed Latin and Persian script');
+    expect(result.confidence).toBe(0.85);
+    expect(result.source).toBe('db_profile');
+    expect(result.prompt_context).toBe('This is a Bahá\'í text.');
+  });
+
+  it('parses null subdomains as empty array', () => {
+    const profile = { subject: 'legal', subdomains: null, confidence: 0.7, prompt_context: null };
+    const result = buildDomainFromProfile(profile, 'pattern_match');
+    expect(result.subdomains).toEqual([]);
+  });
+
+  it('defaults era to null when not in profile', () => {
+    const profile = { subject: 'legal', subdomains: '[]', confidence: 0.7, prompt_context: null };
+    expect(buildDomainFromProfile(profile, 'test').era).toBeNull();
+  });
+
+  it('defaults script_context to "Latin script" when missing', () => {
+    const profile = { subject: 'legal', subdomains: '[]', confidence: 0.7, prompt_context: null, script_context: null };
+    expect(buildDomainFromProfile(profile, 'test').script_context).toBe('Latin script');
+  });
+
+  it('passes source parameter through', () => {
+    const profile = { subject: 'general', subdomains: '[]', confidence: 0.5, prompt_context: null };
+    expect(buildDomainFromProfile(profile, 'haiku_inference').source).toBe('haiku_inference');
+  });
+});
+
+describe('gatherSignals', () => {
+  it('extracts host from sourceUrl', () => {
+    const ctx = { sourceUrl: 'https://bahai-library.com/path/to/file.pdf', meta: {}, quality: {} };
+    const s = gatherSignals(ctx);
+    expect(s.host).toBe('bahai-library.com');
+  });
+
+  it('returns unknown host when sourceUrl is missing', () => {
+    const ctx = { sourceUrl: null, meta: {}, quality: {} };
+    const s = gatherSignals(ctx);
+    expect(s.host).toBe('unknown.invalid');
+  });
+
+  it('combines thin signals into lowercase combined string', () => {
+    const ctx = {
+      sourceUrl: 'https://example.com/doc.pdf',
+      meta: { title: 'Annual Report', anchorText: 'Download Report' },
+      quality: {},
+    };
+    const s = gatherSignals(ctx);
+    expect(s.combined).toContain('annual report');
+    expect(s.combined).toContain('download report');
+  });
+
+  it('sets richContext true when pageText is provided', () => {
+    const ctx = { sourceUrl: 'https://x.com/f.pdf', meta: { pageText: 'Some page text here' }, quality: {} };
+    expect(gatherSignals(ctx).richContext).toBe(true);
+  });
+
+  it('sets richContext false with only short anchorText and no pageText', () => {
+    const ctx = { sourceUrl: 'https://x.com/f.pdf', meta: { anchorText: 'Short' }, quality: {} };
+    expect(gatherSignals(ctx).richContext).toBe(false);
+  });
+
+  it('sets hasAnySignal false when no metadata provided', () => {
+    const ctx = { sourceUrl: 'https://x.com/f.pdf', meta: {}, quality: {} };
+    expect(gatherSignals(ctx).hasAnySignal).toBe(false);
+  });
+
+  it('truncates pageText to 500 chars', () => {
+    const ctx = { sourceUrl: 'https://x.com/f.pdf', meta: { pageText: 'x'.repeat(1000) }, quality: {} };
+    expect(gatherSignals(ctx).pageText.length).toBe(500);
+  });
+
+  it('gets language from quality.baseline.language when set', () => {
+    const ctx = {
+      sourceUrl: 'https://x.com/f.pdf',
+      meta: {},
+      quality: { baseline: { language: 'arabic' } },
+    };
+    expect(gatherSignals(ctx).language).toBe('arabic');
   });
 });

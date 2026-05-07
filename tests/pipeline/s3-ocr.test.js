@@ -9,7 +9,7 @@ vi.mock('../../src/pipeline/config.js', async (importOriginal) => {
 
 import { execFile } from 'child_process';
 import { shouldRun } from '../../src/pipeline/config.js';
-import { s3Ocr, parseHocr } from '../../src/pipeline/stages/s3-ocr.js';
+import { s3Ocr, parseHocr, repairHyphens, resolveLang, cleanRatio } from '../../src/pipeline/stages/s3-ocr.js';
 
 const SAMPLE_HOCR = `<html><body>
 <div class='ocr_page'>
@@ -36,17 +36,18 @@ beforeEach(() => {
   shouldRun.mockReturnValue(true);
 });
 
+// tests: word parsing, HTML entity decode, conf values, empty spans, numeric entities, ocr_word class, pageNo, source field, nested markup, empty string
 describe('parseHocr', () => {
   it('parses two ocrx_word spans correctly', () => {
     const words = parseHocr(SAMPLE_HOCR, 1);
     expect(words).toHaveLength(3);
-    expect(words[0]).toMatchObject({ text: 'Hello', x1: 10, y1: 20, x2: 80, y2: 40, conf: 95 });
-    expect(words[1]).toMatchObject({ text: 'world', x1: 90, y1: 20, x2: 160, y2: 40, conf: 72 });
+    expect(words[0]).toMatchObject({ text: 'Hello ', x1: 10, y1: 20, x2: 80, y2: 40, conf: 95 });
+    expect(words[1]).toMatchObject({ text: 'world ', x1: 90, y1: 20, x2: 160, y2: 40, conf: 72 });
   });
 
   it('decodes HTML entities', () => {
     const words = parseHocr(SAMPLE_HOCR, 1);
-    expect(words[2].text).toBe('fuzzy&dirty');
+    expect(words[2].text).toBe('fuzzy&dirty ');
   });
 
   it('includes conf values', () => {
@@ -66,14 +67,14 @@ describe('parseHocr', () => {
     // &#233; = é (latin small letter e with acute)
     const hocr = `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 90'>caf&#233;</span>`;
     const words = parseHocr(hocr, 1);
-    expect(words[0].text).toBe('café');
+    expect(words[0].text).toBe('café ');
   });
 
   it('accepts ocr_word class (not just ocrx_word)', () => {
     const hocr = `<span class='ocr_word' id='w1' title='bbox 10 20 80 40; x_wconf 88'>Test</span>`;
     const words = parseHocr(hocr, 1);
     expect(words).toHaveLength(1);
-    expect(words[0].text).toBe('Test');
+    expect(words[0].text).toBe('Test ');
     expect(words[0].conf).toBe(88);
   });
 
@@ -90,7 +91,7 @@ describe('parseHocr', () => {
   it('handles spans with nested markup (bold, italic) by stripping tags', () => {
     const hocr = `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 90'><strong>bold</strong></span>`;
     const words = parseHocr(hocr, 1);
-    expect(words[0].text).toBe('bold');
+    expect(words[0].text).toBe('bold ');
   });
 
   it('returns empty array for empty hOCR string', () => {
@@ -98,10 +99,43 @@ describe('parseHocr', () => {
   });
 });
 
+// tests: trailing space appended, hyphen join, min-conf of joined pair, no-join single-char, empty array
+describe('repairHyphens', () => {
+  const w = (text, conf = 90, x2 = 100) => ({ text, conf, x1: 0, y1: 0, x2, y2: 20, source: 'tesseract', pageNo: 1 });
+
+  it('appends trailing space to every word', () => {
+    const result = repairHyphens([w('hello'), w('world')]);
+    expect(result[0].text).toBe('hello ');
+    expect(result[1].text).toBe('world ');
+  });
+
+  it('joins line-break hyphen with next word', () => {
+    const result = repairHyphens([w('deter-'), w('mined')]);
+    expect(result).toHaveLength(1);
+    expect(result[0].text).toBe('determined ');
+  });
+
+  it('uses lower conf for joined word', () => {
+    const result = repairHyphens([w('deter-', 95), w('mined', 70)]);
+    expect(result[0].conf).toBe(70);
+  });
+
+  it('does not join single-char fragments', () => {
+    const result = repairHyphens([w('a-'), w('b')]);
+    expect(result).toHaveLength(2);
+    expect(result[0].text).toBe('a- ');
+  });
+
+  it('returns empty array unchanged', () => {
+    expect(repairHyphens([])).toHaveLength(0);
+  });
+});
+
 const HIGH_HOCR = `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 95'>good</span>
 <span class='ocrx_word' id='w2' title='bbox 60 0 120 20; x_wconf 92'>great</span>
 <span class='ocrx_word' id='w3' title='bbox 130 0 180 20; x_wconf 91'>word</span>`;
 
+// tests: uses enhanced when improves ratio, keeps original when no improvement, --force flag, --method flag, enhanced:false kept original, python3 throw kept original
 describe('s3Ocr stage — contrast enhancement', () => {
   it('uses enhanced version when python3+tesseract improves clean ratio', async () => {
     // 3 calls: pdftoppm, tesseract(original=low), python3(enhance success), tesseract(enhanced=high)
@@ -253,6 +287,7 @@ describe('s3Ocr stage — contrast enhancement', () => {
   });
 });
 
+// tests: skip when shouldRun false, endStage on empty pages, recoverable page error, ISO lang routing, full-name lang routing, unknown lang fallback, cjk region routing, arabic region routing, word buckets, quality.perStage.s3, no quality when no words
 describe('s3Ocr stage', () => {
   it('skips when shouldRun returns false', async () => {
     shouldRun.mockReturnValue(false);
@@ -372,5 +407,84 @@ describe('s3Ocr stage', () => {
     ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
     await s3Ocr(ctx);
     expect(ctx.quality.perStage['s3']).toBeUndefined();
+  });
+});
+
+// tests: arabic region, persian region, cjk region, region priority over metaLang, full-name lookup, case-insensitive, ISO 639-1 lookup, null/null→eng, unknown→eng, unknown region→eng
+describe('resolveLang', () => {
+  it('returns "ara" for printed_arabic region type', () => {
+    expect(resolveLang('printed_arabic', null)).toBe('ara');
+  });
+
+  it('returns "fas" for printed_persian region type', () => {
+    expect(resolveLang('printed_persian', null)).toBe('fas');
+  });
+
+  it('returns "chi_sim+jpn" for printed_cjk region type', () => {
+    expect(resolveLang('printed_cjk', null)).toBe('chi_sim+jpn');
+  });
+
+  it('region type takes priority over metaLang', () => {
+    expect(resolveLang('printed_arabic', 'persian')).toBe('ara');
+  });
+
+  it('returns TESS_LANG lookup for known metaLang string', () => {
+    expect(resolveLang(null, 'arabic')).toBe('ara');
+    expect(resolveLang(null, 'persian')).toBe('fas');
+    expect(resolveLang(null, 'french')).toBe('fra');
+    expect(resolveLang(null, 'german')).toBe('deu');
+    expect(resolveLang(null, 'russian')).toBe('rus');
+    expect(resolveLang(null, 'japanese')).toBe('jpn');
+  });
+
+  it('is case-insensitive for metaLang', () => {
+    expect(resolveLang(null, 'French')).toBe('fra');
+    expect(resolveLang(null, 'ARABIC')).toBe('ara');
+  });
+
+  it('returns ISO code lookup when metaLang is ISO 639-1', () => {
+    expect(resolveLang(null, 'fr')).toBe('fra');
+    expect(resolveLang(null, 'de')).toBe('deu');
+    expect(resolveLang(null, 'ar')).toBe('ara');
+    expect(resolveLang(null, 'zh')).toBe('chi_sim');
+  });
+
+  it('returns "eng" for null region type and null metaLang', () => {
+    expect(resolveLang(null, null)).toBe('eng');
+  });
+
+  it('returns "eng" for unknown metaLang string', () => {
+    expect(resolveLang(null, 'klingon')).toBe('eng');
+  });
+
+  it('returns "eng" for unknown region type', () => {
+    expect(resolveLang('handwritten_latin', null)).toBe('eng');
+  });
+});
+
+// tests: empty array→0, all clean→1, none clean→0, partial fraction, conf exactly at threshold
+describe('cleanRatio', () => {
+  it('returns 0 for empty array', () => {
+    expect(cleanRatio([], 90)).toBe(0);
+  });
+
+  it('returns 1 when all words meet threshold', () => {
+    const words = [{ conf: 95 }, { conf: 92 }, { conf: 100 }];
+    expect(cleanRatio(words, 90)).toBe(1);
+  });
+
+  it('returns 0 when no words meet threshold', () => {
+    const words = [{ conf: 50 }, { conf: 60 }, { conf: 70 }];
+    expect(cleanRatio(words, 90)).toBe(0);
+  });
+
+  it('returns correct fraction for partial match', () => {
+    const words = [{ conf: 95 }, { conf: 80 }, { conf: 55 }, { conf: 91 }];
+    expect(cleanRatio(words, 90)).toBeCloseTo(0.5, 5);
+  });
+
+  it('treats conf exactly at threshold as clean', () => {
+    const words = [{ conf: 90 }, { conf: 89 }];
+    expect(cleanRatio(words, 90)).toBeCloseTo(0.5, 5);
   });
 });

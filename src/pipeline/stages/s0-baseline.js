@@ -1,7 +1,9 @@
 // Stage 0: Quality baseline + domain detection. Deterministic scoring + optional Haiku domain inference.
 // Exports: s0Baseline. Deps: score.js, domain-detect.js, context.js
-import { existsSync } from 'fs';
+import { existsSync, statSync } from 'fs';
 import { scorePdf } from '../../pdf-upgrade/score.js';
+
+const MAX_PDF_MB = 200; // reject PDFs larger than this — protects memory in all downstream stages
 import { shouldRun } from '../config.js';
 import { detectDomain } from '../domain-detect.js';
 
@@ -18,6 +20,8 @@ export async function s0Baseline(ctx) {
 
   try {
     if (!existsSync(ctx.sourcePath)) throw new Error(`File not found: ${ctx.sourcePath}`);
+    const fileMb = statSync(ctx.sourcePath).size / (1024 * 1024);
+    if (fileMb > MAX_PDF_MB) throw new Error(`PDF too large (${fileMb.toFixed(1)}MB > ${MAX_PDF_MB}MB limit)`);
     const score = await scorePdf(ctx.sourcePath);
 
     ctx.pageCount = score.pages ?? 0;

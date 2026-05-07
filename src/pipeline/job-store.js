@@ -31,7 +31,7 @@ CREATE INDEX IF NOT EXISTS idx_jobs_submitted   ON jobs(submitted_at);
 `;
 
 export class JobStore {
-  constructor(db) { this.db = db; }
+  constructor(db) { this.db = db; this._closed = false; }
 
   /** Create a new pending job. Returns the generated job id. */
   create({ pdfPath, sourceUrl, meta, config, importance = 1 }) {
@@ -48,7 +48,7 @@ export class JobStore {
 
   get(id) {
     const row = this.db.prepare('SELECT * FROM jobs WHERE id=?').get(id);
-    return row ? parse(row) : null;
+    return row ? parseJobRow(row) : null;
   }
 
   /** Next pending job: highest importance first, then oldest submitted. */
@@ -56,7 +56,7 @@ export class JobStore {
     const row = this.db.prepare(
       "SELECT * FROM jobs WHERE status='pending' ORDER BY importance DESC, submitted_at ASC LIMIT 1"
     ).get();
-    return row ? parse(row) : null;
+    return row ? parseJobRow(row) : null;
   }
 
   setProcessing(id) {
@@ -106,7 +106,9 @@ export class JobStore {
     ).get()?.n ?? 0;
   }
 
-  close() { this.db.close(); }
+  close() { this._closed = true; this.db.close(); }
+  /** Guard: returns true if DB is closed. Use to skip writes after server teardown. */
+  isClosed() { return this._closed; }
 }
 
 export async function openJobStore(dbPath) {
@@ -119,7 +121,7 @@ export async function openJobStore(dbPath) {
 
 const iso = () => new Date().toISOString();
 
-function parse(row) {
+export function parseJobRow(row) {
   return {
     ...row,
     meta:     row.meta     ? JSON.parse(row.meta)     : {},

@@ -21,12 +21,14 @@ afterEach(async () => {
   cleanup();
 });
 
-const get  = (path) => fetch(`http://localhost:${PORT}${path}`);
+// Disable keep-alive to prevent connection reuse across beforeEach/afterEach server restarts
+const NO_KEEPALIVE = { headers: { Connection: 'close' } };
+const get  = (path) => fetch(`http://localhost:${PORT}${path}`, NO_KEEPALIVE);
 const post = (path, body) => fetch(`http://localhost:${PORT}${path}`, {
-  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  method: 'POST', headers: { 'Content-Type': 'application/json', Connection: 'close' },
   body: JSON.stringify(body),
 });
-const del = (path) => fetch(`http://localhost:${PORT}${path}`, { method: 'DELETE' });
+const del = (path) => fetch(`http://localhost:${PORT}${path}`, { method: 'DELETE', ...NO_KEEPALIVE });
 
 describe('GET /health', () => {
   it('returns status ok with version and queue_depth', async () => {

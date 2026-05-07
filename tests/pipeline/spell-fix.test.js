@@ -11,7 +11,7 @@ vi.mock('@anthropic-ai/sdk', () => ({
   })),
 }));
 
-import { spellFixWordObjects, spellFixMarkdown, spellFixCost } from '../../src/pdf-upgrade/spell-fix.js';
+import { spellFixWordObjects, spellFixMarkdown, spellFixCost, buildEntries, buildSystem } from '../../src/pdf-upgrade/spell-fix.js';
 
 function okResponse(text = '', tokIn = 10, tokOut = 5) {
   return { content: [{ text }], usage: { input_tokens: tokIn, output_tokens: tokOut } };
@@ -234,5 +234,116 @@ describe('spellFixMarkdown', () => {
     createMock.mockResolvedValueOnce(okResponse(''));
     const result = await spellFixMarkdown('the quick brown fox', 'key', {});
     expect(result.markdown).toBe('the quick brown fox');
+  });
+});
+
+describe('buildEntries', () => {
+  it('returns empty array for empty word list', () => {
+    expect(buildEntries([])).toEqual([]);
+  });
+
+  it('creates one entry per word with sequential idx', () => {
+    const words = [{ text: 'hello' }, { text: 'world' }];
+    const entries = buildEntries(words);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].idx).toBe(1);
+    expect(entries[0].display).toBe('hello');
+    expect(entries[1].idx).toBe(2);
+    expect(entries[1].display).toBe('world');
+  });
+
+  it('merges hyphenated word pair into one entry', () => {
+    const words = [{ text: 'pre-' }, { text: 'fix' }];
+    const entries = buildEntries(words);
+    expect(entries).toHaveLength(1);
+    expect(entries[0].display).toBe('pre-¶fix');
+    expect(entries[0].srcIdx).toBe(0);
+    expect(entries[0].mergedSrcIdx).toBe(1);
+  });
+
+  it('does NOT merge when next word starts with uppercase', () => {
+    const words = [{ text: 'end-' }, { text: 'Of' }];
+    const entries = buildEntries(words);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].display).toBe('end-');
+  });
+
+  it('does NOT merge when next word is empty', () => {
+    const words = [{ text: 'word-' }, { text: '' }];
+    const entries = buildEntries(words);
+    expect(entries).toHaveLength(2);
+  });
+
+  it('sets mergedSrcIdx to null for non-merged words', () => {
+    const words = [{ text: 'hello' }];
+    const entries = buildEntries(words);
+    expect(entries[0].mergedSrcIdx).toBeNull();
+  });
+
+  it('handles missing text field gracefully', () => {
+    const words = [{ text: undefined }, { text: 'next' }];
+    const entries = buildEntries(words);
+    expect(entries).toHaveLength(2);
+    expect(entries[0].display).toBe('');
+  });
+});
+
+describe('buildSystem', () => {
+  it('returns BASE_SYSTEM alone when no options given', () => {
+    const result = buildSystem();
+    expect(result).toContain('correct OCR errors');
+    expect(result).not.toContain('Document:');
+  });
+
+  it('includes document title when title provided', () => {
+    const result = buildSystem({ title: 'Annual Report' });
+    expect(result).toContain('Document: "Annual Report"');
+  });
+
+  it('includes page info as "Page: N of M" when both provided', () => {
+    const result = buildSystem({ pageNo: 3, totalPages: 10 });
+    expect(result).toContain('Page: 3 of 10');
+  });
+
+  it('includes just page number when totalPages not provided', () => {
+    const result = buildSystem({ pageNo: 5 });
+    expect(result).toContain('Page: 5');
+    expect(result).not.toContain('of');
+  });
+
+  it('includes language when provided', () => {
+    const result = buildSystem({ language: 'Persian' });
+    expect(result).toContain('Language: Persian');
+  });
+
+  it('includes domainContext when provided', () => {
+    const result = buildSystem({ domainContext: 'This is a legal document from 1920.' });
+    expect(result).toContain('legal document from 1920');
+  });
+
+  it('includes prevPageTail excerpt (last 200 chars)', () => {
+    const tail = 'A'.repeat(300);
+    const result = buildSystem({ prevPageTail: tail });
+    expect(result).toContain('Previous page ends with');
+    // Only last 200 chars of tail are included
+    expect(result).toContain('A'.repeat(200));
+    expect(result).not.toContain('A'.repeat(201));
+  });
+
+  it('includes vision draft when boss is set', () => {
+    const result = buildSystem({ visionDraft: { boss: 'Boss read this', marker: null } });
+    expect(result).toContain('Vision A: Boss read this');
+    expect(result).not.toContain('Vision B:');
+  });
+
+  it('includes both vision drafts when both are set', () => {
+    const result = buildSystem({ visionDraft: { boss: 'Boss text', marker: 'Marker text' } });
+    expect(result).toContain('Vision A: Boss text');
+    expect(result).toContain('Vision B: Marker text');
+  });
+
+  it('does not include vision section when visionDraft is null/undefined', () => {
+    const result = buildSystem({ title: 'Test' });
+    expect(result).not.toContain('Independent vision');
   });
 });

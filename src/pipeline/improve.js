@@ -140,7 +140,7 @@ function safeHost(url) {
   catch { return null; }
 }
 
-function perStageDelta(ctx, stageName) {
+export function perStageDelta(ctx, stageName) {
   const scores = ctx.quality.perStage;
   const keys = Object.keys(scores);
   const idx = keys.indexOf(stageName);

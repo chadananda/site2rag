@@ -1,23 +1,33 @@
-// Stage 4: Re-OCR at 600 DPI for dirty pages; fetches boss+marker vision drafts for broker spell-fix.
-// Exports: s4Escalate. Deps: pdftoppm CLI, tesseract CLI, config.js
+// Stage 4: High-DPI re-OCR for dirty pages; parallel vision drafts from boss+marker.
+// Exports: s4Escalate, buildDraftPrompt, parseHocr, meanConf
+//   s4Escalate(ctx) → ctx   — re-OCRs dirty pages at 600 DPI; fetches boss/marker vision drafts
+//   buildDraftPrompt(ctx)   — assembles LLM transcription prompt from doc meta + domain context
+//   parseHocr(hocr,pageNo) — Tesseract hOCR XML → word objects (NOTE: also in s3; s4 uses source='tesseract-600')
+//   meanConf(words) → 0-100 — average Tesseract confidence
+// CONFIG: thresholds.dirtyWord:0.40 — below this conf = dirty word requiring escalation
+//         bossUrl    — local LLM vision endpoint (POST /chat/completions OpenAI-style)
+//         markerUrl  — marker service (POST /convert, full-doc PDF→markdown, cached per doc)
+//         toolBackends.pdftoppm — route 600dpi rasterization to remote
+// ERRORS: boss fetch fail → null draft (recoverable); marker fetch fail → null draft (recoverable)
+//         pdftoppm/tesseract fail per page → recoverable; dirty words still marked needs_vision
 // CONTRACT:
 //   Reads:  ctx.pages[n].words, ctx.pages[n]._lang, ctx.pages[n]._bucketed, ctx.pages[n]._pngPath
-//   Writes: may replace page.words; sets w.needs_vision=true on remaining dirty; updates _bucketed.needs_vision
-//           sets page._visionDraft = { boss: string|null, marker: string|null } for dirty pages
-
-import { shouldRun } from '../config.js';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+//   Writes: ctx.pages[n].words (may replace with 600dpi version)
+//           ctx.pages[n]._visionDraft = {boss:string|null, marker:string|null}
+//           ctx.pages[n]._needsFullVision = true (if no tesseract output at all)
+//           ctx.pages[n]._bucketed.needs_vision (count of dirty words after escalation)
+//           ctx._markerDoc (cached full-doc markdown, set once)
+import { shouldRun } from '../config.js';          // shouldRun(stage,ctx)→bool
 import { mkdirSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { createHash } from 'crypto';
-
-const execFileAsync = promisify(execFile);
+// ── config defaults ──────────────────────────────────────────────────────────
+const D_DIRTY_WORD = 0.40;   // thresholds.dirtyWord
 
 // ── vision draft helpers (boss + marker, run in parallel) ─────────────────────
 
-function buildDraftPrompt(ctx) {
+export function buildDraftPrompt(ctx) {
   const parts = [];
   if (ctx.meta?.title) parts.push(`Document: "${ctx.meta.title}"`);
   if (ctx.meta?.language) parts.push(`Language: ${ctx.meta.language}`);
@@ -86,7 +96,7 @@ async function fetchPageDrafts(page, ctx) {
 
 // ── hOCR parser ───────────────────────────────────────────────────────────────
 
-function parseHocr(hocr, pageNo) {
+export function parseHocr(hocr, pageNo) {
   const words = [];
   const re = /<span[^>]+class='(?:ocr|ocrx)_word'[^>]+title='([^']*)'[^>]*>([\s\S]*?)<\/span>/g;
   let m;
@@ -109,16 +119,16 @@ function parseHocr(hocr, pageNo) {
   return words;
 }
 
-function meanConf(words) {
+export function meanConf(words) {
   if (!words.length) return 0;
   return words.reduce((s, w) => s + (w.conf ?? 0), 0) / words.length;
 }
 
-async function rasterizeAt(pdfPath, pageNo, outDir, dpi) {
+async function rasterizeAt(pdfPath, pageNo, outDir, dpi, ctx) {
   const outBase = join(outDir, `p${pageNo}-${dpi}`);
   const pngPath = `${outBase}.png`;
   if (!existsSync(pngPath)) {
-    await execFileAsync('pdftoppm', [
+    await ctx.run('pdftoppm', [
       '-png', '-r', String(dpi), '-f', String(pageNo), '-l', String(pageNo),
       '-singlefile', pdfPath, outBase,
     ], { timeout: 90000 });
@@ -131,7 +141,7 @@ export async function s4Escalate(ctx) {
 
   ctx.beginStage('s4');
   let pagesAffected = 0;
-  const dirtyT = (ctx.config.thresholds?.dirtyWord ?? 0.40) * 100;
+  const dirtyT = (ctx.config.thresholds?.dirtyWord ?? D_DIRTY_WORD) * 100;
   const docHash = createHash('sha256').update(ctx.docId).digest('hex').slice(0, 16);
   const tmpDir = join(tmpdir(), `site2rag-s3-${docHash}`);
   mkdirSync(tmpDir, { recursive: true });
@@ -149,8 +159,8 @@ export async function s4Escalate(ctx) {
         // Fan out: re-OCR at 600dpi + vision drafts from boss+marker, all in parallel
         const [reOcrResult, visionDraft] = await Promise.all([
           noOutput ? Promise.resolve(null) : (async () => {
-            const pngPath600 = await rasterizeAt(ctx.sourcePath, page.pageNo, tmpDir, 600);
-            const { stdout } = await execFileAsync('tesseract', [pngPath600, 'stdout', 'hocr', '-l', lang, '--psm', '3'], {
+            const pngPath600 = await rasterizeAt(ctx.sourcePath, page.pageNo, tmpDir, 600, ctx);
+            const { stdout } = await ctx.run('tesseract', [pngPath600, 'stdout', 'hocr', '-l', lang, '--psm', '3'], {
               timeout: 120000, maxBuffer: 20 * 1024 * 1024,
             });
             return parseHocr(stdout, page.pageNo);

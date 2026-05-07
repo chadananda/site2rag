@@ -1,32 +1,38 @@
-// Stage 5: Vision model escalation for pages where tesseract failed or output is mostly dirty.
-// Exports: s5Vision. Deps: config.js, pdftoppm (system), surya_ocr (optional CLI)
+// Stage 5: Vision model escalation for pages Tesseract couldn't handle.
+// Exports: s5Vision
+//   s5Vision(ctx) → ctx  — Phase 1: Surya CLI batch; Phase 2: per-page backend chain
+// CONFIG: s5Mode:'haiku'|'sonnet' — forces ALL pages through named Anthropic model
+//         escalation.suryaVision:2 — min importance for Surya Phase 1
+//         escalation.localVision   — min importance for Phase 2 backends
+//         maxTokenBudget           — hard token cap; checked per page via withinBudget()
+//         toolBackends.surya_ocr   — route Surya to remote GPU host
+//         toolBackends.pdftoppm    — route rasterization to remote host
+// ERRORS: surya_ocr ENOENT → recoverable; surya batch fail → recoverable
+//         backend chain exhausted → page skipped (recoverable)
+//         pdftoppm fail → page skipped (recoverable)
 // CONTRACT:
-//   Reads:  ctx.pages[n]._needsFullVision, _bucketed, words, _pngPath, _lang
-//   Writes: ctx.pages[n].visionMd; clears page.words for full-vision pages
+//   Reads:  ctx.pages[n]._needsFullVision, _bucketed, words, _pngPath, _lang, _suryaText
+//   Writes: ctx.pages[n].visionMd — final corrected markdown; clears page.words for vision pages
 //
-// Two-phase approach:
-//   Phase 1 — Surya pre-pass (batch): calls surya_ocr CLI once per document chunk,
-//             stores results in page._suryaMd. Free, handles Arabic/CJK handwriting well.
-//             Large docs are chunked (SURYA_CHUNK_SIZE pages) to avoid OOM.
-//   Phase 2 — Per-page backend chain: boss → azure → google → claude.
-//             Only runs for pages surya didn't cover.
-
-import { shouldRun, withinBudget, llmCost } from '../config.js';
-import { execFile } from 'child_process';
-import { promisify } from 'util';
+// Phase 1 — Surya pre-pass (batch): surya_ocr CLI, chunked by SURYA_CHUNK_SIZE pages.
+//           Skipped if s3 already ran Surya (ctx.pages.some(p=>p._suryaText)).
+// Phase 2 — Per-page backend chain: s5Mode model → boss → azure → google → claude-opus.
+//           Only pages surya didn't cover.
+import { shouldRun, withinBudget, llmCost } from '../config.js'; // shouldRun(stage,ctx)→bool; withinBudget(ctx,n?)→bool; llmCost(model,in,out)→usd
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join, basename } from 'path';
 import { tmpdir } from 'os';
 import { createHash } from 'crypto';
+// ── config defaults ──────────────────────────────────────────────────────────
+const D_SURYA_CHUNK = 20;     // SURYA_CHUNK_SIZE — pages per surya_ocr batch call
+const D_MAX_PNG_MB  = 12;     // max PNG size in MB before skipping page
 
-const execFileAsync = promisify(execFile);
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 
 const VISION_PROMPT = 'Transcribe all text from this document page exactly as it appears. Output only the transcribed text in clean Markdown. Preserve headings, paragraphs, lists, and tables. Do not add commentary.';
 const HANDWRITING_PROMPT = 'Carefully transcribe all handwritten and printed text from this document page. The text may include multiple languages and scripts including Arabic, Persian, and English. Preserve paragraph breaks. Mark words that are truly illegible as [illegible]. Output only the transcribed text in clean Markdown. Do not add commentary.';
 
-const SURYA_CHUNK_SIZE = 20; // pages per surya_ocr call — limits memory on large docs
-const SURYA_BIN = process.env.SURYA_PATH ?? 'surya_ocr'; // path to surya_ocr CLI
+// SURYA_CHUNK_SIZE moved to D_SURYA_CHUNK above
 
 // Map Tesseract lang codes → Surya lang codes
 const TESS_TO_SURYA = {
@@ -42,7 +48,7 @@ const TESS_TO_GOOGLE = {
   jpn: 'ja', 'chi_sim+jpn': 'zh-CN', kor: 'ko', eng: 'en',
 };
 
-const shouldVisionPage = (page) => {
+export const shouldVisionPage = (page) => {
   const visionWords = (page.words ?? []).filter(w => w.needs_vision);
   const needsFull = page._needsFullVision || (page.words?.length === 0 && page.regions?.some(r => r.type !== 'figure'));
   const dirty = page._bucketed?.dirty ?? 0;
@@ -53,21 +59,29 @@ const shouldVisionPage = (page) => {
 
 // ── page PNG helper ───────────────────────────────────────────────────────────
 
+const MAX_PNG_BYTES = D_MAX_PNG_MB * 1024 * 1024; // larger pages downsampled by vision model anyway
+
 async function getPagePng(page, ctx) {
-  if (page._pngPath && existsSync(page._pngPath)) return readFileSync(page._pngPath);
+  if (page._pngPath && existsSync(page._pngPath)) {
+    const buf = readFileSync(page._pngPath);
+    return buf.length <= MAX_PNG_BYTES ? buf : null; // skip oversized pages
+  }
   const stableDir = join(tmpdir(), 'site2rag-s3-' + sha256(ctx.docId).slice(0, 16));
   mkdirSync(stableDir, { recursive: true });
   const outBase = join(stableDir, `page-${page.pageNo}`);
-  await execFileAsync('pdftoppm', ['-png', '-r', '200', '-f', String(page.pageNo),
-    '-l', String(page.pageNo), '-singlefile', ctx.sourcePath, outBase]);
-  return readFileSync(outBase + '.png');
+  await ctx.run('pdftoppm', ['-png', '-r', '200', '-f', String(page.pageNo),
+    '-l', String(page.pageNo), '-singlefile', ctx.sourcePath, outBase], { timeout: 30000 });
+  const pngPath = outBase + '.png';
+  if (!existsSync(pngPath)) return null;
+  const buf = readFileSync(pngPath);
+  return buf.length <= MAX_PNG_BYTES ? buf : null;
 }
 
 // ── Phase 1: Surya batch pre-pass ────────────────────────────────────────────
 
-async function checkSuryaCli() {
+async function checkSuryaCli(ctx) {
   try {
-    await execFileAsync(SURYA_BIN, ['--help'], { timeout: 5000 });
+    await ctx.run('surya_ocr', ['--help'], { timeout: 5000 });
     return true;
   } catch (e) {
     // surya_ocr --help exits non-zero but that still means it's installed
@@ -76,14 +90,17 @@ async function checkSuryaCli() {
 }
 
 async function runSuryaChunk(pages, chunkDir, ctx) {
-  // Write PNGs into the chunk directory
+  // Write PNGs into the chunk directory — skip oversized or unreadable pages
   const pngMap = new Map(); // filename → page
   for (const page of pages) {
-    const buf = await getPagePng(page, ctx);
+    let buf;
+    try { buf = await getPagePng(page, ctx); } catch { continue; }
+    if (!buf) continue;
     const filename = `page-${String(page.pageNo).padStart(4, '0')}.png`;
     writeFileSync(join(chunkDir, filename), buf);
     pngMap.set(filename, page);
   }
+  if (pngMap.size === 0) return;
 
   // Collect unique langs for this chunk
   const langs = [...new Set(pages.map(p => TESS_TO_SURYA[p._lang] ?? 'en'))].join(',');
@@ -94,7 +111,7 @@ async function runSuryaChunk(pages, chunkDir, ctx) {
   try {
     // Directory input → results.json written directly in outDir
     // Requires transformers==4.44.2 (4.45+ breaks surya 0.6.x model loading)
-    await execFileAsync(SURYA_BIN, [chunkDir, '--langs', langs, '--results_dir', outDir],
+    await ctx.run('surya_ocr', [chunkDir, '--langs', langs, '--results_dir', outDir],
       { timeout: 300000 }); // 5 min max per chunk
 
     const resultsPath = join(outDir, 'results.json');
@@ -123,9 +140,9 @@ async function runSuryaBatch(visionPages, ctx) {
   const base = join(tmpdir(), `site2rag-surya-${docHash}`);
 
   // Process in chunks to avoid OOM on large documents
-  for (let i = 0; i < visionPages.length; i += SURYA_CHUNK_SIZE) {
-    const chunk = visionPages.slice(i, i + SURYA_CHUNK_SIZE);
-    const chunkDir = `${base}-chunk${Math.floor(i / SURYA_CHUNK_SIZE)}`;
+  for (let i = 0; i < visionPages.length; i += D_SURYA_CHUNK) {
+    const chunk = visionPages.slice(i, i + D_SURYA_CHUNK);
+    const chunkDir = `${base}-chunk${Math.floor(i / D_SURYA_CHUNK)}`;
     mkdirSync(chunkDir, { recursive: true });
     await runSuryaChunk(chunk, chunkDir, ctx);
   }
@@ -191,25 +208,56 @@ async function visionViaAzure(endpoint, key, b64) {
 
 async function visionViaGoogle(key, b64, lang) {
   const langHint = TESS_TO_GOOGLE[lang] ?? 'en';
-  const res = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${key}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ requests: [{
-      image: { content: b64 },
-      features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
-      imageContext: { languageHints: [langHint] },
-    }]}),
-  });
-  if (!res.ok) throw new Error(`google HTTP ${res.status}`);
-  const data = await res.json();
-  const text = data.responses?.[0]?.fullTextAnnotation?.text ?? '';
-  if (!text) throw new Error('google returned empty text');
-  return { text, tokens_in: 0, tokens_out: 0, cost: 0.0015 };
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 60000);
+  try {
+    const res = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${key}`, {
+      method: 'POST', signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ requests: [{
+        image: { content: b64 },
+        features: [{ type: 'DOCUMENT_TEXT_DETECTION' }],
+        imageContext: { languageHints: [langHint] },
+      }]}),
+    });
+    clearTimeout(timer);
+    if (!res.ok) throw new Error(`google HTTP ${res.status}`);
+    const data = await res.json();
+    const text = data.responses?.[0]?.fullTextAnnotation?.text ?? '';
+    if (!text) throw new Error('google returned empty text');
+    return { text, tokens_in: 0, tokens_out: 0, cost: 0.0015 };
+  } catch (e) { clearTimeout(timer); throw e; }
 }
 
 async function visionViaCloud(b64, apiKey, model, prompt = VISION_PROMPT) {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
-  const client = new Anthropic({ apiKey });
+  const client = new Anthropic({ apiKey, timeout: 120000 });
+  const msg = await client.messages.create({
+    model, max_tokens: 2048,
+    messages: [{ role: 'user', content: [
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: b64 } },
+      { type: 'text', text: prompt },
+    ]}],
+  });
+  const text = msg.content.map(b => b.type === 'text' ? b.text : '').join('');
+  const cost = llmCost(model, msg.usage?.input_tokens ?? 0, msg.usage?.output_tokens ?? 0);
+  return { text, tokens_in: msg.usage?.input_tokens ?? 0, tokens_out: msg.usage?.output_tokens ?? 0, cost };
+}
+
+async function synthesizeWithOcrContext(b64, apiKey, model, page) {
+  const { default: Anthropic } = await import('@anthropic-ai/sdk');
+  const client = new Anthropic({ apiKey, timeout: 120000 });
+  const ocrDrafts = [];
+  if (page?.words?.length > 0) {
+    const tessText = page.words.map(w => w.text).join(' ').replace(/\s+/g, ' ').trim();
+    if (tessText) ocrDrafts.push(`Tesseract OCR:\n${tessText.slice(0, 2000)}`);
+  }
+  if (page?._suryaText) {
+    ocrDrafts.push(`Secondary OCR (Surya):\n${page._suryaText.slice(0, 2000)}`);
+  }
+  const prompt = ocrDrafts.length > 0
+    ? `You are correcting OCR output for a scanned historical document page.\n\nOCR drafts:\n\n${ocrDrafts.join('\n\n')}\n\nReview the page image carefully and provide the corrected, accurate transcription. Output only the transcribed text in clean Markdown. Preserve paragraph breaks, headings, and structure.`
+    : VISION_PROMPT;
   const msg = await client.messages.create({
     model, max_tokens: 2048,
     messages: [{ role: 'user', content: [
@@ -249,6 +297,14 @@ async function buildBackendChain(ctx) {
         chain.push({ name, call: (b64) => visionViaCloud(b64, ctx.config.apiKey, name, visionPrompt) });
     }
   }
+  // s5Mode: inject preferred model at front of chain for synthesis with OCR context
+  if (ctx.config.s5Mode && ctx.config.apiKey) {
+    const modeModel = ctx.config.s5Mode === 'haiku' ? 'claude-haiku-4-5-20251001' :
+                      ctx.config.s5Mode === 'sonnet' ? 'claude-sonnet-4-6' : null;
+    if (modeModel) {
+      chain.unshift({ name: modeModel, call: (b64, _lang, page) => synthesizeWithOcrContext(b64, ctx.config.apiKey, modeModel, page) });
+    }
+  }
   return chain;
 }
 
@@ -261,21 +317,25 @@ export async function s5Vision(ctx) {
   let pagesAffected = 0, totalCost = 0, totalIn = 0, totalOut = 0;
 
   try {
-    const visionPages = ctx.pages.filter(p => shouldVisionPage(p).shouldVision);
+    const forcedByMode = !!ctx.config.s5Mode;
+    const visionPages = ctx.pages.filter(p => forcedByMode || shouldVisionPage(p).shouldVision);
 
     // Phase 1: Surya batch pre-pass (free, handles difficult scripts well).
     // Always run for hard docs (difficulty >= 0.3) — they need it most.
     const difficulty = ctx.quality?.baseline?.processing_difficulty ?? 0;
     const suryaGate = ctx.config.escalation?.suryaVision ?? 2;
-    if (visionPages.length > 0 && (ctx.importance >= suryaGate || difficulty >= 0.3)) {
-      const suryaOk = await checkSuryaCli();
-      if (suryaOk) {
+    const s3RanSurya = ctx.pages.some(p => p._suryaText);
+    if (!s3RanSurya && visionPages.length > 0 && (ctx.importance >= suryaGate || difficulty >= 0.3)) {
+      const suryaOk = await checkSuryaCli(ctx);
+      if (!suryaOk) {
+        ctx.addError('s5', new Error(`surya_ocr CLI not found — install surya or set SURYA_PATH`), true);
+      } else {
         try {
           await runSuryaBatch(visionPages, ctx);
           const suryaCount = visionPages.filter(p => p._suryaMd).length;
           if (suryaCount) ctx.addDecision('s5', 'surya_batch', `${suryaCount}/${visionPages.length} pages`);
         } catch (e) {
-          ctx.addDecision('s5', 'surya_failed', e.message);
+          ctx.addError('s5', new Error(`surya batch failed: ${e.message}`), true);
         }
       }
     }
@@ -310,13 +370,14 @@ export async function s5Vision(ctx) {
       let pngBuf;
       try { pngBuf = await getPagePng(page, ctx); }
       catch (e) { ctx.addError('s5', new Error(`page ${page.pageNo} PNG failed: ${e.message}`), true); continue; }
+      if (!pngBuf) { ctx.addDecision('s5', `page_${page.pageNo}`, 'skip: oversized PNG'); continue; }
 
       const b64 = pngBuf.toString('base64');
       const lang = page._lang ?? 'eng';
       let result = null, usedBackend = null;
 
       for (const backend of chain) {
-        try { result = await backend.call(b64, lang); usedBackend = backend.name; break; }
+        try { result = await backend.call(b64, lang, page); usedBackend = backend.name; break; }
         catch (e) { ctx.addDecision('s5', `${backend.name}_failed`, `page ${page.pageNo}: ${e.message}`); }
       }
 
@@ -332,6 +393,15 @@ export async function s5Vision(ctx) {
       ctx.addDecision('s5', `page_${page.pageNo}`, usedBackend, page.visionMd.length);
     }
 
+    // Record quality after vision: coverage of vision-processed pages weighted by prior s3 score
+    if (pagesAffected > 0) {
+      const totalPages = ctx.pages.length;
+      const visionCoverage = pagesAffected / totalPages;
+      const s3Score = ctx.quality.perStage['s3'] ?? ctx.quality.baseline?.composite_score ?? 0;
+      // Vision fills gaps s3 missed — estimate combined quality
+      const s5Score = Math.min(1, s3Score + visionCoverage * (1 - s3Score));
+      ctx.recordStageQuality('s5', Math.round(s5Score * 1000) / 1000);
+    }
   } catch (err) {
     ctx.addError('s5', err, true);
     if (ctx.config.failFast) throw err;

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { openJobStore } from '../../src/pipeline/job-store.js';
+import { openJobStore, parseJobRow } from '../../src/pipeline/job-store.js';
 import { makeTempDir } from './helpers.js';
 import { join } from 'path';
 
@@ -161,5 +161,50 @@ describe('JobStore — resetStuck', () => {
   it('returns 0 when no stuck jobs exist', () => {
     store.create({ pdfPath: '/tmp/a.pdf' });  // still pending
     expect(store.resetStuck(null)).toBe(0);
+  });
+});
+
+describe('parseJobRow', () => {
+  it('parses meta JSON string to object', () => {
+    const row = { meta: '{"title":"Test Doc"}', config: null, progress: null, receipt: null };
+    const result = parseJobRow(row);
+    expect(result.meta).toEqual({ title: 'Test Doc' });
+  });
+
+  it('returns empty object for null meta', () => {
+    const row = { meta: null, config: null, progress: null, receipt: null };
+    expect(parseJobRow(row).meta).toEqual({});
+  });
+
+  it('parses config JSON string to object', () => {
+    const row = { meta: null, config: '{"failFast":true}', progress: null, receipt: null };
+    expect(parseJobRow(row).config).toEqual({ failFast: true });
+  });
+
+  it('returns empty object for null config', () => {
+    const row = { meta: null, config: null, progress: null, receipt: null };
+    expect(parseJobRow(row).config).toEqual({});
+  });
+
+  it('parses progress JSON string', () => {
+    const row = { meta: null, config: null, progress: '{"stage":"s3","page":2}', receipt: null };
+    expect(parseJobRow(row).progress).toEqual({ stage: 's3', page: 2 });
+  });
+
+  it('returns null for null progress', () => {
+    const row = { meta: null, config: null, progress: null, receipt: null };
+    expect(parseJobRow(row).progress).toBeNull();
+  });
+
+  it('parses receipt JSON string', () => {
+    const row = { meta: null, config: null, progress: null, receipt: '{"cost_usd":0.01}' };
+    expect(parseJobRow(row).receipt).toEqual({ cost_usd: 0.01 });
+  });
+
+  it('preserves other row fields via spread', () => {
+    const row = { id: 'abc123', status: 'done', meta: null, config: null, progress: null, receipt: null };
+    const result = parseJobRow(row);
+    expect(result.id).toBe('abc123');
+    expect(result.status).toBe('done');
   });
 });

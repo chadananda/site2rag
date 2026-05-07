@@ -1,7 +1,22 @@
-// Stage 6: LLM spell-fix on fuzzy-confidence words only. Bbox-preserving.
-// Exports: s6SpellFix. Deps: spell-fix.js, config.js
-import { spellFixWordObjects } from '../../pdf-upgrade/spell-fix.js';
-import { shouldRun, withinBudget } from '../config.js';
+// Stage 6: LLM spell-fix on fuzzy-confidence words only. Bbox-preserving, conf-gated.
+// Exports: s6SpellFix
+//   s6SpellFix(ctx) → ctx  — runs Haiku spell-fix on words in [fuzzyWord, cleanPage) conf band
+// CONFIG: apiKey                        — required; skip if absent
+//         implementations.spellfix[0]   — model name (default: claude-haiku-4-5-20251001)
+//         thresholds.spellFixMin:0.45   — skip if baseline composite < this
+//         thresholds.cleanPage:0.90     — upper bound of fuzzy band
+//         thresholds.fuzzyWord:0.60     — lower bound of fuzzy band
+//         maxTokenBudget                — stops at page boundary if exceeded
+// ERRORS: spellFixWordObjects fail per page → recoverable; prior words kept
+// CONTRACT:
+//   Reads:  ctx.pages[n].words, ctx.quality.baseline, ctx.meta, ctx.domain.prompt_context
+//   Writes: ctx.pages[n].words (corrections merged in), ctx.pages[n]._spellFixCount
+import { spellFixWordObjects } from '../../pdf-upgrade/spell-fix.js'; // (words,apiKey,opts)→{words,tokens_in,tokens_out,cost_usd}
+import { shouldRun, withinBudget } from '../config.js';               // shouldRun(stage,ctx)→bool; withinBudget(ctx,n?)→bool
+// ── config defaults ──────────────────────────────────────────────────────────
+const D_SPELL_FIX_MIN = 0.45;  // thresholds.spellFixMin
+const D_CLEAN_PAGE    = 0.90;  // thresholds.cleanPage
+const D_FUZZY_WORD    = 0.60;  // thresholds.fuzzyWord
 
 /**
  * Run Haiku spell-fix on the fuzzy-confidence word bucket (conf between fuzzyWord and cleanPage).
@@ -24,15 +39,15 @@ export async function s6SpellFix(ctx) {
 
     // Don't waste tokens on docs too broken for cheap correction
     const baseline = ctx.quality.baseline?.composite_score ?? 0;
-    const spellMin = ctx.config.thresholds?.spellFixMin ?? 0.45;
+    const spellMin = ctx.config.thresholds?.spellFixMin ?? D_SPELL_FIX_MIN;
     if (baseline < spellMin) {
       ctx.addDecision('s6', 'skip',
         `baseline ${baseline.toFixed(3)} < min ${spellMin} — too broken for spell-fix`, baseline);
       return ctx;
     }
 
-    const fuzzyLow = (ctx.config.thresholds?.fuzzyWord ?? 0.60) * 100;
-    const cleanHigh = (ctx.config.thresholds?.cleanPage ?? 0.90) * 100;
+    const fuzzyLow = (ctx.config.thresholds?.fuzzyWord ?? D_FUZZY_WORD) * 100;
+    const cleanHigh = (ctx.config.thresholds?.cleanPage ?? D_CLEAN_PAGE) * 100;
 
     for (const page of ctx.pages) {
       if (!page.words?.length) continue;

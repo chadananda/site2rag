@@ -1,6 +1,12 @@
-// Pipeline configuration. All thresholds, routing rules, and implementation choices live here.
-// Exports: DEFAULT_CONFIG, mergeConfig, stagesForImportance, llmCost, MODEL_RATES
-// Philosophy: tune thresholds without touching stage code; swap implementations via config.
+// Pipeline config defaults, thresholds, escalation gates, LLM cost model.
+// Exports: DEFAULT_CONFIG, mergeConfig, shouldRun, stagesForImportance, withinBudget, llmCost, MODEL_RATES
+//   DEFAULT_CONFIG                            — all defaults (stages,thresholds,escalation,implementations)
+//   mergeConfig(overrides) → config           — deep-merge over defaults; caller values win
+//   shouldRun(stage, ctx) → bool              — checks skip list + importance gates
+//   stagesForImportance(importance, cfg) → [] — filtered stage list
+//   withinBudget(ctx, additionalTokens?) → bool
+//   llmCost(model, tokensIn, tokensOut) → usd — uses MODEL_RATES
+//   MODEL_RATES = {model:[$/M_in, $/M_out]}
 
 /** Canonical pricing table: $/million tokens [input, output]. Update when Anthropic reprices. */
 export const MODEL_RATES = {

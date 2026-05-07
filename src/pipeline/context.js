@@ -1,6 +1,15 @@
-// Pipeline execution context. Carries document state, per-stage metrics, and decisions through the pipeline.
-// Exports: PipelineContext, PIPELINE_VERSION
+// Pipeline execution context — per-doc state, metrics, decisions, quality, receipt.
+// Exports: PipelineContext, PIPELINE_VERSION, _buildAssessment, _buildSuggestions
+//   new PipelineContext({docId,sourcePath,sourceUrl?,importance?,config?,meta?}) → ctx
+//   ctx.run(tool,args,opts) → {stdout,stderr}     — tool runner (local|http|cloud)
+//   ctx.beginStage(name) / ctx.endStage(name,extra) — stage lifecycle (always in finally)
+//   ctx.addDecision(stage,code,reason,value?)     — audit trail for self-improvement
+//   ctx.addError(stage,err,recoverable)           — recoverable=true: continue; false: fatal
+//   ctx.recordStageQuality(stage,score) / ctx.qualityDelta(from,to) → delta|null
+//   ctx.toReceipt() → receipt                     — cost, quality, suggestions summary
+//   ctx.toJSON() / PipelineContext.fromJSON(data) — serialize/restore for crash recovery
 import { performance } from 'perf_hooks';
+import { createToolRunner } from './tool-runner.js'; // (config)→run(tool,args,opts) — routes to local|http|cloud
 
 export const PIPELINE_VERSION = '1.0.0';
 
@@ -14,6 +23,7 @@ export class PipelineContext {
     this.sourceUrl = sourceUrl;
     this.importance = Math.max(0, Math.min(5, importance));
     this.config = config;
+    this.run = createToolRunner(config); // bound tool runner — use ctx.run('pdftoppm',[...]) in stages
     this.meta = meta;  // {title, authors, language, ...} from existing metadata extraction
 
     this.pageCount = 0;
@@ -159,7 +169,7 @@ export class PipelineContext {
 
 const STAGE_LABELS = { s1: 'normalize', s3: 'OCR', s4: 'escalate', s5: 'vision', s6: 'spell-fix', s7: 'archive', s8: 'export' };
 
-function _buildAssessment(ctx, qualityGain) {
+export function _buildAssessment(ctx, qualityGain) {
   const baseline = ctx.quality.baseline ?? {};
   const ranStages = ctx.metrics.stages
     .filter(s => !s.notes?.startsWith('skip') && STAGE_LABELS[s.stage])
@@ -179,7 +189,7 @@ function _buildAssessment(ctx, qualityGain) {
   };
 }
 
-function _buildSuggestions(ctx, totals, qualityGain) {
+export function _buildSuggestions(ctx, totals, qualityGain) {
   const suggestions = [];
   const baseline = ctx.quality.baseline ?? {};
   const threshold = ctx.config.thresholds?.goodDoc ?? 0.75;

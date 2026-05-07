@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { analyzeRun, reviewSuggestions, markReviewed } from '../../src/pipeline/improve.js';
+import { analyzeRun, reviewSuggestions, markReviewed, perStageDelta } from '../../src/pipeline/improve.js';
 import { openAnalyticsDb, ANALYTICS_SCHEMA } from '../../src/pipeline/analytics.js';
 import { makeCtx, makeTempDir } from './helpers.js';
 import { join } from 'path';
@@ -280,5 +280,57 @@ describe('evidence field privacy', () => {
     expect(s.evidence ?? '').not.toContain('example.com');
     // host is stored in site_host column, not buried in evidence JSON
     expect(s.site_host).toBe('example.com');
+  });
+});
+
+describe('perStageDelta', () => {
+  it('returns null when stage not in perStage', () => {
+    const ctx = makeCtx();
+    expect(perStageDelta(ctx, 's5')).toBeNull();
+  });
+
+  it('returns null when stage score is null', () => {
+    const ctx = makeCtx();
+    ctx.quality.perStage['s5'] = null;
+    expect(perStageDelta(ctx, 's5')).toBeNull();
+  });
+
+  it('returns null when first stage has no baseline', () => {
+    const ctx = makeCtx();
+    ctx.quality.perStage['s5'] = 0.7;
+    // no baseline set, no prior stage → prev is null
+    expect(perStageDelta(ctx, 's5')).toBeNull();
+  });
+
+  it('uses baseline composite_score as prev for first stage', () => {
+    const ctx = makeCtx();
+    ctx.setBaseline({ composite_score: 0.5 });
+    // s0 is set by setBaseline; s5 is first key after s0
+    ctx.quality.perStage['s5'] = 0.7;
+    // s5 is not index 0 (s0 is), so prev = scores['s0'] = 0.5
+    const delta = perStageDelta(ctx, 's5');
+    expect(delta).toBeCloseTo(0.2, 5);
+  });
+
+  it('uses prior stage score as prev for subsequent stages', () => {
+    const ctx = makeCtx();
+    ctx.setBaseline({ composite_score: 0.4 });
+    ctx.quality.perStage['s5'] = 0.6;
+    ctx.quality.perStage['s6'] = 0.75;
+    expect(perStageDelta(ctx, 's6')).toBeCloseTo(0.15, 5);
+  });
+
+  it('returns zero when stage score equals prior stage', () => {
+    const ctx = makeCtx();
+    ctx.setBaseline({ composite_score: 0.5 });
+    ctx.quality.perStage['s5'] = 0.5;
+    expect(perStageDelta(ctx, 's5')).toBeCloseTo(0, 5);
+  });
+
+  it('returns negative delta when stage score is lower than prior', () => {
+    const ctx = makeCtx();
+    ctx.setBaseline({ composite_score: 0.6 });
+    ctx.quality.perStage['s5'] = 0.55;
+    expect(perStageDelta(ctx, 's5')).toBeCloseTo(-0.05, 5);
   });
 });

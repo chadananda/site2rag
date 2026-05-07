@@ -106,9 +106,10 @@ describe('s2Classify stage', () => {
 
   it('does NOT override existing regions', async () => {
     const ctx = makeCtx();
+    // Use an interior block large enough to pass filterBlocks geometry checks
     ctx.pages = [{
       pageNo: 1,
-      regions: [{ type: 'handwritten', bbox: [0, 0, 100, 200] }],
+      regions: [{ type: 'handwritten', bbox: [200, 200, 1500, 2000], x1: 200, y1: 200, x2: 1500, y2: 2000 }],
       quality: {},
     }];
     await s2Classify(ctx);
@@ -133,10 +134,11 @@ describe('s2Classify stage', () => {
     await expect(s2Classify(ctx)).resolves.not.toThrow();
   });
 
-  it('region bbox is null (stub — full page)', async () => {
+  it('region bbox covers full page (stub defaults to PAGE_W x PAGE_H)', async () => {
     const ctx = makeCtx();
     ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
     await s2Classify(ctx);
-    expect(ctx.pages[0].regions[0].bbox).toBeNull();
+    const bbox = ctx.pages[0].regions[0].bbox;
+    expect(bbox).toEqual([0, 0, 1700, 2200]);
   });
 });
