@@ -71,6 +71,7 @@ console.log('[4] Sending before/after to Haiku for readability assessment...\n')
 
 async function assessImage(label, imgPath) {
   const data = readFileSync(imgPath).toString('base64');
+  const mediaType = imgPath.endsWith('.jpg') || imgPath.endsWith('.jpeg') ? 'image/jpeg' : 'image/png';
   const resp = await client.messages.create({
     model: 'claude-haiku-4-5-20251001',
     max_tokens: 400,
@@ -79,7 +80,7 @@ async function assessImage(label, imgPath) {
       content: [
         {
           type: 'image',
-          source: { type: 'base64', media_type: 'image/png', data },
+          source: { type: 'base64', media_type: mediaType, data },
         },
         {
           type: 'text',
