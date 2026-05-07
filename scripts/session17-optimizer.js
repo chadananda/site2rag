@@ -1,6 +1,7 @@
 #!/usr/bin/env node
-// Session 17: New language exploration — German, Turkish, English historical scans.
-// Goals: find cheapest viable strategy per language; confirm Arabic regression at 0.720.
+// Session 17: Arabic regression + French/English first pass on bahai-library.com corpus.
+// Corpus reality: arabic(23), french(21, all 1pp), persian(14, all at 1.0), english(12)
+// Goals: confirm Arabic 0.720 regression; test French 1-pagers; improve English low-scorers.
 // Exports: none (standalone script). Deps: pipeline/client, db, mirror-crawl, fs
 //
 // Usage: ANTHROPIC_API_KEY=... PIPELINE_URL=http://localhost:49900 node scripts/session17-optimizer.js
@@ -23,24 +24,23 @@ mkdirSync('tmp', { recursive: true });
 
 // ─────────────────────────── variant definitions ───────────────────────────
 
-const ARA_REGRESSION = [
+// Arabic: confirmed strategy — surya batch + haiku vision
+const ARA_VARIANTS = [
   { id: 'surya_multi_haiku_ara', config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'ara', s3MultiEngine: ['surya'] } },
 ];
 
-const GERMAN_VARIANTS = [
-  { id: 'haiku_no_ocr',          config: { skip: ['s2','s3','s4','s7','s8'], s5Mode: 'haiku' } },
-  { id: 'haiku_deu',             config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'deu' } },
-  { id: 'surya_multi_haiku_deu', config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'deu', s3MultiEngine: ['surya'] } },
+// French: 1-pagers only in corpus — test cheapest (no-OCR) vs Tesseract French
+const FRENCH_VARIANTS = [
+  { id: 'haiku_no_ocr', config: { skip: ['s2','s3','s4','s7','s8'], s5Mode: 'haiku' } },
+  { id: 'haiku_fra',    config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'fra' } },
+  { id: 'surya_multi_haiku_fra', config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'fra', s3MultiEngine: ['surya'] } },
 ];
 
-const TURKISH_VARIANTS = [
-  { id: 'haiku_tur',             config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'tur' } },
-  { id: 'surya_multi_haiku_ara', config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'ara', s3MultiEngine: ['surya'] } },
-];
-
+// English image scans: no-OCR vs Tesseract eng
 const ENGLISH_VARIANTS = [
   { id: 'haiku_no_ocr', config: { skip: ['s2','s3','s4','s7','s8'], s5Mode: 'haiku' } },
   { id: 'haiku_eng',    config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'eng' } },
+  { id: 'surya_multi_haiku_eng', config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'eng', s3MultiEngine: ['surya'] } },
 ];
 
 // ─────────────────────────── receipt analysis ──────────────────────────────
@@ -258,41 +258,31 @@ async function main() {
     };
   }
 
-  // Arabic regression reference
-  const araRefRows = db.prepare(
-    `SELECT url, pages FROM pdf_quality WHERE ai_language='arabic' AND has_text_layer=0
-     AND composite_score=1.0 AND pages BETWEEN 5 AND 7 ORDER BY pages LIMIT 2`
+  // Arabic: 2 regression refs (known 0.720) + 1 low-scorer (kharman, 0.620)
+  const araRows = db.prepare(
+    `SELECT url, pages, composite_score FROM pdf_quality WHERE ai_language='arabic'
+     AND has_text_layer=0 AND pages BETWEEN 5 AND 30 ORDER BY composite_score LIMIT 4`
   ).all();
-  const araRefDocs = araRefRows
-    .map(r => makeDoc(r.url, r.pages, 'ara_ref', 'arabic', 0.720))
+  const araDocs = araRows
+    .map(r => makeDoc(r.url, r.pages, 'arabic', 'arabic', 0))
     .filter(d => existsSync(d.localPath));
 
-  // German image PDFs
-  const germanRows = db.prepare(
-    `SELECT url, pages, composite_score FROM pdf_quality WHERE ai_language='german'
-     AND has_text_layer=0 AND pages BETWEEN 1 AND 8 ORDER BY composite_score DESC LIMIT 4`
+  // French: 1-pagers are all we have — test anyway, results tell us baseline for future
+  const frenchRows = db.prepare(
+    `SELECT url, pages, composite_score FROM pdf_quality WHERE ai_language='french'
+     AND has_text_layer=0 ORDER BY pages, composite_score LIMIT 3`
   ).all();
-  const germanDocs = germanRows
-    .map(r => makeDoc(r.url, r.pages, 'german', 'german', r.composite_score ?? 0))
+  const frenchDocs = frenchRows
+    .map(r => makeDoc(r.url, r.pages, 'french', 'french', 0))
     .filter(d => existsSync(d.localPath));
 
-  // Turkish Ottoman
-  const turkishRows = db.prepare(
-    `SELECT url, pages, composite_score FROM pdf_quality WHERE ai_language='turkish'
-     AND has_text_layer=0 AND pages BETWEEN 2 AND 10 ORDER BY composite_score DESC LIMIT 3`
-  ).all();
-  const turkishDocs = turkishRows
-    .map(r => makeDoc(r.url, r.pages, 'turkish', 'turkish', r.composite_score ?? 0))
-    .filter(d => existsSync(d.localPath));
-
-  // English historical scans (challenging, low baseline)
+  // English: take low-scoring image PDFs, relax page constraint
   const englishRows = db.prepare(
     `SELECT url, pages, composite_score FROM pdf_quality WHERE ai_language='english'
-     AND has_text_layer=0 AND composite_score < 0.5 AND pages BETWEEN 2 AND 6
-     ORDER BY composite_score ASC LIMIT 3`
+     AND has_text_layer=0 AND pages >= 10 ORDER BY composite_score ASC LIMIT 2`
   ).all();
   const englishDocs = englishRows
-    .map(r => makeDoc(r.url, r.pages, 'eng_scan', 'english', r.composite_score ?? 0))
+    .map(r => makeDoc(r.url, r.pages, 'eng_scan', 'english', 0))
     .filter(d => existsSync(d.localPath));
 
   // Corpus language survey
@@ -302,7 +292,7 @@ async function main() {
      GROUP BY ai_language ORDER BY n DESC`
   ).all();
 
-  log(`Arabic regression refs=${araRefDocs.length}  German=${germanDocs.length}  Turkish=${turkishDocs.length}  English scans=${englishDocs.length}`);
+  log(`Arabic=${araDocs.length}  French=${frenchDocs.length}  English=${englishDocs.length}`);
   log('\nCorpus language survey (image PDFs):');
   langSurvey.forEach(r =>
     log(`  ${(r.ai_language || 'unknown').padEnd(14)} n=${String(r.n).padStart(4)}  avg_score=${r.avg_score?.toFixed(3)}  avg_pages=${r.avg_pages?.toFixed(1)}`)
@@ -311,19 +301,15 @@ async function main() {
   const allResults = {};
 
   allResults.arabic = await runCategory(
-    'Arabic regression (surya_multi_haiku_ara — expected ≈ 0.720)',
-    araRefDocs, ARA_REGRESSION
+    'Arabic image PDFs (surya_multi_haiku_ara — regression + low-scorer)',
+    araDocs, ARA_VARIANTS
   );
-  allResults.german = await runCategory(
-    'German image PDFs (cheapest viable strategy)',
-    germanDocs, GERMAN_VARIANTS
-  );
-  allResults.turkish = await runCategory(
-    'Turkish Ottoman (Arabic-script pre-1928)',
-    turkishDocs, TURKISH_VARIANTS
+  allResults.french = await runCategory(
+    'French image PDFs (first pass — 1-pagers)',
+    frenchDocs, FRENCH_VARIANTS
   );
   allResults.english = await runCategory(
-    'English historical scans (low-baseline challenge)',
+    'English image scans (no-OCR vs Tesseract vs Surya)',
     englishDocs, ENGLISH_VARIANTS
   );
 
@@ -332,16 +318,13 @@ async function main() {
   log('Session 17 COMPLETE');
   log(`Results written to: ${RESULTS_JSONL}`);
   log('Key questions answered:');
-  log('  1. Does haiku_no_ocr or haiku_deu win for German? → see German category summary');
-  log('  2. Does Arabic strategy generalize to Ottoman Turkish? → see Turkish category summary');
-  log('  3. English historical: any improvement? → see English category summary');
+  log('  1. Arabic regression holding at ~0.720? → see Arabic category summary');
+  log('  2. French 1-pagers: best strategy? → see French category summary');
+  log('  3. English image scans: surya vs no-OCR? → see English category summary');
 
   writeFileSync(SUMMARY_JSON, JSON.stringify({
     ts: new Date().toISOString(),
-    docCounts: {
-      arabic: araRefDocs.length, german: germanDocs.length,
-      turkish: turkishDocs.length, english: englishDocs.length,
-    },
+    docCounts: { arabic: araDocs.length, french: frenchDocs.length, english: englishDocs.length },
     langSurvey,
     results: allResults,
   }, null, 2));
