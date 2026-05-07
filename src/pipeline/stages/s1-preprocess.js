@@ -19,7 +19,7 @@
 //           ctx.pages[n]._deskewAngle (if deskew was applied, for coord correction)
 //   Never:  modifies the original PDF file on disk
 import { shouldRun } from '../config.js';                            // shouldRun(stage,ctx)→bool
-import { existsSync } from 'fs';
+import { existsSync, rmSync } from 'fs';
 import { mkdtemp, rm } from 'fs/promises';
 import { createHash } from 'crypto';
 import { tmpdir } from 'os';
@@ -113,11 +113,16 @@ export async function s1Preprocess(ctx) {
           const ppmPath = `${outBase}.ppm`;
           const cleanPpmPath = `${outBase}_clean.ppm`;
           const cleanPngPath = `${outBase}_clean.png`;
+          // Remove stale temp files from prior runs — unpaper refuses to overwrite
+          for (const p of [ppmPath, cleanPpmPath, cleanPngPath]) {
+            if (existsSync(p)) { rmSync(p); }
+          }
           await ctx.run('pdftoppm', ['-r', String(D_PREPROCESS_DPI), '-f', String(page.pageNo), '-l', String(page.pageNo), '-singlefile', ctx.sourcePath, outBase], { timeout: 60000 });
           if (existsSync(ppmPath)) {
             await ctx.run('unpaper', [ppmPath, cleanPpmPath], { timeout: 60000 });
             if (existsSync(cleanPpmPath)) {
-              await ctx.run('convert', [cleanPpmPath, cleanPngPath], { timeout: 30000 });
+              // Aggressive contrast normalization for dark/faded scans
+              await ctx.run('convert', [cleanPpmPath, '-normalize', '-contrast-stretch', '2%x1%', '-sharpen', '0x1', cleanPngPath], { timeout: 30000 });
               if (existsSync(cleanPngPath)) {
                 page._preprocessedPath = cleanPngPath;
                 preprocessed++;
