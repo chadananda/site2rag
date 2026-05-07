@@ -72,8 +72,8 @@ execFileSync('convert', [srcPpm, '-normalize', '-sharpen', '0x0.5', '-resize', '
 execFileSync('convert', [srcPpm, '-normalize', '-contrast-stretch', '5%x2%', '-sharpen', '0x1.5', '-resize', '1400x>', '-quality', '85', variants.contrast]);
 // binarize: Otsu threshold for yellowed paper
 execFileSync('convert', [srcPpm, '-colorspace', 'Gray', '-normalize', '-threshold', '45%', '-resize', '1400x>', '-quality', '85', variants.binarize]);
-// adaptive: local adaptive threshold — IM6 uses hyphenated form
-execFileSync('convert', [srcPpm, '-colorspace', 'Gray', '-normalize', '-adaptive-threshold', '21x21+5%', '-resize', '1400x>', '-quality', '85', variants.adaptive]);
+// adaptive: local adaptive threshold — IM6 uses -lat (local adaptive thresholding)
+execFileSync('convert', [srcPpm, '-colorspace', 'Gray', '-normalize', '-lat', '21x21+5%', '-resize', '1400x>', '-quality', '85', variants.adaptive]);
 // raw for comparison
 const rawApiPng = join(base, 'page-raw-api.jpg');
 execFileSync('convert', [srcPpm, '-normalize', '-contrast-stretch', '2%x1%', '-sharpen', '0x1', cleanPng]);
