@@ -56,9 +56,14 @@ try {
   process.exit(1);
 }
 
-// Step 3: contrast + sharpen
+// Step 3: contrast + sharpen + resize to fit API (5MB limit)
 console.log('[3] Applying contrast normalization + sharpening...');
 execFileSync('convert', [cleanPpm, '-normalize', '-contrast-stretch', '2%x1%', '-sharpen', '0x1', cleanPng]);
+// Also resize raw PNG for API (full-res 300dpi can exceed 5MB)
+const rawApiPng   = join(base, 'page-raw-api.jpg');
+const cleanApiPng = join(base, 'page-clean-api.jpg');
+execFileSync('convert', [rawPng,   '-resize', '1400x>', '-quality', '85', rawApiPng]);
+execFileSync('convert', [cleanPng, '-resize', '1400x>', '-quality', '85', cleanApiPng]);
 console.log(`  clean PNG: ${cleanPng}`);
 
 // Step 4: send both to Haiku for readability assessment
@@ -95,8 +100,8 @@ Be concise. One line per point.`,
   return resp.content[0].text;
 }
 
-const rawAssessment   = await assessImage('RAW (before preprocessing)', rawPng);
-const cleanAssessment = await assessImage('CLEANED (after unpaper+contrast)', cleanPng);
+const rawAssessment   = await assessImage('RAW (before preprocessing)', rawApiPng);
+const cleanAssessment = await assessImage('CLEANED (after unpaper+contrast)', cleanApiPng);
 
 console.log('─'.repeat(60));
 console.log('RAW IMAGE ASSESSMENT:');
