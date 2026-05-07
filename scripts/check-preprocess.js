@@ -73,11 +73,9 @@ execFileSync('convert', [cleanPpm, '-colorspace', 'Gray', '-normalize', '-thresh
 // adaptive: local adaptive threshold — best for uneven lighting
 execFileSync('convert', [cleanPpm, '-colorspace', 'Gray', '-normalize', '-adaptiveThreshold', '21x21+5%', '-resize', '1400x>', '-quality', '85', variants.adaptive]);
 // raw for comparison
-const rawApiPng   = join(base, 'page-raw-api.jpg');
-const cleanPng    = join(base, 'page-clean.png');
+const rawApiPng = join(base, 'page-raw-api.jpg');
 execFileSync('convert', [cleanPpm, '-normalize', '-contrast-stretch', '2%x1%', '-sharpen', '0x1', cleanPng]);
 execFileSync('convert', [rawPng, '-resize', '1400x>', '-quality', '85', rawApiPng]);
-const cleanApiPng = variants.contrast; // default clean for assessment
 console.log(`  clean PNG: ${cleanPng}`);
 
 // Step 4: send both to Haiku for readability assessment
