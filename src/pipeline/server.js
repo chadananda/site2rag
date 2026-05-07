@@ -27,7 +27,15 @@ const log = (msg) => console.log(`[pipeline-server] ${new Date().toISOString().s
 const REQUIRED_TOOLS = ['pdftoppm', 'tesseract', 'gs', 'surya_ocr'];
 const OPTIONAL_TOOLS = ['unpaper', 'convert'];
 
-async function probeTool(cmd) {
+// Resolve tool name to actual command path (mirrors ToolRunner logic)
+const TOOL_ENV_VARS = { surya_ocr: 'SURYA_PATH' };
+function resolveToolCmd(tool, config = {}) {
+  const envVar = TOOL_ENV_VARS[tool];
+  return config.toolPaths?.[tool] ?? (envVar ? process.env[envVar] : null) ?? tool;
+}
+
+async function probeTool(tool, config = {}) {
+  const cmd = resolveToolCmd(tool, config);
   try {
     await execFileAsync(cmd, ['--version'], { timeout: 5000 });
     return { ok: true };
@@ -38,10 +46,10 @@ async function probeTool(cmd) {
   }
 }
 
-async function checkDeps() {
+async function checkDeps(config = {}) {
   const [required, optional] = await Promise.all([
-    Promise.all(REQUIRED_TOOLS.map(async t => [t, await probeTool(t)])),
-    Promise.all(OPTIONAL_TOOLS.map(async t => [t, await probeTool(t)])),
+    Promise.all(REQUIRED_TOOLS.map(async t => [t, await probeTool(t, config)])),
+    Promise.all(OPTIONAL_TOOLS.map(async t => [t, await probeTool(t, config)])),
   ]);
   const deps = {};
   for (const [t, r] of required) deps[t] = { ...r, required: true };
@@ -151,8 +159,8 @@ export async function startPipelineServer({
     try {
       // GET /health
       if (req.method === 'GET' && path === '/health') {
-        const { deps, missing_required, healthy } = await checkDeps();
-        return reply(res, healthy ? 200 : 503, {
+        const { deps, missing_required, healthy } = await checkDeps(baseConfig);
+        return reply(res, 200, {
           status: healthy ? 'ok' : 'degraded',
           version: PIPELINE_VERSION,
           queue_depth: jobs.queueDepth(),

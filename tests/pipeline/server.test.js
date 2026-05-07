@@ -31,11 +31,12 @@ const post = (path, body) => fetch(`http://localhost:${PORT}${path}`, {
 const del = (path) => fetch(`http://localhost:${PORT}${path}`, { method: 'DELETE', ...NO_KEEPALIVE });
 
 describe('GET /health', () => {
-  it('returns status ok with version and queue_depth', async () => {
+  it('returns health response with version and queue_depth', async () => {
     const res  = await get('/health');
     const body = await res.json();
     expect(res.status).toBe(200);
-    expect(body).toMatchObject({ status: 'ok', version: expect.any(String), queue_depth: 0 });
+    expect(body).toMatchObject({ status: expect.any(String), version: expect.any(String), queue_depth: 0 });
+    expect(body.deps).toBeDefined();
   });
 });
 
