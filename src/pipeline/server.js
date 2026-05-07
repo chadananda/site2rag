@@ -24,8 +24,8 @@ import { openJobStore } from './job-store.js';
 const execFileAsync = promisify(execFile);
 const log = (msg) => console.log(`[pipeline-server] ${new Date().toISOString().slice(0,19)} ${msg}`);
 
-const REQUIRED_TOOLS = ['pdftoppm', 'tesseract', 'gs', 'surya_ocr'];
-const OPTIONAL_TOOLS = ['unpaper', 'convert'];
+const REQUIRED_TOOLS = ['pdftoppm', 'tesseract', 'gs', 'surya_ocr', 'unpaper', 'convert'];
+const OPTIONAL_TOOLS = [];
 
 // Resolve tool name to actual command path (mirrors ToolRunner logic)
 const TOOL_ENV_VARS = { surya_ocr: 'SURYA_PATH' };
