@@ -24,8 +24,8 @@ import { openJobStore } from './job-store.js';
 const execFileAsync = promisify(execFile);
 const log = (msg) => console.log(`[pipeline-server] ${new Date().toISOString().slice(0,19)} ${msg}`);
 
-const REQUIRED_TOOLS = ['pdftoppm', 'tesseract', 'gs'];
-const OPTIONAL_TOOLS = ['unpaper', 'convert', 'surya_ocr'];
+const REQUIRED_TOOLS = ['pdftoppm', 'tesseract', 'gs', 'surya_ocr'];
+const OPTIONAL_TOOLS = ['unpaper', 'convert'];
 
 async function probeTool(cmd) {
   try {

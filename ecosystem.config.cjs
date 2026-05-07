@@ -11,7 +11,7 @@ if (fs.existsSync(envFile)) {
   });
 }
 const ANTHROPIC_API_KEY = envVars.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '';
-const SURYA_PATH = envVars.SURYA_PATH || SURYA_PATH;
+const SURYA_PATH = envVars.SURYA_PATH || process.env.SURYA_PATH || 'surya_ocr';
 module.exports = {
   apps: [
     {
