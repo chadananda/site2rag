@@ -24,60 +24,69 @@ mkdirSync('tmp', { recursive: true });
 
 // ─────────────────────────── variant definitions ───────────────────────────
 
-// Arabic: confirmed strategy — surya batch + haiku vision
+// Arabic: confirmed strategy — surya batch + haiku vision + region detection
 const ARA_VARIANTS = [
-  { id: 'surya_multi_haiku_ara', config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'ara', s3MultiEngine: ['surya'] } },
+  { id: 'surya_multi_haiku_ara', config: { skip: ['s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'ara', s3MultiEngine: ['surya'] } },
 ];
 
-// French: 1-pagers only in corpus — test cheapest (no-OCR) vs Tesseract French
+// French: include s2 region detection so vision works on blocks not full pages
 const FRENCH_VARIANTS = [
-  { id: 'haiku_no_ocr', config: { skip: ['s2','s3','s4','s7','s8'], s5Mode: 'haiku' } },
-  { id: 'haiku_fra',    config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'fra' } },
-  { id: 'surya_multi_haiku_fra', config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'fra', s3MultiEngine: ['surya'] } },
+  { id: 'haiku_fra',             config: { skip: ['s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'fra' } },
+  { id: 'surya_multi_haiku_fra', config: { skip: ['s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'fra', s3MultiEngine: ['surya'] } },
 ];
 
-// English image scans: no-OCR vs Tesseract eng
+// English: include s2 region detection; compare Tesseract vs Surya
 const ENGLISH_VARIANTS = [
-  { id: 'haiku_no_ocr', config: { skip: ['s2','s3','s4','s7','s8'], s5Mode: 'haiku' } },
-  { id: 'haiku_eng',    config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'eng' } },
-  { id: 'surya_multi_haiku_eng', config: { skip: ['s2','s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'eng', s3MultiEngine: ['surya'] } },
+  { id: 'haiku_eng',             config: { skip: ['s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'eng' } },
+  { id: 'surya_multi_haiku_eng', config: { skip: ['s4','s7','s8'], s5Mode: 'haiku', s3Lang: 'eng', s3MultiEngine: ['surya'] } },
 ];
 
 // ─────────────────────────── receipt analysis ──────────────────────────────
 
+// Receipt structure: stages/decisions/errors at top level; quality scores in quality.per_stage
 function stageChain(receipt) {
-  if (!receipt?.metrics?.stages) return '(no stages)';
-  return receipt.metrics.stages
-    .map(s => {
-      const score = s.quality_after != null ? s.quality_after.toFixed(3) : '?';
-      const delta = s.quality_delta != null && s.quality_delta > 0.001
-        ? `+${s.quality_delta.toFixed(3)}`
-        : s.quality_delta != null && s.quality_delta < -0.001
-          ? s.quality_delta.toFixed(3)
-          : '';
-      return `${s.stage}(${score}${delta ? ',' + delta : ''})`;
-    })
-    .join(' → ');
+  if (!receipt?.stages?.length) return '(no stages)';
+  const perStage = receipt.quality?.per_stage ?? {};
+  const stageNames = receipt.stages.map(s => s.stage);
+  return receipt.stages.map((s, i) => {
+    const q = perStage[s.stage];
+    const prev = i === 0 ? (receipt.quality?.baseline?.composite_score ?? 0)
+      : (perStage[stageNames[i - 1]] ?? 0);
+    const delta = q != null ? q - prev : null;
+    const qStr = q != null ? q.toFixed(3) : '?';
+    const dStr = delta != null && Math.abs(delta) > 0.001
+      ? (delta > 0 ? `+${delta.toFixed(3)}` : delta.toFixed(3)) : '';
+    const note = s.notes ? ` [${s.notes}]` : '';
+    return `${s.stage}(${qStr}${dStr}${note})`;
+  }).join(' → ');
 }
 
 function keyDecisions(receipt) {
-  if (!receipt?.metrics?.decisions) return [];
-  return receipt.metrics.decisions
-    .filter(d => ['surya_batch','lang','contrast','engine','skip'].some(k => d.key?.includes(k)))
-    .map(d => `${d.key}=${d.value}`);
+  if (!receipt?.decisions?.length) return [];
+  return receipt.decisions
+    .filter(d => d.decision && !['baseline_computed'].includes(d.decision))
+    .map(d => `${d.stage}:${d.decision}=${typeof d.value === 'number' ? d.value.toFixed(3) : d.value}`);
 }
 
 function recoverableErrors(receipt) {
-  if (!receipt?.metrics?.errors) return [];
-  return receipt.metrics.errors
+  if (!receipt?.errors?.length) return [];
+  return receipt.errors
     .filter(e => e.recoverable !== false)
-    .map(e => `[${e.stage}] ${e.message?.slice(0,60)}`);
+    .map(e => `[${e.stage}] ${(e.error ?? e.message ?? '').slice(0, 70)}`);
 }
 
 function weakStages(receipt) {
-  if (!receipt?.metrics?.stages) return [];
-  return receipt.metrics.stages
-    .filter(s => s.quality_delta != null && s.quality_delta < 0.005 && !['s0','s7','s8'].includes(s.stage))
+  if (!receipt?.stages?.length) return [];
+  const perStage = receipt.quality?.per_stage ?? {};
+  const stageNames = receipt.stages.map(s => s.stage);
+  return receipt.stages
+    .filter((s, i) => {
+      if (['s0','s7','s8'].includes(s.stage)) return false;
+      const q = perStage[s.stage] ?? 0;
+      const prev = i === 0 ? (receipt.quality?.baseline?.composite_score ?? 0)
+        : (perStage[stageNames[i - 1]] ?? 0);
+      return (q - prev) < 0.005;
+    })
     .map(s => s.stage);
 }
 
