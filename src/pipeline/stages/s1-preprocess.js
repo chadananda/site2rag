@@ -121,8 +121,8 @@ export async function s1Preprocess(ctx) {
           if (existsSync(ppmPath)) {
             await ctx.run('unpaper', [ppmPath, cleanPpmPath], { timeout: 60000 });
             if (existsSync(cleanPpmPath)) {
-              // Aggressive contrast normalization for dark/faded scans
-              await ctx.run('convert', [cleanPpmPath, '-normalize', '-contrast-stretch', '2%x1%', '-sharpen', '0x1', cleanPngPath], { timeout: 30000 });
+              // Otsu binarize: best for aged paper/newspaper scans (vision-verified)
+              await ctx.run('convert', [cleanPpmPath, '-colorspace', 'Gray', '-normalize', '-threshold', '45%', cleanPngPath], { timeout: 30000 });
               if (existsSync(cleanPngPath)) {
                 page._preprocessedPath = cleanPngPath;
                 preprocessed++;
