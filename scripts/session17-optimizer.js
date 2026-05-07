@@ -14,7 +14,7 @@ import { existsSync, appendFileSync, writeFileSync, mkdirSync } from 'fs';
 
 const PIPELINE_URL = process.env.PIPELINE_URL ?? 'http://localhost:49900';
 const client = new PipelineClient({ baseUrl: PIPELINE_URL });
-const JOB_TIMEOUT = 20 * 60 * 1000;
+const JOB_TIMEOUT = 60 * 60 * 1000; // 60min — 20min was too short for 27pp+ docs
 const RESULTS_JSONL = 'tmp/session17-results.jsonl';
 const SUMMARY_JSON = 'tmp/session17-summary.json';
 
