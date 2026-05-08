@@ -110,6 +110,8 @@ const TESS_LANG = {
 };
 // ISO 639-1/2 codes → Tesseract lang code
 const ISO_TESS = { fr: 'fra', de: 'deu', es: 'spa', it: 'ita', pt: 'por', nl: 'nld', pl: 'pol', tr: 'tur', ru: 'rus', ar: 'ara', fa: 'fas', he: 'heb', ja: 'jpn', zh: 'chi_sim', ko: 'kor' };
+// Valid Tesseract 3-letter codes that can be passed through directly
+const VALID_TESS = new Set(['eng', 'fra', 'deu', 'spa', 'ita', 'por', 'nld', 'pol', 'tur', 'rus', 'ara', 'fas', 'heb', 'jpn', 'chi_sim', 'chi_tra', 'kor', 'chi_sim+jpn', 'chi_sim+chi_tra']);
 
 /** Map region type / meta language to Tesseract lang string. */
 export function resolveLang(regionType, metaLang) {
@@ -118,6 +120,7 @@ export function resolveLang(regionType, metaLang) {
   if (regionType === 'printed_cjk') return 'chi_sim+jpn';
   if (metaLang) {
     const key = metaLang.toLowerCase();
+    if (VALID_TESS.has(key)) return key;  // direct Tesseract code passthrough
     if (TESS_LANG[key]) return TESS_LANG[key];
     if (ISO_TESS[key]) return ISO_TESS[key];
   }
