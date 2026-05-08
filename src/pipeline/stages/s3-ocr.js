@@ -180,9 +180,9 @@ export function cleanRatio(words, cleanT) {
 }
 
 /** Try contrast enhancement via Python PIL. Returns enhanced PNG path or null if not needed/failed. */
-async function tryEnhance(pngPath, enhancedPath) {
+async function tryEnhance(pngPath, enhancedPath, extraArgs = []) {
   try {
-    const { stdout } = await execFileAsync('python3', [PREPROCESS_PY, pngPath, enhancedPath], {
+    const { stdout } = await execFileAsync('python3', [PREPROCESS_PY, ...extraArgs, pngPath, enhancedPath], {
       timeout: 30000,
     });
     const result = JSON.parse(stdout.trim());
@@ -195,7 +195,7 @@ async function tryEnhance(pngPath, enhancedPath) {
 /** Force contrast enhancement regardless of detection thresholds. */
 async function tryEnhanceForced(pngPath, enhancedPath, extraArgs = []) {
   try {
-    const { stdout } = await execFileAsync('python3', [PREPROCESS_PY, '--force', pngPath, enhancedPath, ...extraArgs], {
+    const { stdout } = await execFileAsync('python3', [PREPROCESS_PY, '--force', ...extraArgs, pngPath, enhancedPath], {
       timeout: 30000,
     });
     const result = JSON.parse(stdout.trim());
@@ -211,6 +211,30 @@ async function runTesseract(pngPath, lang, pageNo, ctx) {
     timeout: 120000, maxBuffer: 20 * 1024 * 1024,
   });
   return parseHocr(stdout, pageNo);
+}
+
+/** Run Tesseract layout pass (--psm 1) to get block bounding boxes from hOCR. */
+async function runTesseractLayout(pngPath, lang, ctx) {
+  const { stdout } = await ctx.run('tesseract', [pngPath, 'stdout', 'hocr', '--psm', '1', '-l', lang], {
+    timeout: 60000, maxBuffer: 5 * 1024 * 1024,
+  });
+  return stdout;
+}
+
+/** Parse ocr_carea block bounding boxes from Tesseract hOCR. */
+function parseHocrBlocks(hocr) {
+  const blocks = [];
+  const re = /<div[^>]+class='ocr_carea'[^>]+title='([^']*)'[^>]*>/g;
+  let m;
+  while ((m = re.exec(hocr)) !== null) {
+    const bboxM = m[1].match(/bbox\s+(\d+)\s+(\d+)\s+(\d+)\s+(\d+)/);
+    if (!bboxM) continue;
+    const x1 = parseInt(bboxM[1]), y1 = parseInt(bboxM[2]);
+    const x2 = parseInt(bboxM[3]), y2 = parseInt(bboxM[4]);
+    if (x2 - x1 < 50 || y2 - y1 < 40) continue; // skip tiny/noise regions
+    blocks.push({ x1, y1, x2, y2 });
+  }
+  return blocks;
 }
 
 export async function s3Ocr(ctx) {
@@ -250,49 +274,104 @@ export async function s3Ocr(ctx) {
             '-singlefile', ctx.sourcePath, outBase,
           ], { timeout: 60000 });
         }
-        // Reject zero-byte/corrupt output (pdftoppm writes a tiny PNG on error).
-        // If file is simply absent, let tesseract fail naturally — handles mocks + edge cases.
         if (existsSync(pngPath) && statSync(pngPath).size < 100) {
           throw new Error(`pdftoppm produced corrupt PNG for page ${page.pageNo}`);
         }
         page._pngPath = pngPath;
 
-        // OCR on original
-        const origWords = await runTesseract(pngPath, lang, page.pageNo, ctx);
-        const origScore = cleanRatio(origWords, cleanT);
+        // Layout detection pass at 72dpi — fast, just for block bounding boxes
+        const D_LAYOUT_DPI = 72;
+        const layoutBase = join(tmpDir, `p${page.pageNo}_layout`);
+        const layoutPng = `${layoutBase}.png`;
+        let blocks = [];
+        try {
+          if (!existsSync(layoutPng)) {
+            await ctx.run('pdftoppm', [
+              '-png', '-r', String(D_LAYOUT_DPI), '-f', String(page.pageNo),
+              '-l', String(page.pageNo), '-singlefile', ctx.sourcePath, layoutBase,
+            ], { timeout: 30000 });
+          }
+          if (existsSync(layoutPng)) {
+            const layoutHocr = await runTesseractLayout(layoutPng, lang, ctx);
+            blocks = parseHocrBlocks(layoutHocr);
+          }
+        } catch { /* layout pass failure is non-fatal — fall back to full page */ }
 
-        // Contrast enhancement: auto-detect (default) or force via config
+        // Build preprocessing args from scan issues detected in s0
         const prepCfg = ctx.config.preprocessing ?? {};
         const forceContrast = prepCfg.forceContrast ?? false;
-        const enhancedPath = `${outBase}_enhanced.png`;
-        // Pass method preference to Python script via env-style args
-        const extraArgs = prepCfg.method ? ['--method', prepCfg.method] : [];
-        const enhancement = forceContrast
-          ? await tryEnhanceForced(pngPath, enhancedPath, extraArgs)
-          : await tryEnhance(pngPath, enhancedPath);
+        const scanIssues = ctx._scanIssues ?? [];
+        const issueArgs = scanIssues.length ? ['--issues', scanIssues.join(',')] : [];
+        const methodArgs = prepCfg.method ? ['--method', prepCfg.method] : [];
+        const extraArgs = [...issueArgs, ...methodArgs];
 
-        let words = origWords;
-        let usedEnhancement = null;
+        const MIN_BLOCKS = 2; // need at least 2 blocks to bother splitting
+        const useBlocks = blocks.length >= MIN_BLOCKS;
+        const dpiScale = dpi / D_LAYOUT_DPI;
 
-        if (enhancement) {
-          try {
-            const enhWords = await runTesseract(enhancedPath, lang, page.pageNo, ctx);
-            const enhScore = cleanRatio(enhWords, cleanT);
-            if (enhScore > origScore) {
-              // Enhanced version is better — use it, update PNG path
-              words = enhWords.map(w => ({ ...w, source: 'tesseract+contrast' }));
-              page._pngPath = enhancedPath;
-              usedEnhancement = enhancement.applied?.[0] ?? 'enhanced';
-              enhancedCount++;
-              ctx.addDecision('s3', `contrast_p${page.pageNo}`,
-                `${usedEnhancement}: ${(origScore*100).toFixed(0)}%→${(enhScore*100).toFixed(0)}% clean`,
-                enhScore - origScore);
-            } else {
-              ctx.addDecision('s3', `contrast_p${page.pageNo}`,
-                `${enhancement.applied?.[0] ?? 'enhanced'} tried but kept original (${(origScore*100).toFixed(0)}% vs ${(enhScore*100).toFixed(0)}%)`,
-                0);
-            }
-          } catch { /* OCR on enhanced failed — keep original */ }
+        let words;
+
+        if (useBlocks) {
+          // Per-block OCR: crop each block, preprocess, OCR, offset coordinates back
+          const allBlockWords = [];
+          for (let bi = 0; bi < blocks.length; bi++) {
+            const blk = blocks[bi];
+            const bx1 = Math.floor(blk.x1 * dpiScale), by1 = Math.floor(blk.y1 * dpiScale);
+            const bx2 = Math.ceil(blk.x2  * dpiScale), by2 = Math.ceil(blk.y2  * dpiScale);
+            const bw = bx2 - bx1, bh = by2 - by1;
+            const blockRaw = join(tmpDir, `p${page.pageNo}_b${bi}.png`);
+            try {
+              await ctx.run('convert', [
+                pngPath, '-crop', `${bw}x${bh}+${bx1}+${by1}`, '+repage', blockRaw,
+              ], { timeout: 15000 });
+              if (!existsSync(blockRaw)) continue;
+
+              // Preprocess the block image using scan issue hints
+              const blockEnh = join(tmpDir, `p${page.pageNo}_b${bi}_enh.png`);
+              const enhancement = forceContrast
+                ? await tryEnhanceForced(blockRaw, blockEnh, extraArgs)
+                : await tryEnhance(blockRaw, blockEnh, extraArgs);
+              const blockToOcr = (enhancement?.path) ?? blockRaw;
+
+              const blockWords = await runTesseract(blockToOcr, lang, page.pageNo, ctx);
+              // Shift word coordinates back to full-page space
+              for (const w of blockWords) {
+                allBlockWords.push({ ...w, x1: w.x1 + bx1, y1: w.y1 + by1, x2: w.x2 + bx1, y2: w.y2 + by1 });
+              }
+            } catch { /* skip bad block, continue with others */ }
+          }
+          words = allBlockWords;
+          ctx.addDecision('s3', `blocks_p${page.pageNo}`, `${blocks.length} blocks → ${words.length} words`);
+          if (words.length > 0) enhancedCount++;
+        } else {
+          // Full-page fallback (no usable blocks detected)
+          const origWords = await runTesseract(pngPath, lang, page.pageNo, ctx);
+          const origScore = cleanRatio(origWords, cleanT);
+
+          const enhancedPath = `${outBase}_enhanced.png`;
+          const enhancement = forceContrast
+            ? await tryEnhanceForced(pngPath, enhancedPath, extraArgs)
+            : await tryEnhance(pngPath, enhancedPath, extraArgs);
+
+          words = origWords;
+          if (enhancement) {
+            try {
+              const enhWords = await runTesseract(enhancedPath, lang, page.pageNo, ctx);
+              const enhScore = cleanRatio(enhWords, cleanT);
+              if (enhScore > origScore) {
+                words = enhWords.map(w => ({ ...w, source: 'tesseract+contrast' }));
+                page._pngPath = enhancedPath;
+                enhancedCount++;
+                ctx.addDecision('s3', `contrast_p${page.pageNo}`,
+                  `${enhancement.applied?.[0] ?? 'enhanced'}: ${(origScore*100).toFixed(0)}%→${(enhScore*100).toFixed(0)}% clean`,
+                  enhScore - origScore);
+              } else {
+                ctx.addDecision('s3', `contrast_p${page.pageNo}`,
+                  `${enhancement.applied?.[0] ?? 'enhanced'} tried, kept original (${(origScore*100).toFixed(0)}% vs ${(enhScore*100).toFixed(0)}%)`,
+                  0);
+              }
+            } catch { /* keep original */ }
+          }
         }
 
         page.words = words;

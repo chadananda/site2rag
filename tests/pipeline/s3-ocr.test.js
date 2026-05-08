@@ -138,21 +138,24 @@ const HIGH_HOCR = `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wcon
 // tests: uses enhanced when improves ratio, keeps original when no improvement, --force flag, --method flag, enhanced:false kept original, python3 throw kept original
 describe('s3Ocr stage — contrast enhancement', () => {
   it('uses enhanced version when python3+tesseract improves clean ratio', async () => {
-    // 3 calls: pdftoppm, tesseract(original=low), python3(enhance success), tesseract(enhanced=high)
-    let callIdx = 0;
+    // Flow: pdftoppm(full) → pdftoppm(layout,no file created) → tesseract(original=low) → python3(enhance) → tesseract(enhanced=high)
+    // Track tesseract calls independently since layout pdftoppm shifts global callIdx
+    let tessCallIdx = 0;
     execFile.mockImplementation((_cmd, _args, _opts, cb) => {
       const callback = typeof _opts === 'function' ? _opts : cb;
-      callIdx++;
       if (_cmd === 'pdftoppm') {
         callback(null, { stdout: '', stderr: '' });
-      } else if (_cmd === 'tesseract' && callIdx === 2) {
-        // First tesseract: low-conf original
-        callback(null, { stdout: `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 30'>bad</span>`, stderr: '' });
+      } else if (_cmd === 'tesseract') {
+        tessCallIdx++;
+        if (tessCallIdx === 1) {
+          // Layout pass (--psm 1) or first full-page OCR: return low-conf
+          callback(null, { stdout: `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 30'>bad</span>`, stderr: '' });
+        } else {
+          // Enhanced OCR: high-conf
+          callback(null, { stdout: HIGH_HOCR, stderr: '' });
+        }
       } else if (_cmd === 'python3') {
         callback(null, { stdout: JSON.stringify({ enhanced: true, applied: ['clahe'] }), stderr: '' });
-      } else if (_cmd === 'tesseract') {
-        // Second tesseract: high-conf enhanced
-        callback(null, { stdout: HIGH_HOCR, stderr: '' });
       } else {
         callback(null, { stdout: '', stderr: '' });
       }

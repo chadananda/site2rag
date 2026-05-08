@@ -47,6 +47,28 @@ export async function s0Baseline(ctx) {
 
     if (score.language && !ctx.meta.language) ctx.meta.language = score.language;
 
+    // For image PDFs: infer language + scan issues from a small page thumbnail.
+    // Runs before domain detection so language is available for all downstream stages.
+    const needsOcr = score.has_text_layer !== 1 || score.avg_chars_per_page < 300;
+    if (needsOcr && ctx.config.apiKey && ctx.pageCount > 0) {
+      try {
+        const { inferScanProfile } = await import('../scan-profile.js');
+        const profile = await inferScanProfile(ctx);
+        tokensIn  += profile.tokensIn  ?? 0;
+        tokensOut += profile.tokensOut ?? 0;
+        costUsd   += profile.costUsd   ?? 0;
+        if (profile.language && (profile.languageConfidence ?? 0) >= 0.6 && !ctx.meta?.language) {
+          ctx.meta = { ...(ctx.meta ?? {}), language: profile.language };
+        }
+        if (profile.scanIssues?.length) ctx._scanIssues = profile.scanIssues;
+        const issueStr = (profile.scanIssues ?? []).join(',') || 'none';
+        ctx.addDecision('s0', 'scan_profile',
+          `lang=${profile.language ?? 'unknown'} conf=${(profile.languageConfidence ?? 0).toFixed(2)} issues=${issueStr}`);
+      } catch (e) {
+        ctx.addError('s0', new Error(`scan_profile: ${e.message}`), true);
+      }
+    }
+
     // Domain detection — tokens counted here so s0 stage record reflects total cost
     if (!ctx.domain && ctx.config.domainDetect !== false) {
       const usage = await detectDomain(ctx);

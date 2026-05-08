@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Detect and fix contrast/bleed-through issues in scanned page images.
-Usage: python3 preprocess_image.py <input.png> <output.png>
+Usage: python3 preprocess_image.py [--force] [--issues bleed_through,low_contrast] [--method otsu|autocontrast] <input.png> <output.png>
 Outputs JSON to stdout: {"applied": [...], "contrast_score": 0.0-1.0, "bleed_detected": bool}
 Exit 0 always. Output file written only if enhancement was applied.
 """
@@ -11,12 +11,11 @@ from PIL import Image, ImageEnhance, ImageOps, ImageFilter
 def analyze(img):
     """Return contrast score (0=flat/bad, 1=full range) and bleed score."""
     gray = img.convert('L')
-    hist = gray.histogram()  # 256 buckets
+    hist = gray.histogram()
     total = sum(hist)
     if total == 0:
         return 0.0, 0.0
 
-    # Find 1st/99th percentile pixel values
     cum, lo, hi = 0, 0, 255
     for i, h in enumerate(hist):
         cum += h
@@ -25,18 +24,18 @@ def analyze(img):
         if cum / total < 0.99:
             hi = i
 
-    contrast_range = (hi - lo) / 255.0  # 0=flat, 1=full dynamic range
+    contrast_range = (hi - lo) / 255.0
 
-    # Bleed-through: high mean with narrow range in light half.
-    # Bleed shows up as mid-gray "noise" (values 150-220) coexisting with dark text (<80).
+    # Bleed-through: mid-gray noise (150-220) coexisting with dark text (<80)
     light_pixels = sum(hist[150:220])
     dark_pixels = sum(hist[0:80])
     bleed_score = light_pixels / max(dark_pixels + light_pixels, 1)
 
     return contrast_range, bleed_score
 
-def enhance_contrast(img):
-    """Apply contrast stretch + optional bleed suppression. Returns list of variants."""
+def enhance_contrast(img, issues=None):
+    """Apply contrast enhancement variants. Returns list of (label, image) tuples."""
+    issues = issues or []
     variants = []
 
     # 1. Autocontrast — stretches histogram to full 0-255 range
@@ -47,12 +46,10 @@ def enhance_contrast(img):
     boosted = ImageEnhance.Contrast(auto).enhance(1.5)
     variants.append(('autocontrast+boost', boosted))
 
-    # 3. Adaptive threshold variant — converts to pure B&W via Otsu-like approach.
-    # Good for bleed-through: makes light mid-gray (bleed) white, keeps dark ink black.
+    # 3. Otsu threshold — converts to B&W via inter-class variance maximization.
     gray = img.convert('L')
     hist = gray.histogram()
     total = sum(hist)
-    # Find Otsu threshold (maximize inter-class variance)
     best_thresh, best_var = 128, -1
     cum_n, cum_sum = 0, 0
     total_sum = sum(i * h for i, h in enumerate(hist))
@@ -67,32 +64,67 @@ def enhance_contrast(img):
         var = w0 * w1 * (mu0 - mu1) ** 2
         if var > best_var:
             best_var, best_thresh = var, t
-    # Apply threshold with slight bias toward keeping more text (lower threshold = keep more ink)
     thresh = max(50, best_thresh - 15)
     bw = gray.point(lambda p: 0 if p < thresh else 255).convert('RGB')
     variants.append(('otsu_threshold', bw))
 
+    # 4. Bleed-through suppression — for reverse-side bleed on old newspaper/book scans.
+    # Bleed pixels live in the 130-220 mid-gray range; real text is below 100.
+    # Strategy: whiten the bleed zone, then autocontrast what remains.
+    if 'bleed_through' in issues:
+        gray2 = img.convert('L')
+        # First pass: median filter to estimate local background (captures bleed, blurs text)
+        bg = gray2.filter(ImageFilter.MedianFilter(size=9))
+        # Whiten pixels that are lighter than a bleed threshold
+        bleed_thresh = 135
+        cleaned = gray2.point(lambda p: 255 if p > bleed_thresh else p)
+        # Normalize remaining ink
+        suppressed = ImageOps.autocontrast(cleaned.convert('RGB'), cutoff=1)
+        variants.append(('bleed_suppression', suppressed))
+
+        # Also try a two-stage approach: median-based background subtraction then threshold
+        # Use PIL ImageChops to compute difference between original and blurred background
+        from PIL import ImageChops
+        bg_rgb = bg.convert('RGB')
+        orig_rgb = gray2.convert('RGB')
+        # Difference = foreground (text) without background
+        diff = ImageChops.difference(orig_rgb, bg_rgb)
+        # Invert (text should be dark on white)
+        inv = ImageOps.invert(diff)
+        auto_inv = ImageOps.autocontrast(inv, cutoff=1)
+        variants.append(('bg_subtract', auto_inv))
+
+    # 5. Faded text: aggressive contrast + brightness push
+    if 'faded' in issues or 'low_contrast' in issues:
+        gray3 = img.convert('L')
+        stretched = ImageOps.autocontrast(gray3, cutoff=5).convert('RGB')
+        pushed = ImageEnhance.Contrast(stretched).enhance(2.0)
+        variants.append(('faded_boost', pushed))
+
     return variants
 
 def score_variant(label, img_path):
-    """Quick quality proxy: mean pixel value of grayscale (higher=lighter=more white space=less noise)."""
-    # We can't run Tesseract here, so use image statistics as proxy:
-    # A good scan has mostly white background + crisp dark text → high mean + high stddev.
+    """Quality proxy: high mean (white bg) + high stddev (sharp contrast) = good scan."""
     img = Image.open(img_path).convert('L')
     hist = img.histogram()
     total = sum(hist)
     mean = sum(i * h for i, h in enumerate(hist)) / total
-    # Variance
     var = sum((i - mean) ** 2 * h for i, h in enumerate(hist)) / total
     stddev = var ** 0.5
-    # Score: want high mean (white background) + high stddev (sharp contrast)
-    # Normalize: mean/255 * stddev/128 → 0 to ~1
     return (mean / 255.0) * min(stddev / 80.0, 1.0)
 
 def main():
     args = sys.argv[1:]
     force = '--force' in args
     args = [a for a in args if a != '--force']
+
+    issues = []
+    if '--issues' in args:
+        idx = args.index('--issues')
+        if idx + 1 < len(args):
+            issues = [s.strip() for s in args[idx+1].split(',') if s.strip()]
+        args = args[:idx] + args[idx+2:]
+
     method = None
     if '--method' in args:
         idx = args.index('--method')
@@ -100,7 +132,7 @@ def main():
         args = args[:idx] + args[idx+2:]
 
     if len(args) < 2:
-        print(json.dumps({"error": "usage: preprocess_image.py [--force] [--method otsu|autocontrast] input.png output.png"}))
+        print(json.dumps({"error": "usage: preprocess_image.py [--force] [--issues i1,i2] [--method M] input.png output.png"}))
         sys.exit(1)
 
     in_path, out_path = args[0], args[1]
@@ -116,28 +148,30 @@ def main():
 
     contrast_range, bleed_score = analyze(img)
     needs_contrast = contrast_range < 0.6
-    needs_bleed_fix = bleed_score > 0.3
+    needs_bleed_fix = bleed_score > 0.3 or 'bleed_through' in issues
 
     result = {
         "contrast_range": round(contrast_range, 3),
         "bleed_score": round(bleed_score, 3),
-        "bleed_detected": needs_bleed_fix,
+        "bleed_detected": bleed_score > 0.3,
         "applied": [],
         "enhanced": False,
     }
 
     if not force and not needs_contrast and not needs_bleed_fix:
-        # Image is fine — no output file written
         print(json.dumps(result))
         return
 
-    # Generate enhancement variants and pick the best by image score
-    all_variants = enhance_contrast(img)
-    # Filter to requested method if specified
+    all_variants = enhance_contrast(img, issues)
     if method:
         variants = [(l, v) for l, v in all_variants if method in l] or all_variants
+    elif 'bleed_through' in issues:
+        # Prioritize bleed-suppression variants when bleed is flagged
+        bleed_variants = [(l, v) for l, v in all_variants if 'bleed' in l or 'bg_sub' in l]
+        variants = bleed_variants or all_variants
     else:
         variants = all_variants
+
     best_label, best_img, best_score = None, None, -1
 
     for label, v_img in variants:
@@ -153,11 +187,9 @@ def main():
             try: os.unlink(tmp_path)
             except: pass
 
-    # Also score original for comparison
     orig_score = score_variant('original', in_path)
 
     if best_img is not None and best_score > orig_score * 1.05:
-        # Enhancement is meaningfully better (>5% improvement)
         best_img.save(out_path, 'PNG')
         result["applied"] = [best_label]
         result["enhanced"] = True
