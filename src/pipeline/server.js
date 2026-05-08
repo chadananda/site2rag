@@ -20,6 +20,7 @@ import { promisify } from 'util';
 import { PIPELINE_VERSION } from './context.js';
 import { runPipeline } from './index.js';
 import { openJobStore } from './job-store.js';
+import { getTmpDir } from '../config.js';
 
 const execFileAsync = promisify(execFile);
 const log = (msg) => console.log(`[pipeline-server] ${new Date().toISOString().slice(0,19)} ${msg}`);
@@ -34,38 +35,76 @@ function resolveToolCmd(tool, config = {}) {
   return config.toolPaths?.[tool] ?? (envVar ? process.env[envVar] : null) ?? tool;
 }
 
+// FUNCTIONAL_TESTS: run a real operation instead of --version where feasible.
+// surya_ocr imports torch at startup — a Python tempfile failure will show as import error.
+const FUNCTIONAL_TESTS = {
+  surya_ocr: async (cmd) => {
+    // Run with --help; a torch import failure produces exit 1 + traceback, which is a real error
+    const { stdout, stderr } = await execFileAsync(cmd, ['--help'], { timeout: 15000 })
+      .catch(e => ({ stdout: e.stdout ?? '', stderr: e.stderr ?? '', _err: e }));
+    if ((stderr + stdout).includes('Traceback') || (stderr + stdout).includes('Error')) {
+      const firstLine = (stderr || stdout).split('\n').find(l => l.includes('Error') || l.includes('error')) ?? 'import failed';
+      throw new Error(firstLine.trim().slice(0, 120));
+    }
+  },
+};
+
 async function probeTool(tool, config = {}) {
   const cmd = resolveToolCmd(tool, config);
   try {
-    await execFileAsync(cmd, ['--version'], { timeout: 5000 });
+    const fn = FUNCTIONAL_TESTS[tool];
+    if (fn) {
+      await fn(cmd);
+    } else {
+      await execFileAsync(cmd, ['--version'], { timeout: 5000 });
+    }
     return { ok: true };
   } catch (e) {
-    if (e.code === 'ENOENT') return { ok: false, error: 'not found' };
-    // Many tools exit non-zero for --version but still write to stdout/stderr — treat as present
-    return { ok: true };
+    if (e.code === 'ENOENT') return { ok: false, error: `not found: ${cmd}` };
+    return { ok: false, error: e.message.slice(0, 120) };
+  }
+}
+
+async function checkDiskSpace() {
+  try {
+    const tmpDir = getTmpDir();
+    const { stdout } = await execFileAsync('df', ['-BG', tmpDir], { timeout: 5000 });
+    const line = stdout.split('\n')[1] ?? '';
+    const parts = line.trim().split(/\s+/);
+    const availGB = parseInt(parts[3]) || 0;
+    const usePercent = parseInt((parts[4] ?? '0%').replace('%', '')) || 0;
+    return { path: tmpDir, avail_gb: availGB, use_percent: usePercent,
+      ok: availGB >= 5, error: availGB < 5 ? `only ${availGB}GB free in ${tmpDir}` : undefined };
+  } catch {
+    return { ok: true }; // df failure is non-fatal
   }
 }
 
 async function checkDeps(config = {}) {
-  const [required, optional] = await Promise.all([
+  const [required, optional, disk] = await Promise.all([
     Promise.all(REQUIRED_TOOLS.map(async t => [t, await probeTool(t, config)])),
     Promise.all(OPTIONAL_TOOLS.map(async t => [t, await probeTool(t, config)])),
+    checkDiskSpace(),
   ]);
   const deps = {};
   for (const [t, r] of required) deps[t] = { ...r, required: true };
   for (const [t, r] of optional) deps[t] = { ...r, required: false };
-  const missing_required = required.filter(([, r]) => !r.ok).map(([t]) => t);
-  return { deps, missing_required, healthy: missing_required.length === 0 };
+  const missing_required = [
+    ...required.filter(([, r]) => !r.ok).map(([t]) => t),
+    ...(!disk.ok ? [`disk: ${disk.error}`] : []),
+  ];
+  return { deps, missing_required, disk, healthy: missing_required.length === 0 };
 }
 
 export async function startPipelineServer({
   port        = 49900,
-  dbPath      = '/tmp/pipeline-jobs.db',
+  dbPath      = null,
   concurrency = 1,
   config: baseConfig = {},
   apiKey      = null,   // if set, require Authorization: Bearer <key> on all requests
 } = {}) {
-  const jobs = await openJobStore(dbPath);
+  const resolvedDbPath = dbPath ?? `${getTmpDir()}/pipeline-jobs.db`;
+  const jobs = await openJobStore(resolvedDbPath);
   let running = 0;
 
   // Reset jobs stuck in 'processing' from a previous instance. Use server start time as the
@@ -157,14 +196,15 @@ export async function startPipelineServer({
     const path = url.pathname;
 
     try {
-      // GET /health
+      // GET /health — returns 503 (not 200) when required tools are broken or disk is low
       if (req.method === 'GET' && path === '/health') {
-        const { deps, missing_required, healthy } = await checkDeps(baseConfig);
-        return reply(res, 200, {
-          status: healthy ? 'ok' : 'degraded',
+        const { deps, missing_required, disk, healthy } = await checkDeps(baseConfig);
+        return reply(res, healthy ? 200 : 503, {
+          status: healthy ? 'ok' : 'UNHEALTHY',
           version: PIPELINE_VERSION,
           queue_depth: jobs.queueDepth(),
           deps,
+          disk,
           missing_required,
         });
       }

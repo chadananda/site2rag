@@ -24,8 +24,8 @@ import { promisify } from 'util';
 import { mkdirSync, existsSync, statSync, readFileSync, writeFileSync, rmSync } from 'fs';
 import { join, basename, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { tmpdir } from 'os';
 import { createHash } from 'crypto';
+import { getTmpDir } from '../../config.js';
 // ── config defaults ──────────────────────────────────────────────────────────
 const D_RASTER_DPI  = 300;
 const D_CLEAN_PAGE  = 0.90;
@@ -49,7 +49,7 @@ async function checkSuryaCli(ctx) {
 
 async function runSuryaBatchS3(pages, ctx) {
   const docHash = createHash('sha256').update(ctx.docId).digest('hex').slice(0, 12);
-  const base = join(tmpdir(), `site2rag-s3-surya-${docHash}`);
+  const base = join(getTmpDir(), `site2rag-s3-surya-${docHash}`);
   const allPages = pages.filter(p => p._pngPath && existsSync(p._pngPath));
 
   for (let i = 0; i < allPages.length; i += D_SURYA_CHUNK) {
@@ -223,7 +223,7 @@ export async function s3Ocr(ctx) {
   const cleanT = (ctx.config.thresholds?.cleanPage ?? D_CLEAN_PAGE) * 100;
   const fuzzyT = (ctx.config.thresholds?.fuzzyWord ?? D_FUZZY_WORD) * 100;
   const docHash = createHash('sha256').update(ctx.docId).digest('hex').slice(0, 16);
-  const tmpDir = join(tmpdir(), `site2rag-s3-${docHash}`);
+  const tmpDir = join(getTmpDir(), `site2rag-s3-${docHash}`);
   mkdirSync(tmpDir, { recursive: true });
 
   // Validate multi-engine config upfront — missing server URL is a config error

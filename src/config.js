@@ -12,6 +12,8 @@ export const getMirrorRoot = () => join(getSiteRoot(), 'websites_mirror');
 export const getMdRoot = () => join(getSiteRoot(), 'websites_md');
 /** Return logs root dir. */
 export const getLogsRoot = () => join(getSiteRoot(), 'logs');
+/** Return tmp dir for pipeline operations — always on the data drive, never the OS drive. */
+export const getTmpDir = () => join(getSiteRoot(), 'tmp');
 /** Return mirror path for a domain. */
 export const mirrorDir = (domain) => join(getMirrorRoot(), domain);
 /** Return MD output dir for a domain. */

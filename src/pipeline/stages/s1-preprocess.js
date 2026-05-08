@@ -22,8 +22,8 @@ import { shouldRun } from '../config.js';                            // shouldRu
 import { existsSync, rmSync } from 'fs';
 import { mkdtemp, rm } from 'fs/promises';
 import { createHash } from 'crypto';
-import { tmpdir } from 'os';
 import { join } from 'path';
+import { getTmpDir } from '../../config.js';
 // ── config defaults ──────────────────────────────────────────────────────────
 const D_PREPROCESS_DPI = 300;   // rasterDpi for unpaper input
 
@@ -32,7 +32,7 @@ export const CORRUPT_PATTERN = /TPsot|non.?conformant|data.?format.?error|image.
 
 /** Detect non-conformant PDFs by doing a low-res probe render via pdftoppm. Returns true if gs normalization is warranted. */
 async function probeNeedsNormalization(sourcePath, ctx) {
-  const tmpDir = await mkdtemp(join(tmpdir(), 's1-probe-'));
+  const tmpDir = await mkdtemp(join(getTmpDir(), 's1-probe-'));
   try {
     const { stderr } = await ctx.run('pdftoppm', ['-r', '8', '-png', '-f', '1', '-l', '1', sourcePath, join(tmpDir, 'p')], { timeout: 15000 });
     return CORRUPT_PATTERN.test(stderr ?? '');
@@ -47,7 +47,7 @@ async function probeNeedsNormalization(sourcePath, ctx) {
 /** Run ghostscript PDF normalization to fix non-conformant JPEG2000 codestreams. Writes to a temp file; caller tracks via ctx._gsNormalized. */
 async function gsNormalize(sourcePath, ctx) {
   const hash = createHash('sha1').update(sourcePath).digest('hex').slice(0, 8);
-  const outPath = join(tmpdir(), `site2rag_gs_${hash}.pdf`);
+  const outPath = join(getTmpDir(), `site2rag_gs_${hash}.pdf`);
   await ctx.run('gs', [
     '-dBATCH', '-dNOPAUSE', '-dQUIET', '-sDEVICE=pdfwrite', '-dCompatibilityLevel=1.4',
     `-sOutputFile=${outPath}`, sourcePath,
@@ -109,7 +109,7 @@ export async function s1Preprocess(ctx) {
         if (toolMissing) break; // stop retrying once a tool is confirmed absent
         try {
           const hash = createHash('sha1').update(ctx.sourcePath + page.pageNo).digest('hex');
-          const outBase = join(tmpdir(), 'site2rag-s1-' + hash.slice(0, 12) + '-p' + page.pageNo);
+          const outBase = join(getTmpDir(), 'site2rag-s1-' + hash.slice(0, 12) + '-p' + page.pageNo);
           const ppmPath = `${outBase}.ppm`;
           const cleanPpmPath = `${outBase}_clean.ppm`;
           const cleanPngPath = `${outBase}_clean.png`;

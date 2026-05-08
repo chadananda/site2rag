@@ -25,8 +25,8 @@ export class PipelineClient {
     this.timeout      = timeout;
   }
 
-  /** Check service health. Returns { status, version, queue_depth, deps, missing_required } or throws on unreachable. */
-  health() { return this._get('/health'); }
+  /** Check service health. Returns health object (may have status=UNHEALTHY) or throws if unreachable. */
+  health() { return this._get('/health', { allowStatus: [200, 503] }); }
 
   /**
    * Submit a job. Returns jobId string.
@@ -83,11 +83,11 @@ export class PipelineClient {
     return h;
   }
 
-  _get(path)          { return this._req('GET',    path); }
+  _get(path, opts)    { return this._req('GET',    path, null, opts); }
   _post(path, body)   { return this._req('POST',   path, body); }
   _delete(path)       { return this._req('DELETE', path); }
 
-  _req(method, path, body = null) {
+  _req(method, path, body = null, opts = null) {
     return new Promise((resolve, reject) => {
       const url      = new URL(this.baseUrl + path);
       const reqFn    = url.protocol === 'https:' ? httpsRequest : httpRequest;
@@ -105,7 +105,8 @@ export class PipelineClient {
         let data = '';
         res.on('data', c => { data += c; });
         res.on('end', () => {
-          if (res.statusCode >= 400) {
+          const allowed = opts?.allowStatus;
+          if (res.statusCode >= 400 && !(allowed?.includes(res.statusCode))) {
             let msg = `HTTP ${res.statusCode}`;
             try { const body = JSON.parse(data); if (body.error) msg = `HTTP ${res.statusCode} ${body.error}`; } catch {}
             return reject(new Error(`pipeline ${method} ${path}: ${msg}`));

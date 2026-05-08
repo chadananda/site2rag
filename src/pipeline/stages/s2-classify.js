@@ -14,8 +14,8 @@
 import { shouldRun } from '../config.js';          // shouldRun(stage,ctx)→bool
 import { mkdirSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
 import { createHash } from 'crypto';
+import { getTmpDir } from '../../config.js';
 
 export async function s2Classify(ctx) {
   if (!shouldRun('s2', ctx)) return ctx;
@@ -66,7 +66,7 @@ export async function s2Classify(ctx) {
 
 async function classifyPageWithHaiku(pageNo, ctx, apiKey) {
   const docHash = createHash('sha256').update(ctx.docId).digest('hex').slice(0, 12);
-  const tmpDir = join(tmpdir(), `site2rag-s2-${docHash}`);
+  const tmpDir = join(getTmpDir(), `site2rag-s2-${docHash}`);
   mkdirSync(tmpDir, { recursive: true });
   const outBase = join(tmpDir, `p${pageNo}`);
   await ctx.run('pdftoppm', ['-r', '100', '-jpeg', '-f', String(pageNo), '-l', String(pageNo), '-singlefile', ctx.sourcePath, outBase], { timeout: 30000 });

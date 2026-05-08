@@ -108,7 +108,7 @@ describe('PipelineClient — API key', () => {
 
       const auth = new PipelineClient({ baseUrl: `http://localhost:${PORT + 1}`, apiKey: 'my-secret' });
       const h = await auth.health();
-      expect(h.status).toMatch(/^(ok|degraded)$/);
+      expect(h.status).toMatch(/^(ok|degraded|UNHEALTHY)$/);
     } finally {
       await authService.close();
     }

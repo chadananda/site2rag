@@ -12,6 +12,7 @@ if (fs.existsSync(envFile)) {
 }
 const ANTHROPIC_API_KEY = envVars.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '';
 const SURYA_PATH = envVars.SURYA_PATH || process.env.SURYA_PATH || 'surya_ocr';
+const TMPDIR = path.join(SITE2RAG_ROOT, 'tmp'); // all processes write temp files to the data drive, never the OS drive
 module.exports = {
   apps: [
     {
@@ -20,7 +21,7 @@ module.exports = {
       cwd: __dirname,
       interpreter: 'node',
       node_args: '--max-old-space-size=16384',
-      env: { NODE_ENV: 'production', SITE2RAG_ROOT },
+      env: { NODE_ENV: 'production', SITE2RAG_ROOT, TMPDIR },
       autorestart: true,
       watch: false,
       min_uptime: '30s',
@@ -36,7 +37,7 @@ module.exports = {
       script: './bin/lnker-server.js',
       cwd: __dirname,
       interpreter: 'node',
-      env: { NODE_ENV: 'production', SITE2RAG_ROOT, LNKER_PORT: '7841' },
+      env: { NODE_ENV: 'production', SITE2RAG_ROOT, LNKER_PORT: '7841', TMPDIR },
       autorestart: true,
       watch: false,
       max_memory_restart: '4G',
@@ -51,6 +52,7 @@ module.exports = {
       interpreter: 'node',
       env: {
         NODE_ENV: 'production',
+        TMPDIR,
         SITE2RAG_ROOT,
         REPORT_PORT: '7840',
         CORS_ORIGIN: 'https://site2rag.lnker.com',
@@ -72,6 +74,7 @@ module.exports = {
       interpreter: 'node',
       env: {
         NODE_ENV: 'production',
+        TMPDIR,
         SITE2RAG_ROOT,
         ANTHROPIC_API_KEY,
         PIPELINE_PORT: '49900',
@@ -99,6 +102,7 @@ module.exports = {
       interpreter: 'node',
       env: {
         NODE_ENV: 'production',
+        TMPDIR,
         SITE2RAG_ROOT,
         ANTHROPIC_API_KEY,
         LOCAL_LLM: process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:49800/v1',
@@ -123,6 +127,7 @@ module.exports = {
       interpreter: '/tank/site2rag/marker-venv/bin/python',
       env: {
         NODE_ENV: 'production',
+        TMPDIR,
         SITE2RAG_ROOT,
         MARKER_PORT: '7842',
         MARKER_WORKERS: '8'
@@ -143,6 +148,7 @@ module.exports = {
       interpreter: 'node',
       env: {
         NODE_ENV: 'production',
+        TMPDIR,
         SITE2RAG_ROOT,
         UPDATE_CHECK_INTERVAL_MIN: '60',
         UPDATE_BRANCH: 'main',

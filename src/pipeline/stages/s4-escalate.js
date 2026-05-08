@@ -20,8 +20,8 @@
 import { shouldRun } from '../config.js';          // shouldRun(stage,ctx)→bool
 import { mkdirSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
 import { createHash } from 'crypto';
+import { getTmpDir } from '../../config.js';
 // ── config defaults ──────────────────────────────────────────────────────────
 const D_DIRTY_WORD = 0.40;   // thresholds.dirtyWord
 
@@ -143,7 +143,7 @@ export async function s4Escalate(ctx) {
   let pagesAffected = 0;
   const dirtyT = (ctx.config.thresholds?.dirtyWord ?? D_DIRTY_WORD) * 100;
   const docHash = createHash('sha256').update(ctx.docId).digest('hex').slice(0, 16);
-  const tmpDir = join(tmpdir(), `site2rag-s3-${docHash}`);
+  const tmpDir = join(getTmpDir(), `site2rag-s3-${docHash}`);
   mkdirSync(tmpDir, { recursive: true });
 
   try {

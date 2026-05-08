@@ -21,8 +21,8 @@
 import { shouldRun, withinBudget, llmCost } from '../config.js'; // shouldRun(stage,ctx)→bool; withinBudget(ctx,n?)→bool; llmCost(model,in,out)→usd
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join, basename } from 'path';
-import { tmpdir } from 'os';
 import { createHash } from 'crypto';
+import { getTmpDir } from '../../config.js';
 // ── config defaults ──────────────────────────────────────────────────────────
 const D_SURYA_CHUNK = 20;     // SURYA_CHUNK_SIZE — pages per surya_ocr batch call
 const D_MAX_PNG_MB  = 12;     // max PNG size in MB before skipping page
@@ -66,7 +66,7 @@ async function getPagePng(page, ctx) {
     const buf = readFileSync(page._pngPath);
     return buf.length <= MAX_PNG_BYTES ? buf : null; // skip oversized pages
   }
-  const stableDir = join(tmpdir(), 'site2rag-s3-' + sha256(ctx.docId).slice(0, 16));
+  const stableDir = join(getTmpDir(), 'site2rag-s3-' + sha256(ctx.docId).slice(0, 16));
   mkdirSync(stableDir, { recursive: true });
   const outBase = join(stableDir, `page-${page.pageNo}`);
   await ctx.run('pdftoppm', ['-png', '-r', '200', '-f', String(page.pageNo),
@@ -137,7 +137,7 @@ async function runSuryaChunk(pages, chunkDir, ctx) {
 
 async function runSuryaBatch(visionPages, ctx) {
   const docHash = sha256(ctx.docId).slice(0, 12);
-  const base = join(tmpdir(), `site2rag-surya-${docHash}`);
+  const base = join(getTmpDir(), `site2rag-surya-${docHash}`);
 
   // Process in chunks to avoid OOM on large documents
   for (let i = 0; i < visionPages.length; i += D_SURYA_CHUNK) {
