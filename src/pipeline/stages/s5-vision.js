@@ -64,17 +64,22 @@ const MAX_PNG_BYTES = D_MAX_PNG_MB * 1024 * 1024; // larger pages downsampled by
 async function getPagePng(page, ctx) {
   if (page._pngPath && existsSync(page._pngPath)) {
     const buf = readFileSync(page._pngPath);
-    return buf.length <= MAX_PNG_BYTES ? buf : null; // skip oversized pages
+    if (buf.length <= MAX_PNG_BYTES) return buf;
+    // Full-res too large — re-rasterize at lower DPI for vision
   }
   const stableDir = join(getTmpDir(), 'site2rag-s3-' + sha256(ctx.docId).slice(0, 16));
   mkdirSync(stableDir, { recursive: true });
-  const outBase = join(stableDir, `page-${page.pageNo}`);
-  await ctx.run('pdftoppm', ['-png', '-r', '200', '-f', String(page.pageNo),
-    '-l', String(page.pageNo), '-singlefile', ctx.sourcePath, outBase], { timeout: 30000 });
-  const pngPath = outBase + '.png';
-  if (!existsSync(pngPath)) return null;
-  const buf = readFileSync(pngPath);
-  return buf.length <= MAX_PNG_BYTES ? buf : null;
+  // Try 150dpi, then 100dpi if still too large
+  for (const dpi of [150, 100]) {
+    const outBase = join(stableDir, `page-${page.pageNo}-${dpi}dpi`);
+    await ctx.run('pdftoppm', ['-png', '-r', String(dpi), '-f', String(page.pageNo),
+      '-l', String(page.pageNo), '-singlefile', ctx.sourcePath, outBase], { timeout: 30000 });
+    const pngPath = outBase + '.png';
+    if (!existsSync(pngPath)) continue;
+    const buf = readFileSync(pngPath);
+    if (buf.length <= MAX_PNG_BYTES) return buf;
+  }
+  return null;
 }
 
 // ── Phase 1: Surya batch pre-pass ────────────────────────────────────────────

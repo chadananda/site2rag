@@ -37,12 +37,15 @@ export async function s6SpellFix(ctx) {
       return ctx;
     }
 
-    // Don't waste tokens on docs too broken for cheap correction
-    const baseline = ctx.quality.baseline?.composite_score ?? 0;
+    // Don't waste tokens on docs too broken for cheap correction.
+    // Use post-OCR quality (s5 or s3) if available — image PDFs have baseline=0 but may have
+    // good Tesseract/vision output worth correcting.
+    const postOcrScore = ctx.quality.perStage?.['s5'] ?? ctx.quality.perStage?.['s3'] ?? null;
+    const baseline = postOcrScore ?? ctx.quality.baseline?.composite_score ?? 0;
     const spellMin = ctx.config.thresholds?.spellFixMin ?? D_SPELL_FIX_MIN;
     if (baseline < spellMin) {
       ctx.addDecision('s6', 'skip',
-        `baseline ${baseline.toFixed(3)} < min ${spellMin} — too broken for spell-fix`, baseline);
+        `quality ${baseline.toFixed(3)} < min ${spellMin} — too broken for spell-fix`, baseline);
       return ctx;
     }
 
