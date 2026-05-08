@@ -67,57 +67,53 @@ describe('s5Vision — skip logic', () => {
 
 describe('s5Vision — surya batch pre-pass', () => {
   it('uses surya results when CLI is available', async () => {
-    // Mock execFile: surya_ocr --help exits with error (but code ≠ ENOENT = installed)
-    // surya_ocr <dir> writes results.json
-    const { execFile: realExecFile } = await import('child_process');
-    vi.spyOn(await import('child_process'), 'execFile').mockImplementation((cmd, args, opts, cb) => {
-      const callback = typeof opts === 'function' ? opts : cb;
-      if (cmd !== 'surya_ocr') return realExecFile(cmd, args, opts, cb);
-      if (args[0] === '--help') { callback(new Error('usage')); return; } // installed, exits non-zero
-      // surya_ocr <chunkDir> --langs en --results_dir <outDir>
-      const outDir = args[args.indexOf('--results_dir') + 1];
-      const { writeFileSync: wfs, mkdirSync: mds } = require('fs');
-      mds(outDir, { recursive: true });
-      // Keys are stems without extension (matches surya 0.6.x directory-input format)
-      const results = { 'page-0001': [{ text_lines: [{ text: 'Surya OCR text' }] }] };
-      wfs(require('path').join(outDir, 'results.json'), JSON.stringify(results));
-      callback(null, '', '');
-    });
-
     const ctx = makeCtx({ config: { apiKey: null, azureKey: null, googleKey: null } });
     ctx.pages = [makePageWithPng(1)];
+    // Mock ctx.run directly: surya --help succeeds (non-ENOENT = installed),
+    // surya batch writes results.json; other tools pass through.
+    const { existsSync: fsExists, writeFileSync: wfs, mkdirSync: mds } = await import('fs');
+    const { join: pjoin } = await import('path');
+    ctx.run = vi.fn(async (tool, args, opts) => {
+      if (tool === 'surya_ocr') {
+        if (args[0] === '--help') throw new Error('usage'); // installed but exits non-zero
+        const outDir = args[args.indexOf('--results_dir') + 1];
+        mds(outDir, { recursive: true });
+        const results = { 'page-0001': [{ text_lines: [{ text: 'Surya OCR transcription of the document page' }] }] };
+        wfs(pjoin(outDir, 'results.json'), JSON.stringify(results));
+        return { stdout: '', stderr: '' };
+      }
+      return { stdout: '', stderr: '' };
+    });
     vi.resetModules();
     const { s5Vision } = await import('../../src/pipeline/stages/s5-vision.js');
     await s5Vision(ctx);
-    expect(ctx.pages[0].visionMd).toBe('Surya OCR text');
+    expect(ctx.pages[0].visionMd).toBe('Surya OCR transcription of the document page');
   });
 
   it('chunks large documents into SURYA_CHUNK_SIZE batches', async () => {
-    const callArgs = [];
-    vi.spyOn(await import('child_process'), 'execFile').mockImplementation((cmd, args, opts, cb) => {
-      const callback = typeof opts === 'function' ? opts : cb;
-      if (cmd !== 'surya_ocr') { callback(null, '', ''); return; }
-      if (args[0] === '--help') { callback(new Error('usage')); return; }
-      callArgs.push(args);
-      const outDir = args[args.indexOf('--results_dir') + 1];
-      const { writeFileSync: wfs, mkdirSync: mds, readdirSync: rds } = require('fs');
-      mds(outDir, { recursive: true });
-      // Generate results for each PNG in the chunk dir
-      const chunkDir = args[0];
-      const files = rds(chunkDir).filter(f => f.endsWith('.png'));
-      const results = Object.fromEntries(files.map(f => [f, [{ text_lines: [{ text: `text-${f}` }] }]]));
-      wfs(require('path').join(outDir, 'results.json'), JSON.stringify(results));
-      callback(null, '', '');
-    });
-
-    // Create 25 pages (> SURYA_CHUNK_SIZE=20) — should produce 2 surya_ocr calls
+    const { writeFileSync: wfs2, mkdirSync: mds2, readdirSync: rds2 } = await import('fs');
+    const { join: pjoin2 } = await import('path');
+    const batchCalls = [];
     const ctx = makeCtx({ config: { apiKey: null, azureKey: null, googleKey: null } });
     ctx.pages = Array.from({ length: 25 }, (_, i) => makePageWithPng(i + 1));
+    ctx.run = vi.fn(async (tool, args) => {
+      if (tool === 'surya_ocr') {
+        if (args[0] === '--help') throw new Error('usage'); // installed
+        batchCalls.push(args);
+        const outDir = args[args.indexOf('--results_dir') + 1];
+        mds2(outDir, { recursive: true });
+        const chunkDir = args[0];
+        const files = rds2(chunkDir).filter(f => f.endsWith('.png'));
+        const results = Object.fromEntries(files.map(f => [f, [{ text_lines: [{ text: `text-${f}-long-enough-result` }] }]]));
+        wfs2(pjoin2(outDir, 'results.json'), JSON.stringify(results));
+        return { stdout: '', stderr: '' };
+      }
+      return { stdout: '', stderr: '' };
+    });
     vi.resetModules();
     const { s5Vision } = await import('../../src/pipeline/stages/s5-vision.js');
     await s5Vision(ctx);
-    // Subtract 1 for the --help check; remaining calls should be 2 chunks
-    const batchCalls = callArgs.filter(a => a[0] !== '--help');
+    // Should produce 2 surya_ocr batch calls (25 pages / SURYA_CHUNK_SIZE=20 = 2 chunks)
     expect(batchCalls.length).toBe(2);
   });
 
@@ -129,14 +125,13 @@ describe('s5Vision — surya batch pre-pass', () => {
         usage: { prompt_tokens: 50, completion_tokens: 20 },
       })}));
 
-    vi.spyOn(await import('child_process'), 'execFile').mockImplementation((cmd, args, opts, cb) => {
-      const callback = typeof opts === 'function' ? opts : cb;
-      if (cmd === 'surya_ocr') { const e = new Error('not found'); e.code = 'ENOENT'; callback(e); return; }
-      callback(null, '', '');
-    });
-
-    const ctx = makeCtx({ config: { apiKey: null, azureKey: null, googleKey: null } });
+    const ctx = makeCtx({ config: { apiKey: null, azureKey: null, googleKey: null, toolBackends: {} } });
     ctx.pages = [makePageWithPng(1)];
+    // Mock ctx.run: surya ENOENT = not installed
+    ctx.run = vi.fn(async (tool, args) => {
+      if (tool === 'surya_ocr') { const e = new Error('not found'); e.code = 'ENOENT'; throw e; }
+      return { stdout: '', stderr: '' };
+    });
     vi.resetModules();
     const { s5Vision } = await import('../../src/pipeline/stages/s5-vision.js');
     await s5Vision(ctx);
@@ -152,13 +147,12 @@ describe('s5Vision — HTTP backend chain', () => {
         choices: [{ message: { content: 'Boss OCR result' } }],
         usage: { prompt_tokens: 100, completion_tokens: 50 },
       })}));
-    vi.spyOn(await import('child_process'), 'execFile').mockImplementation((cmd, args, opts, cb) => {
-      const callback = typeof opts === 'function' ? opts : cb;
-      if (cmd === 'surya_ocr') { const e = new Error('not found'); e.code = 'ENOENT'; callback(e); return; }
-      callback(null, '', '');
-    });
-    const ctx = makeCtx({ config: { apiKey: null } });
+    const ctx = makeCtx({ config: { apiKey: null, toolBackends: {} } });
     ctx.pages = [makePageWithPng(1)];
+    ctx.run = vi.fn(async (tool) => {
+      if (tool === 'surya_ocr') { const e = new Error('not found'); e.code = 'ENOENT'; throw e; }
+      return { stdout: '', stderr: '' };
+    });
     vi.resetModules();
     const { s5Vision } = await import('../../src/pipeline/stages/s5-vision.js');
     await s5Vision(ctx);
@@ -175,15 +169,15 @@ describe('s5Vision — HTTP backend chain', () => {
         status: 'succeeded', analyzeResult: { content: 'Azure text' },
       })}));
     vi.useFakeTimers();
-    vi.spyOn(await import('child_process'), 'execFile').mockImplementation((cmd, args, opts, cb) => {
-      const callback = typeof opts === 'function' ? opts : cb;
-      if (cmd === 'surya_ocr') { const e = new Error('not found'); e.code = 'ENOENT'; callback(e); return; }
-      callback(null, '', '');
-    });
     const ctx = makeCtx({ importance: 3, config: {
       apiKey: null, azureKey: 'key', azureEndpoint: 'https://azure.test', googleKey: null,
+      toolBackends: {},
       implementations: { vision: ['boss', 'azure'] } } });
     ctx.pages = [makePageWithPng(1)];
+    ctx.run = vi.fn(async (tool) => {
+      if (tool === 'surya_ocr') { const e = new Error('not found'); e.code = 'ENOENT'; throw e; }
+      return { stdout: '', stderr: '' };
+    });
     vi.resetModules();
     const { s5Vision } = await import('../../src/pipeline/stages/s5-vision.js');
     const p = s5Vision(ctx);
@@ -194,21 +188,21 @@ describe('s5Vision — HTTP backend chain', () => {
   });
 
   it('calls google with correct language hint', async () => {
+    // Arabic page: boss is skipped (RTL_LANGS), so first fetch is google directly
     vi.stubGlobal('fetch', vi.fn()
-      .mockResolvedValueOnce({ ok: false })   // boss health fails
       .mockResolvedValueOnce({ ok: true, json: async () => ({
         responses: [{ fullTextAnnotation: { text: 'Google Arabic text' } }],
       })}));
-    vi.spyOn(await import('child_process'), 'execFile').mockImplementation((cmd, args, opts, cb) => {
-      const callback = typeof opts === 'function' ? opts : cb;
-      if (cmd === 'surya_ocr') { const e = new Error('not found'); e.code = 'ENOENT'; callback(e); return; }
-      callback(null, '', '');
-    });
     const ctx = makeCtx({ importance: 3, config: {
       apiKey: null, azureKey: null, googleKey: 'goog-key',
       escalation: { cloudVision: 3 },
+      toolBackends: {},
       implementations: { vision: ['boss', 'google'] } } });
     ctx.pages = [makePageWithPng(1, 'ara')];
+    ctx.run = vi.fn(async (tool) => {
+      if (tool === 'surya_ocr') { const e = new Error('not found'); e.code = 'ENOENT'; throw e; }
+      return { stdout: '', stderr: '' };
+    });
     vi.resetModules();
     const { s5Vision } = await import('../../src/pipeline/stages/s5-vision.js');
     await s5Vision(ctx);
@@ -308,11 +302,12 @@ describe('shouldVisionPage', () => {
     expect(shouldVisionPage(page).shouldVision).toBe(true);
   });
 
-  it('returns shouldVision=false when dirty <= 50% of total', () => {
+  it('returns shouldVision=true when dirty <= 50% but quality below 0.90 threshold', () => {
+    // 1 dirty out of 4 = 25% dirty (not high-dirty), but 3/4 = 0.75 quality < 0.90 → belowThreshold
     const words = Array.from({ length: 4 }, () => ({ text: 'w', conf: 95, needs_vision: false }));
     words[0].conf = 20; // 1 dirty out of 4
     const page = makePage({ words, _bucketed: { dirty: 1, clean: 3, fuzzy: 0, needs_vision: 0 } });
-    expect(shouldVisionPage(page).shouldVision).toBe(false);
+    expect(shouldVisionPage(page).shouldVision).toBe(true);
   });
 
   it('returns shouldVision=true when >10 words need vision', () => {
@@ -321,10 +316,11 @@ describe('shouldVisionPage', () => {
     expect(shouldVisionPage(page).shouldVision).toBe(true);
   });
 
-  it('returns shouldVision=false when exactly 10 words need vision (not >10)', () => {
+  it('returns shouldVision=true when exactly 10 words need vision (belowThreshold)', () => {
+    // 10 words all conf=30 (below 60) → quality=0 < 0.90 → belowThreshold triggers vision
     const words = Array.from({ length: 10 }, () => ({ text: 'w', conf: 30, needs_vision: true }));
     const page = makePage({ words, _bucketed: { dirty: 0, clean: 0, fuzzy: 0, needs_vision: 10 } });
-    expect(shouldVisionPage(page).shouldVision).toBe(false);
+    expect(shouldVisionPage(page).shouldVision).toBe(true);
   });
 
   it('returns needsFull=false when _needsFullVision is false and words present', () => {

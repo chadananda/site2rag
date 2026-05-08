@@ -29,8 +29,9 @@ const D_MAX_PNG_MB  = 4;      // max PNG size in MB — Claude API limits to 5MB
 
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 
-const VISION_PROMPT = 'Transcribe all text from this document page exactly as it appears. Output only the transcribed text in clean Markdown. Preserve headings, paragraphs, lists, and tables. Do not add commentary.';
-const HANDWRITING_PROMPT = 'Carefully transcribe all handwritten and printed text from this document page. The text may include multiple languages and scripts including Arabic, Persian, and English. Preserve paragraph breaks. Mark words that are truly illegible as [illegible]. Output only the transcribed text in clean Markdown. Do not add commentary.';
+const VISION_PROMPT = 'Transcribe all text from this document page exactly as it appears. Output only the transcribed text in clean Markdown. Preserve headings, paragraphs, and lists. For tables use Markdown pipe syntax (| col | col |). Do NOT use LaTeX notation, \\begin{array}, \\text{}, or any mathematical markup. Do not add commentary.';
+const HANDWRITING_PROMPT = 'Carefully transcribe all handwritten and printed text from this document page. The text may include multiple languages and scripts including Arabic, Persian, and English. Preserve paragraph breaks. Mark words that are truly illegible as [illegible]. Output only the transcribed text in clean Markdown using pipe-syntax tables (| col | col |). Do NOT use LaTeX notation or mathematical markup. Do not add commentary.';
+const RTL_VISION_PROMPT = 'Transcribe all text from this document page. The text is in Arabic or Persian script (right-to-left). Output only the transcribed text in clean Markdown. Preserve paragraph breaks and list structure. For tables use Markdown pipe syntax (| col | col |). Do NOT use LaTeX notation, \\begin{array}, \\text{}, or mathematical markup. Output the actual Arabic/Persian words and numbers as they appear — do not transliterate. Do not add commentary.';
 
 // SURYA_CHUNK_SIZE moved to D_SURYA_CHUNK above
 
@@ -48,13 +49,48 @@ const TESS_TO_GOOGLE = {
   jpn: 'ja', 'chi_sim+jpn': 'zh-CN', kor: 'ko', eng: 'en',
 };
 
+// RTL scripts that need language-aware prompts and skip boss (local LLaVA has poor RTL support)
+const RTL_LANGS = new Set(['ara', 'fas', 'per', 'heb', 'urd']);
+
+// Detect LaTeX artifacts in vision output — indicates model failure on image
+function hasLatexArtifacts(text) {
+  return /\\begin\{|\\text\{|\\frac\{|\\hline|\$\\/.test(text);
+}
+
+// Deduplicate repeated paragraphs in vision output (model hallucination pattern)
+function deduplicateBlocks(text) {
+  if (!text) return text;
+  const blocks = text.split(/\n{2,}/);
+  const seen = new Set();
+  const deduped = [];
+  for (const block of blocks) {
+    const normalized = block.trim().replace(/\s+/g, ' ');
+    if (normalized.length < 20 || !seen.has(normalized)) {
+      seen.add(normalized);
+      deduped.push(block);
+    }
+  }
+  return deduped.join('\n\n');
+}
+
+// Word-confidence quality for a page (0–1). Used to decide whether vision can still improve it.
+function pageWordQuality(page, cleanT = 60) {
+  const words = page.words ?? [];
+  if (!words.length) return 0;
+  return words.filter(w => w.conf >= cleanT).length / words.length;
+}
+
 export const shouldVisionPage = (page) => {
   const visionWords = (page.words ?? []).filter(w => w.needs_vision);
   const needsFull = page._needsFullVision || (page.words?.length === 0 && page.regions?.some(r => r.type !== 'figure'));
   const dirty = page._bucketed?.dirty ?? 0;
   const total = page.words?.length ?? 0;
   const highDirty = total > 0 && dirty / total > 0.5;
-  return { shouldVision: needsFull || highDirty || visionWords.length > 10, needsFull };
+  // Include pages below the vision improvement threshold — vision can improve fuzzy Tesseract output.
+  // Only applies when there are words to assess; empty pages rely on needsFull instead.
+  const hasWords = (page.words?.length ?? 0) > 0;
+  const belowThreshold = hasWords && pageWordQuality(page) < (page._visionQualityGate ?? 0.90);
+  return { shouldVision: needsFull || highDirty || visionWords.length > 10 || belowThreshold, needsFull };
 };
 
 // ── page PNG helper ───────────────────────────────────────────────────────────
@@ -178,7 +214,7 @@ async function visionViaBoss(bossUrl, b64) {
           { type: 'image_url', image_url: { url: `data:image/png;base64,${b64}` } },
           { type: 'text', text: VISION_PROMPT },
         ]}],
-        max_tokens: 2048, temperature: 0,
+        max_tokens: 512, temperature: 0,
       }),
     });
     clearTimeout(timer);
@@ -260,9 +296,13 @@ async function synthesizeWithOcrContext(b64, apiKey, model, page) {
   if (page?._suryaText) {
     ocrDrafts.push(`Secondary OCR (Surya):\n${page._suryaText.slice(0, 2000)}`);
   }
+  const lang = page?._lang ?? 'eng';
+  const isRtlPage = RTL_LANGS.has(lang);
+  const basePrompt = isRtlPage ? RTL_VISION_PROMPT : VISION_PROMPT;
+  const rtlNote = isRtlPage ? ' The text is in Arabic or Persian (right-to-left). Do NOT use LaTeX. Do NOT use \\begin{array}.' : '';
   const prompt = ocrDrafts.length > 0
-    ? `You are correcting OCR output for a scanned historical document page.\n\nOCR drafts:\n\n${ocrDrafts.join('\n\n')}\n\nReview the page image carefully and provide the corrected, accurate transcription. Output only the transcribed text in clean Markdown. Preserve paragraph breaks, headings, and structure.`
-    : VISION_PROMPT;
+    ? `You are correcting OCR output for a scanned historical document page.${rtlNote}\n\nOCR drafts:\n\n${ocrDrafts.join('\n\n')}\n\nReview the page image carefully and provide the corrected, accurate transcription. Output only the transcribed text in clean Markdown. Use Markdown pipe tables (| col | col |), NOT LaTeX. Preserve paragraph breaks, headings, and structure.`
+    : basePrompt;
   const msg = await client.messages.create({
     model, max_tokens: 2048,
     messages: [{ role: 'user', content: [
@@ -282,12 +322,15 @@ async function buildBackendChain(ctx) {
   // Standard cloud gate still applies for easy docs (importance >= cloudVision threshold).
   const cloudVisionGate = ctx.config.escalation?.cloudVision ?? 3;
   const needsCloud = ctx.importance >= cloudVisionGate || difficulty >= 0.5;
-  // Use handwriting-aware prompt for very hard docs (dense image scans, handwritten scripts).
-  const visionPrompt = difficulty >= 0.7 ? HANDWRITING_PROMPT : VISION_PROMPT;
+  // Use appropriate prompt: RTL languages need explicit Arabic/Persian guidance; hard/handwritten use handwriting prompt
+  const docLang = ctx.pages[0]?._lang ?? ctx.quality?.baseline?.language ?? 'eng';
+  const isRtl = RTL_LANGS.has(docLang);
+  const visionPrompt = isRtl ? RTL_VISION_PROMPT : difficulty >= 0.7 ? HANDWRITING_PROMPT : VISION_PROMPT;
   const chain = [];
   for (const name of order.filter(n => n !== 'surya')) {
     if (name === 'boss') {
-      if (ctx.importance >= (ctx.config.escalation?.localVision ?? 1)) {
+      // Skip boss for RTL scripts — local LLaVA models produce LaTeX artifacts and hallucinations on Arabic/Persian
+      if (!isRtl && ctx.importance >= (ctx.config.escalation?.localVision ?? 1)) {
         const ok = await checkService(ctx.config.bossUrl.replace(/\/v1$/, ''));
         if (ok) chain.push({ name: 'boss', call: (b64) => visionViaBoss(ctx.config.bossUrl, b64) });
       }
@@ -323,14 +366,21 @@ export async function s5Vision(ctx) {
 
   try {
     const forcedByMode = !!ctx.config.s5Mode;
+    // visionQualityGate: run vision on any page whose word confidence is below this threshold.
+    // Default 0.90 — even "good" Tesseract output can be improved by Surya/cloud vision.
+    // Set to 1.0 in config to run vision on ALL pages; 0.0 to keep old behavior (dirty-only).
+    const visionQualityGate = ctx.config.visionQualityGate ?? 0.90;
+    for (const p of ctx.pages) p._visionQualityGate = visionQualityGate;
     const visionPages = ctx.pages.filter(p => forcedByMode || shouldVisionPage(p).shouldVision);
 
-    // Phase 1: Surya batch pre-pass (free, handles difficult scripts well).
-    // Always run for hard docs (difficulty >= 0.3) — they need it most.
+    // Phase 1: Surya batch pre-pass (free, run on all vision-eligible pages).
+    // s3 already ran Surya block-by-block; s5 runs it on full-page images for better context.
     const difficulty = ctx.quality?.baseline?.processing_difficulty ?? 0;
     const suryaGate = ctx.config.escalation?.suryaVision ?? 2;
-    const s3RanSurya = ctx.pages.some(p => p._suryaText);
-    if (!s3RanSurya && visionPages.length > 0 && (ctx.importance >= suryaGate || difficulty >= 0.3)) {
+    // s3 runs Surya block-by-block on crops; s5 runs it on full-page images (better for layout/tables).
+    // Run s5 Surya even if s3 ran Surya, unless s3 already produced full-page visionMd.
+    const s3RanSuryaFull = ctx.pages.some(p => p.visionMd); // already have full-page output
+    if (!s3RanSuryaFull && visionPages.length > 0 && (ctx.importance >= suryaGate || difficulty >= 0.3)) {
       const suryaOk = await checkSuryaCli(ctx);
       if (!suryaOk) {
         ctx.addError('s5', new Error(`surya_ocr CLI not found — install surya or set SURYA_PATH`), true);
@@ -353,15 +403,19 @@ export async function s5Vision(ctx) {
       ctx.addDecision('s5', 'skip', 'no HTTP vision backend available');
     }
 
-    // Commit surya results to visionMd
+    // Commit surya results to visionMd — always use surya when available (full-page > block-level)
     for (const page of visionPages) {
       const { needsFull } = shouldVisionPage(page);
       if (page._suryaMd) {
-        page.visionMd = page._suryaMd;
+        const suryaText = deduplicateBlocks(page._suryaMd.trim());
         delete page._suryaMd;
-        if (needsFull) page.words = [];
-        pagesAffected++;
-        ctx.addDecision('s5', `page_${page.pageNo}`, 'surya', page.visionMd.length);
+        // Only replace existing words if surya produced meaningful text
+        if (suryaText && suryaText.length > 20) {
+          page.visionMd = suryaText;
+          if (needsFull) page.words = [];
+          pagesAffected++;
+          ctx.addDecision('s5', `page_${page.pageNo}`, 'surya', page.visionMd.length);
+        }
       }
     }
 
@@ -391,7 +445,14 @@ export async function s5Vision(ctx) {
       if (!result) return;
 
       const { needsFull } = shouldVisionPage(page);
-      page.visionMd = result.text.trim();
+      let cleanText = deduplicateBlocks(result.text.trim());
+      // Detect and flag LaTeX artifacts — model failure on image (common with local LLaVA on Arabic)
+      if (hasLatexArtifacts(cleanText)) {
+        ctx.addDecision('s5', `page_${page.pageNo}_latex_detected`, `${usedBackend}: LaTeX artifacts in output — marking as low quality`);
+        page._visionHasLatex = true;
+        // Keep the text but mark it; s8 will still export it as a fallback
+      }
+      page.visionMd = cleanText;
       if (needsFull) page.words = [];
       totalIn += result.tokens_in;
       totalOut += result.tokens_out;
@@ -400,13 +461,16 @@ export async function s5Vision(ctx) {
       ctx.addDecision('s5', `page_${page.pageNo}`, usedBackend, page.visionMd.length);
     })));
 
-    // Record quality after vision: coverage of vision-processed pages weighted by prior s3 score
+    // Record quality after vision: coverage × content quality (penalize LaTeX artifacts)
     if (pagesAffected > 0) {
       const totalPages = ctx.pages.length;
       const visionCoverage = pagesAffected / totalPages;
+      const latexPages = visionPages.filter(p => p._visionHasLatex).length;
+      const latexPenalty = latexPages / Math.max(1, visionPages.length); // 0–1 fraction of bad pages
       const s3Score = ctx.quality.perStage['s3'] ?? ctx.quality.baseline?.composite_score ?? 0;
-      // Vision fills gaps s3 missed — estimate combined quality
-      const s5Score = Math.min(1, s3Score + visionCoverage * (1 - s3Score));
+      // Vision fills gaps s3 missed — estimate combined quality, discounting for LaTeX failures
+      const s5Score = Math.min(1, (s3Score + visionCoverage * (1 - s3Score)) * (1 - latexPenalty * 0.8));
+      if (latexPenalty > 0) ctx.addDecision('s5', 'latex_quality_penalty', `${latexPages}/${visionPages.length} pages have LaTeX artifacts`);
       ctx.recordStageQuality('s5', Math.round(s5Score * 1000) / 1000);
     }
   } catch (err) {

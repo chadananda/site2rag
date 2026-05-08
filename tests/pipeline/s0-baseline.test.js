@@ -134,9 +134,9 @@ describe('s0Baseline — skip logic', () => {
     }
   });
 
-  it('skips s4-s5 but not s1-s3 for sparse text PDFs (skip_ocr_escalation)', async () => {
+  it('does NOT skip s4-s5 for sparse text PDFs with low quality (needs OCR)', async () => {
     const pdfPath = join(tmpDir, 'sparse.pdf');
-    // 50 chars — has_text_layer=1 but avg_chars < 300
+    // 50 chars — has_text_layer=1 but avg_chars < 300 and quality below threshold
     writeFileSync(pdfPath, makeTextPdf('hello world short text'));
     const ctx = makeCtx({ dir: tmpDir, pdfPath, config: { thresholds: { goodDoc: 0.99 } } });
 
@@ -144,8 +144,9 @@ describe('s0Baseline — skip logic', () => {
 
     const baseline = ctx.quality.baseline;
     if (baseline.has_text_layer === 1 && (baseline.avg_chars_per_page ?? 0) < 300) {
-      expect(ctx.config.skip).toContain('s4');
-      expect(ctx.config.skip).toContain('s5');
+      // sparse text layer + low quality → OCR escalation is needed, do NOT skip s4/s5
+      expect(ctx.config.skip).not.toContain('s4');
+      expect(ctx.config.skip).not.toContain('s5');
     }
   });
 

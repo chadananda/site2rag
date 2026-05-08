@@ -8,6 +8,8 @@
 //   GET  /jobs/:id/md         → text/markdown
 //   GET  /jobs/:id/pdf        → application/pdf
 //   DELETE /jobs/:id          → { ok: true }
+//   GET  /workers             → list of registered worker agents with health snapshots
+//   POST /workers/register    → register a worker agent { url, hostname, platform }
 //
 // To move this service to another host: just point PipelineClient at the new URL.
 // Remote hosts: pdfPath must be accessible from the server; for cross-machine use,
@@ -24,6 +26,32 @@ import { getTmpDir } from '../config.js';
 
 const execFileAsync = promisify(execFile);
 const log = (msg) => console.log(`[pipeline-server] ${new Date().toISOString().slice(0,19)} ${msg}`);
+
+// ── Worker registry ─────────────────────────────────────────────────────────
+// In-memory registry of worker agents on the network.
+// Workers self-register via POST /workers/register on startup.
+// Health snapshots are refreshed on GET /workers.
+const workerRegistry = new Map(); // url → { url, hostname, platform, lastSeen, health }
+const WORKER_HEALTH_TTL_MS = 60_000; // re-poll health at most once per minute
+
+async function fetchWorkerHealth(url) {
+  try {
+    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3000) });
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
+}
+
+async function refreshWorkerHealth(entry) {
+  if (Date.now() - (entry.healthAt ?? 0) < WORKER_HEALTH_TTL_MS) return;
+  entry.health = await fetchWorkerHealth(entry.url);
+  entry.healthAt = Date.now();
+}
+
+// Seed from WORKER_URLS env var: comma-separated list of http://host:port URLs
+const SEED_WORKERS = (process.env.WORKER_URLS ?? '').split(',').map(s => s.trim()).filter(Boolean);
+for (const url of SEED_WORKERS) {
+  workerRegistry.set(url, { url, hostname: new URL(url).hostname, platform: 'unknown', lastSeen: Date.now() });
+}
 
 const REQUIRED_TOOLS = ['pdftoppm', 'tesseract', 'gs', 'surya_ocr', 'unpaper', 'convert'];
 const OPTIONAL_TOOLS = [];
@@ -209,6 +237,26 @@ export async function startPipelineServer({
           disk,
           missing_required,
         });
+      }
+
+      // GET /workers — list all registered worker agents with fresh health snapshots
+      if (req.method === 'GET' && path === '/workers') {
+        await Promise.all([...workerRegistry.values()].map(refreshWorkerHealth));
+        return reply(res, 200, {
+          workers: [...workerRegistry.values()].map(({ url, hostname, platform, lastSeen, health }) => ({
+            url, hostname, platform, lastSeen, health,
+          })),
+        });
+      }
+
+      // POST /workers/register — worker agent calls this on startup
+      if (req.method === 'POST' && path === '/workers/register') {
+        const { url, hostname, platform: plat } = await readBody(req);
+        if (!url) return reply(res, 400, { error: 'url required' });
+        const existing = workerRegistry.get(url) ?? {};
+        workerRegistry.set(url, { ...existing, url, hostname: hostname ?? url, platform: plat ?? 'unknown', lastSeen: Date.now(), healthAt: 0 });
+        log(`worker registered: ${hostname ?? url} → ${url}`);
+        return reply(res, 200, { ok: true });
       }
 
       // POST /tools/run — execute a CLI tool on this host (for remote tool backend usage)

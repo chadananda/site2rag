@@ -82,6 +82,19 @@ export const DEFAULT_CONFIG = {
   // External service URLs
   bossUrl: process.env.LOCAL_LLM ?? 'http://boss.taile945b3.ts.net:49800/v1',
   markerUrl: process.env.MARKER_URL ?? 'http://localhost:7842',
+
+  // Worker pool registry — pipeline-server URL for /workers endpoint
+  registryUrl: process.env.PIPELINE_URL ?? 'http://localhost:49900',
+
+  // Tool routing: 'workerPool' picks least-loaded worker via /tools/run API; falls back to local.
+  // Workers expose all tools through their HTTP API — no shared filesystem required for tool dispatch.
+  toolBackends: {
+    surya_ocr:    { type: 'workerPool' }, // GPU-accelerated; routes to boss/jafar
+    easyocr_ocr:  { type: 'workerPool' }, // GPU batch engine; routes to boss/jafar/chads-air
+    paddle_ocr:   { type: 'workerPool' }, // GPU batch engine; routes to boss (CUDA) or chads-air (Metal)
+    doctr_ocr:    { type: 'workerPool' }, // GPU batch engine; routes to any worker with py:doctr
+    kraken_ocr:   { type: 'workerPool' }, // CPU/GPU batch engine; routes to any capable worker
+  },
 };
 
 /**

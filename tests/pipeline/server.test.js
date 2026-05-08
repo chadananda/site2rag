@@ -5,7 +5,7 @@ import { writeFileSync, existsSync } from 'fs';
 import { join } from 'path';
 
 let tempDir, cleanup, service;
-const PORT = 49910;  // test port, distinct from production 49900
+const PORT = 49955;  // test port, distinct from production 49900 and worker-agent 49910
 
 beforeEach(async () => {
   ({ dir: tempDir, cleanup } = makeTempDir());
