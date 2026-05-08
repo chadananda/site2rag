@@ -62,9 +62,13 @@ const TOOLS_TO_PROBE = [
 // Python package availability (checked via import)
 const PYTHON_PKGS = ['easyocr', 'paddleocr', 'doctr', 'kraken'];
 
+// Env overrides for tool paths (e.g. SURYA_PATH=/tank/site2rag/venv/bin/surya_ocr)
+const CMD_ENV_PATHS = { surya_ocr: process.env.SURYA_PATH };
+
 async function probeCmd(cmd) {
+  const resolved = CMD_ENV_PATHS[cmd] ?? cmd;
   try {
-    await execFileAsync(cmd, ['--version'], { timeout: 5000 });
+    await execFileAsync(resolved, ['--version'], { timeout: 5000 });
     return true;
   } catch (e) {
     if (e.code === 'ENOENT') return false;
@@ -196,12 +200,11 @@ async function handleToolRun(req, res) {
       return send(res, 503, { error: 'over capacity', ...cap });
     }
 
-    // Resolve command: Python batch engines use python3 + script path; others use ENV overrides or tool name.
-    const ENV_PATHS = { surya_ocr: process.env.SURYA_PATH };
+    // Resolve command: Python batch engines use python3 + script path; others use CMD_ENV_PATHS or tool name.
     const scriptPath = PYTHON_SCRIPTS[tool];
     const [cmd, execArgs] = scriptPath
       ? ['python3', [scriptPath, ...args]]
-      : [ENV_PATHS[tool] ?? tool, args];
+      : [CMD_ENV_PATHS[tool] ?? tool, args];
 
     activeJobs++;
     await acquireSlot(tool);
