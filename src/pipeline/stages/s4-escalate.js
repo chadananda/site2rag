@@ -17,7 +17,7 @@
 //           ctx.pages[n]._needsFullVision = true (if no tesseract output at all)
 //           ctx.pages[n]._bucketed.needs_vision (count of dirty words after escalation)
 //           ctx._markerDoc (cached full-doc markdown, set once)
-import { shouldRun } from '../config.js';          // shouldRun(stage,ctx)→bool
+import { shouldRun, pLimit } from '../config.js';  // shouldRun(stage,ctx)→bool; pLimit(n)
 import { mkdirSync, existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { createHash } from 'crypto';
@@ -63,25 +63,27 @@ async function fetchBossDraft(pngPath, ctx) {
 }
 
 // Marker service (POST /convert) takes the PDF file path and returns full-document markdown.
-// Called once per document (not per page) and cached in ctx._markerDoc.
-async function fetchMarkerDoc(ctx) {
-  if (ctx._markerDoc !== undefined) return ctx._markerDoc;
+// Called once per document — promise is cached immediately so concurrent page calls share one fetch.
+function fetchMarkerDoc(ctx) {
+  if (ctx._markerDocPromise !== undefined) return ctx._markerDocPromise;
   const markerUrl = ctx.config.markerUrl;
-  if (!markerUrl) { ctx._markerDoc = null; return null; }
-  try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 120000);
-    const res = await fetch(`${markerUrl}/convert`, {
-      method: 'POST', signal: ctrl.signal,
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pdf_path: ctx.sourcePath }),
-    });
-    clearTimeout(timer);
-    if (!res.ok) { ctx._markerDoc = null; return null; }
-    const data = await res.json();
-    ctx._markerDoc = data.markdown?.trim() || null;
-    return ctx._markerDoc;
-  } catch { ctx._markerDoc = null; return null; }
+  if (!markerUrl) { ctx._markerDocPromise = Promise.resolve(null); return ctx._markerDocPromise; }
+  ctx._markerDocPromise = (async () => {
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 120000);
+      const res = await fetch(`${markerUrl}/convert`, {
+        method: 'POST', signal: ctrl.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdf_path: ctx.sourcePath }),
+      });
+      clearTimeout(timer);
+      if (!res.ok) return null;
+      const data = await res.json();
+      return data.markdown?.trim() || null;
+    } catch { return null; }
+  })();
+  return ctx._markerDocPromise;
 }
 
 async function fetchPageDrafts(page, ctx) {
@@ -146,17 +148,17 @@ export async function s4Escalate(ctx) {
   const tmpDir = join(getTmpDir(), `site2rag-s3-${docHash}`);
   mkdirSync(tmpDir, { recursive: true });
 
+  const pageLimit = pLimit(8);
   try {
-    for (const page of ctx.pages) {
+    await Promise.all(ctx.pages.map(page => pageLimit(async () => {
       const words = page.words ?? [];
       const dirtyWords = words.filter(w => (w.conf ?? 100) < dirtyT);
       const noOutput = words.length === 0;
-      // Skip if no dirty words and page has output
-      if (!noOutput && (dirtyWords.length === 0 || (dirtyWords.length < 3 && words.length > 10))) continue;
+      if (!noOutput && (dirtyWords.length === 0 || (dirtyWords.length < 3 && words.length > 10))) return;
 
       const lang = page._lang ?? 'eng';
       try {
-        // Fan out: re-OCR at 600dpi + vision drafts from boss+marker, all in parallel
+        // 600dpi re-OCR + boss draft + marker doc all in parallel
         const [reOcrResult, visionDraft] = await Promise.all([
           noOutput ? Promise.resolve(null) : (async () => {
             const pngPath600 = await rasterizeAt(ctx.sourcePath, page.pageNo, tmpDir, 600, ctx);
@@ -184,12 +186,10 @@ export async function s4Escalate(ctx) {
           } else {
             ctx.addDecision('s4', `page_${page.pageNo}`, 'kept-original', delta);
           }
-          // Mark remaining dirty words as needs_vision
           for (const w of page.words) {
             if ((w.conf ?? 100) < dirtyT) w.needs_vision = true;
           }
         } else if (noOutput) {
-          // No tesseract output at all — mark page for full vision
           page._needsFullVision = true;
           ctx.addDecision('s4', `page_${page.pageNo}`, 'needs-full-vision', 0);
         }
@@ -198,13 +198,12 @@ export async function s4Escalate(ctx) {
         pagesAffected++;
       } catch (pageErr) {
         ctx.addError('s4', pageErr, true);
-        // On error, still mark dirty words as needs_vision
         for (const w of (page.words ?? [])) {
           if ((w.conf ?? 100) < dirtyT) w.needs_vision = true;
         }
         if (page._bucketed) page._bucketed.needs_vision = (page.words ?? []).filter(w => w.needs_vision).length;
       }
-    }
+    })));
   } catch (err) {
     ctx.addError('s4', err, true);
     if (ctx.config.failFast) throw err;

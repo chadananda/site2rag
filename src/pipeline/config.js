@@ -1,5 +1,5 @@
 // Pipeline config defaults, thresholds, escalation gates, LLM cost model.
-// Exports: DEFAULT_CONFIG, mergeConfig, shouldRun, stagesForImportance, withinBudget, llmCost, MODEL_RATES
+// Exports: DEFAULT_CONFIG, mergeConfig, shouldRun, stagesForImportance, withinBudget, llmCost, MODEL_RATES, pLimit
 //   DEFAULT_CONFIG                            — all defaults (stages,thresholds,escalation,implementations)
 //   mergeConfig(overrides) → config           — deep-merge over defaults; caller values win
 //   shouldRun(stage, ctx) → bool              — checks skip list + importance gates
@@ -124,3 +124,17 @@ export const withinBudget = (ctx, additionalTokens = 0) => {
   const used = ctx.metrics.stages.reduce((s, x) => s + (x.tokens_in ?? 0) + (x.tokens_out ?? 0), 0);
   return used + additionalTokens <= ctx.config.maxTokenBudget;
 };
+
+/** Concurrency limiter. Usage: const lim = pLimit(8); await Promise.all(items.map(x => lim(() => fn(x)))) */
+export function pLimit(concurrency) {
+  let active = 0;
+  const queue = [];
+  const tick = () => {
+    while (active < concurrency && queue.length) {
+      active++;
+      const { fn, resolve, reject } = queue.shift();
+      fn().then(v => { active--; resolve(v); tick(); }, e => { active--; reject(e); tick(); });
+    }
+  };
+  return fn => new Promise((resolve, reject) => { queue.push({ fn, resolve, reject }); tick(); });
+}

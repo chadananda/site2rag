@@ -18,7 +18,7 @@
 //   Reads:  ctx.sourcePath, ctx.pages[n].regions[0].type, ctx.meta.language
 //   Writes: ctx.pages[n].words, ctx.pages[n]._pngPath, ctx.pages[n]._bucketed, ctx.pages[n]._lang
 //           ctx.pages[n]._suryaText (string, if s3MultiEngine includes 'surya')
-import { shouldRun } from '../config.js';                            // shouldRun(stage,ctx)→bool
+import { shouldRun, pLimit } from '../config.js';                    // shouldRun(stage,ctx)→bool; pLimit(n)
 import { execFile } from 'child_process';                            // for python3 (not routed through tool-runner)
 import { promisify } from 'util';
 import { mkdirSync, existsSync, statSync, readFileSync, writeFileSync, rmSync } from 'fs';
@@ -250,72 +250,68 @@ export async function s3Ocr(ctx) {
   const tmpDir = join(getTmpDir(), `site2rag-s3-${docHash}`);
   mkdirSync(tmpDir, { recursive: true });
 
-  // Validate multi-engine config upfront — missing server URL is a config error
+  const D_LAYOUT_DPI = 72;
+  const dpi = ctx.config.rasterDpi ?? D_RASTER_DPI;
+  const dpiScale = dpi / D_LAYOUT_DPI;
+  const prepCfg = ctx.config.preprocessing ?? {};
+  const forceContrast = prepCfg.forceContrast ?? false;
+  const scanIssues = ctx._scanIssues ?? [];
+  const issueArgs = scanIssues.length ? ['--issues', scanIssues.join(',')] : [];
+  const methodArgs = prepCfg.method ? ['--method', prepCfg.method] : [];
+  const extraArgs = [...issueArgs, ...methodArgs];
+
+  // Cap page parallelism at 8 to avoid resource exhaustion on large documents
+  const pageLimit = pLimit(8);
+
   try {
-    for (const page of ctx.pages) {
+    await Promise.all(ctx.pages.map(page => pageLimit(async () => {
       try {
         if (page.regions?.length && page.regions.every(r => r.type === 'figure')) {
           page.words = [];
           page._bucketed = { clean: 0, fuzzy: 0, dirty: 0, needs_vision: 0 };
-          continue;
+          return;
         }
         const regionType = page.regions?.[0]?.type ?? null;
         const lang = ctx.config.s3Lang ?? resolveLang(regionType, ctx.meta?.language);
         page._lang = lang;
         routingSummary[lang] = (routingSummary[lang] ?? 0) + 1;
 
-        // Rasterize page — DPI configurable (300 default, 600 for high-res variant)
-        const dpi = ctx.config.rasterDpi ?? D_RASTER_DPI;
+        // Rasterize full-res and layout-res in parallel
         const outBase = join(tmpDir, `p${page.pageNo}`);
         const pngPath = `${outBase}.png`;
-        if (!existsSync(pngPath)) {
-          await ctx.run('pdftoppm', [
-            '-png', '-r', String(dpi), '-f', String(page.pageNo), '-l', String(page.pageNo),
-            '-singlefile', ctx.sourcePath, outBase,
-          ], { timeout: 60000 });
-        }
-        if (existsSync(pngPath) && statSync(pngPath).size < 100) {
-          throw new Error(`pdftoppm produced corrupt PNG for page ${page.pageNo}`);
-        }
-        page._pngPath = pngPath;
-
-        // Layout detection pass at 72dpi — fast, just for block bounding boxes
-        const D_LAYOUT_DPI = 72;
         const layoutBase = join(tmpDir, `p${page.pageNo}_layout`);
         const layoutPng = `${layoutBase}.png`;
+
+        await Promise.all([
+          existsSync(pngPath) ? Promise.resolve() : ctx.run('pdftoppm', [
+            '-png', '-r', String(dpi), '-f', String(page.pageNo), '-l', String(page.pageNo),
+            '-singlefile', ctx.sourcePath, outBase,
+          ], { timeout: 60000 }),
+          existsSync(layoutPng) ? Promise.resolve() : ctx.run('pdftoppm', [
+            '-png', '-r', String(D_LAYOUT_DPI), '-f', String(page.pageNo),
+            '-l', String(page.pageNo), '-singlefile', ctx.sourcePath, layoutBase,
+          ], { timeout: 30000 }),
+        ]);
+
+        if (existsSync(pngPath) && statSync(pngPath).size < 100)
+          throw new Error(`pdftoppm produced corrupt PNG for page ${page.pageNo}`);
+        page._pngPath = pngPath;
+
+        // Layout pass to get block bounding boxes
         let blocks = [];
         try {
-          if (!existsSync(layoutPng)) {
-            await ctx.run('pdftoppm', [
-              '-png', '-r', String(D_LAYOUT_DPI), '-f', String(page.pageNo),
-              '-l', String(page.pageNo), '-singlefile', ctx.sourcePath, layoutBase,
-            ], { timeout: 30000 });
-          }
           if (existsSync(layoutPng)) {
             const layoutHocr = await runTesseractLayout(layoutPng, lang, ctx);
             blocks = parseHocrBlocks(layoutHocr);
           }
-        } catch { /* layout pass failure is non-fatal — fall back to full page */ }
+        } catch { /* non-fatal — fall back to full page */ }
 
-        // Build preprocessing args from scan issues detected in s0
-        const prepCfg = ctx.config.preprocessing ?? {};
-        const forceContrast = prepCfg.forceContrast ?? false;
-        const scanIssues = ctx._scanIssues ?? [];
-        const issueArgs = scanIssues.length ? ['--issues', scanIssues.join(',')] : [];
-        const methodArgs = prepCfg.method ? ['--method', prepCfg.method] : [];
-        const extraArgs = [...issueArgs, ...methodArgs];
-
-        const MIN_BLOCKS = 2; // need at least 2 blocks to bother splitting
-        const useBlocks = blocks.length >= MIN_BLOCKS;
-        const dpiScale = dpi / D_LAYOUT_DPI;
-
+        const MIN_BLOCKS = 2;
         let words;
 
-        if (useBlocks) {
-          // Per-block OCR: crop each block, preprocess, OCR, offset coordinates back
-          const allBlockWords = [];
-          for (let bi = 0; bi < blocks.length; bi++) {
-            const blk = blocks[bi];
+        if (blocks.length >= MIN_BLOCKS) {
+          // All blocks processed in parallel — each block is independent
+          const blockWordArrays = await Promise.all(blocks.map(async (blk, bi) => {
             const bx1 = Math.floor(blk.x1 * dpiScale), by1 = Math.floor(blk.y1 * dpiScale);
             const bx2 = Math.ceil(blk.x2  * dpiScale), by2 = Math.ceil(blk.y2  * dpiScale);
             const bw = bx2 - bx1, bh = by2 - by1;
@@ -324,43 +320,39 @@ export async function s3Ocr(ctx) {
               await ctx.run('convert', [
                 pngPath, '-crop', `${bw}x${bh}+${bx1}+${by1}`, '+repage', blockRaw,
               ], { timeout: 15000 });
-              if (!existsSync(blockRaw)) continue;
+              if (!existsSync(blockRaw)) return [];
 
-              // Preprocess the block image using scan issue hints
               const blockEnh = join(tmpDir, `p${page.pageNo}_b${bi}_enh.png`);
               const enhancement = forceContrast
                 ? await tryEnhanceForced(blockRaw, blockEnh, extraArgs)
                 : await tryEnhance(blockRaw, blockEnh, extraArgs);
-              const blockToOcr = (enhancement?.path) ?? blockRaw;
 
-              const blockWords = await runTesseract(blockToOcr, lang, page.pageNo, ctx);
-              // Shift word coordinates back to full-page space
-              for (const w of blockWords) {
-                allBlockWords.push({ ...w, x1: w.x1 + bx1, y1: w.y1 + by1, x2: w.x2 + bx1, y2: w.y2 + by1 });
-              }
-            } catch { /* skip bad block, continue with others */ }
-          }
-          words = allBlockWords;
+              const blockWords = await runTesseract(enhancement?.path ?? blockRaw, lang, page.pageNo, ctx);
+              return blockWords.map(w => ({ ...w, x1: w.x1 + bx1, y1: w.y1 + by1, x2: w.x2 + bx1, y2: w.y2 + by1 }));
+            } catch { return []; }
+          }));
+
+          words = blockWordArrays.flat();
           ctx.addDecision('s3', `blocks_p${page.pageNo}`, `${blocks.length} blocks → ${words.length} words`);
           if (words.length > 0) enhancedCount++;
         } else {
-          // Full-page fallback (no usable blocks detected)
-          const origWords = await runTesseract(pngPath, lang, page.pageNo, ctx);
+          // Full-page fallback — OCR and contrast enhancement run in parallel
+          const [origWords, enhancement] = await Promise.all([
+            runTesseract(pngPath, lang, page.pageNo, ctx),
+            forceContrast
+              ? tryEnhanceForced(pngPath, `${outBase}_enhanced.png`, extraArgs)
+              : tryEnhance(pngPath, `${outBase}_enhanced.png`, extraArgs),
+          ]);
           const origScore = cleanRatio(origWords, cleanT);
-
-          const enhancedPath = `${outBase}_enhanced.png`;
-          const enhancement = forceContrast
-            ? await tryEnhanceForced(pngPath, enhancedPath, extraArgs)
-            : await tryEnhance(pngPath, enhancedPath, extraArgs);
-
           words = origWords;
+
           if (enhancement) {
             try {
-              const enhWords = await runTesseract(enhancedPath, lang, page.pageNo, ctx);
+              const enhWords = await runTesseract(`${outBase}_enhanced.png`, lang, page.pageNo, ctx);
               const enhScore = cleanRatio(enhWords, cleanT);
               if (enhScore > origScore) {
                 words = enhWords.map(w => ({ ...w, source: 'tesseract+contrast' }));
-                page._pngPath = enhancedPath;
+                page._pngPath = `${outBase}_enhanced.png`;
                 enhancedCount++;
                 ctx.addDecision('s3', `contrast_p${page.pageNo}`,
                   `${enhancement.applied?.[0] ?? 'enhanced'}: ${(origScore*100).toFixed(0)}%→${(enhScore*100).toFixed(0)}% clean`,
@@ -389,7 +381,7 @@ export async function s3Ocr(ctx) {
         page.words = [];
         page._bucketed = { clean: 0, fuzzy: 0, dirty: 0, needs_vision: 0 };
       }
-    }
+    })));
 
     // Surya multi-engine batch — CLI call after all pages rasterized
     if (ctx.config.s3MultiEngine?.includes('surya')) {

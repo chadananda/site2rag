@@ -18,7 +18,7 @@
 //           Skipped if s3 already ran Surya (ctx.pages.some(p=>p._suryaText)).
 // Phase 2 — Per-page backend chain: s5Mode model → boss → azure → google → claude-opus.
 //           Only pages surya didn't cover.
-import { shouldRun, withinBudget, llmCost } from '../config.js'; // shouldRun(stage,ctx)→bool; withinBudget(ctx,n?)→bool; llmCost(model,in,out)→usd
+import { shouldRun, withinBudget, llmCost, pLimit } from '../config.js'; // shouldRun,withinBudget,llmCost,pLimit
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
 import { join, basename } from 'path';
 import { createHash } from 'crypto';
@@ -360,17 +360,19 @@ export async function s5Vision(ctx) {
       }
     }
 
-    // Per-page HTTP backends for remaining pages
-    for (const page of remainingPages) {
+    // Per-page HTTP backends — all remaining pages in parallel, capped at 4
+    // (vision API calls are slow individually; 4 concurrent saturates typical API throughput)
+    const visionLimit = pLimit(4);
+    await Promise.all(remainingPages.map(page => visionLimit(async () => {
       if (!withinBudget(ctx, 2000)) {
         ctx.addDecision('s5', 'budget_stop', `page ${page.pageNo}: token budget exhausted`);
-        break;
+        return;
       }
 
       let pngBuf;
       try { pngBuf = await getPagePng(page, ctx); }
-      catch (e) { ctx.addError('s5', new Error(`page ${page.pageNo} PNG failed: ${e.message}`), true); continue; }
-      if (!pngBuf) { ctx.addDecision('s5', `page_${page.pageNo}`, 'skip: oversized PNG'); continue; }
+      catch (e) { ctx.addError('s5', new Error(`page ${page.pageNo} PNG failed: ${e.message}`), true); return; }
+      if (!pngBuf) { ctx.addDecision('s5', `page_${page.pageNo}`, 'skip: oversized PNG'); return; }
 
       const b64 = pngBuf.toString('base64');
       const lang = page._lang ?? 'eng';
@@ -381,7 +383,7 @@ export async function s5Vision(ctx) {
         catch (e) { ctx.addDecision('s5', `${backend.name}_failed`, `page ${page.pageNo}: ${e.message}`); }
       }
 
-      if (!result) continue;
+      if (!result) return;
 
       const { needsFull } = shouldVisionPage(page);
       page.visionMd = result.text.trim();
@@ -391,7 +393,7 @@ export async function s5Vision(ctx) {
       totalCost += result.cost;
       pagesAffected++;
       ctx.addDecision('s5', `page_${page.pageNo}`, usedBackend, page.visionMd.length);
-    }
+    })));
 
     // Record quality after vision: coverage of vision-processed pages weighted by prior s3 score
     if (pagesAffected > 0) {

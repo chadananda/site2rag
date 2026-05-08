@@ -33,8 +33,8 @@ export async function s2Classify(ctx) {
       ctx.addDecision('s2', 'fallback', apiKey ? `importance ${ctx.importance} < gate ${gate}` : 'no apiKey — language default');
     }
 
-    for (const page of ctx.pages) {
-      if (page.regions?.length) { pagesAffected++; continue; }
+    await Promise.all(ctx.pages.map(async (page) => {
+      if (page.regions?.length) { pagesAffected++; return; }
       if (canUseHaiku) {
         try {
           const result = await classifyPageWithHaiku(page.pageNo, ctx, apiKey);
@@ -45,7 +45,7 @@ export async function s2Classify(ctx) {
             totalOut += result.tokensOut ?? 0;
             pagesAffected++;
             ctx.addDecision('s2', `page_${page.pageNo}`, `haiku:${result.regions.map(r => r.type).join(',')}`);
-            continue;
+            return;
           }
         } catch (e) {
           ctx.addDecision('s2', `page_${page.pageNo}_err`, e.message.slice(0, 80));
@@ -53,7 +53,7 @@ export async function s2Classify(ctx) {
       }
       page.regions = [{ type: defaultType, bbox: [0, 0, 1700, 2200] }];
       pagesAffected++;
-    }
+    }));
   } catch (err) {
     ctx.addError('s2', err, true);
     if (ctx.config.failFast) throw err;
