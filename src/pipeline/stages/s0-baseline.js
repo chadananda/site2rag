@@ -45,7 +45,7 @@ export async function s0Baseline(ctx) {
       `pages=${ctx.pageCount}`,
     ].join(' '), score.composite_score);
 
-    if (score.language && !ctx.meta.language) ctx.meta.language = score.language;
+    if (score.language && score.language !== 'unknown' && !ctx.meta.language) ctx.meta.language = score.language;
 
     // For image PDFs: infer language + scan issues from a small page thumbnail.
     // Runs before domain detection so language is available for all downstream stages.
@@ -57,7 +57,8 @@ export async function s0Baseline(ctx) {
         tokensIn  += profile.tokensIn  ?? 0;
         tokensOut += profile.tokensOut ?? 0;
         costUsd   += profile.costUsd   ?? 0;
-        if (profile.language && (profile.languageConfidence ?? 0) >= 0.6 && !ctx.meta?.language) {
+        // scan_profile wins over unknown baseline; only skip if a real language was already set
+        if (profile.language && (profile.languageConfidence ?? 0) >= 0.6 && (!ctx.meta?.language || ctx.meta.language === 'unknown')) {
           ctx.meta = { ...(ctx.meta ?? {}), language: profile.language };
         }
         if (profile.scanIssues?.length) ctx._scanIssues = profile.scanIssues;

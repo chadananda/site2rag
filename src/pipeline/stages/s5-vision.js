@@ -25,7 +25,7 @@ import { createHash } from 'crypto';
 import { getTmpDir } from '../../config.js';
 // ── config defaults ──────────────────────────────────────────────────────────
 const D_SURYA_CHUNK = 20;     // SURYA_CHUNK_SIZE — pages per surya_ocr batch call
-const D_MAX_PNG_MB  = 12;     // max PNG size in MB before skipping page
+const D_MAX_PNG_MB  = 4;      // max PNG size in MB — Claude API limits to 5MB; stay under with headroom
 
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 
