@@ -61,6 +61,8 @@ async function probeTool(tool, config = {}) {
     return { ok: true };
   } catch (e) {
     if (e.code === 'ENOENT') return { ok: false, error: `not found: ${cmd}` };
+    // For tools without a functional test, non-zero exit on --version = tool exists, just doesn't support the flag
+    if (!FUNCTIONAL_TESTS[tool]) return { ok: true };
     return { ok: false, error: e.message.slice(0, 120) };
   }
 }
