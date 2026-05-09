@@ -49,15 +49,24 @@ const PADDLE_PY      = join(__pyDir, 'paddle_ocr.py');
 const DOCTR_PY       = join(__pyDir, 'doctr_ocr.py');
 const KRAKEN_PY      = join(__pyDir, 'kraken_ocr.py');
 
-// Each engine runs as one Python process over ALL crops (amortizes model load).
-// All engines run concurrently via Promise.all in Phase 2.
-// Surya is separate (CLI tool, chunked for GPU memory).
+// Each engine runs as one Python process over ALL crops on a page (amortizes model load).
+// All engines run concurrently via Promise.all per page.
+// Surya is separate (CLI, chunked for GPU memory) — escalation only for dirty blocks.
 // None of these are winners — all outputs are context for Haiku keyed correction.
+// Language capability: engines only run if they support the detected script.
+// This avoids noise (kraken on CJK, doctr on Arabic) while ensuring maximal context for
+// supported scripts. English/Latin/Arabic blocks always get all 4 engines.
+const CJK_LANGS = new Set(['chi_sim', 'chi_tra', 'chi_sim+jpn', 'chi_sim+chi_tra', 'jpn', 'kor']);
+const RTL_LANGS_S3 = new Set(['ara', 'fas', 'heb', 'urd']);
 const BATCH_ENGINES = [
-  { label: 'easyocr', script: EASYOCR_PY, tool: 'easyocr_ocr' },
-  { label: 'paddle',  script: PADDLE_PY,  tool: 'paddle_ocr'  },
-  { label: 'doctr',   script: DOCTR_PY,   tool: 'doctr_ocr'   },
-  { label: 'kraken',  script: KRAKEN_PY,  tool: 'kraken_ocr'  },
+  // easyocr: all languages
+  { label: 'easyocr', script: EASYOCR_PY, tool: 'easyocr_ocr', langs: null },
+  // paddle: all languages (TESS_TO_PADDLE handles Arabic, CJK, Latin)
+  { label: 'paddle',  script: PADDLE_PY,  tool: 'paddle_ocr',  langs: null },
+  // doctr: Latin + CJK; skip for Arabic/Persian/Hebrew (produces garbage)
+  { label: 'doctr',   script: DOCTR_PY,   tool: 'doctr_ocr',   langs: (lang) => !RTL_LANGS_S3.has(lang) },
+  // kraken: Latin + Arabic/Persian/Hebrew; skip for CJK (no CJK models)
+  { label: 'kraken',  script: KRAKEN_PY,  tool: 'kraken_ocr',  langs: (lang) => !CJK_LANGS.has(lang) },
 ];
 
 const TESS_TO_SURYA = { ara: 'ar', fas: 'fa', heb: 'he', chi_sim: 'zh', 'chi_sim+chi_tra': 'zh', jpn: 'ja', kor: 'ko', rus: 'ru', fra: 'fr', deu: 'de', spa: 'es', ita: 'it', por: 'pt', nld: 'nl', pol: 'pl', tur: 'tr', eng: 'en' };
@@ -556,6 +565,18 @@ export async function s3Ocr(ctx) {
   ctx.addDecision('s3', 'engines_available',
     [suryaOk ? 'surya' : null, ...availableEngines.map(e => e.label)].filter(Boolean).join(', ') || 'tesseract-only');
 
+  // Fail fast if no batch engines available for image documents.
+  // Text PDFs have a text layer and don't need multi-engine OCR context.
+  // Image PDFs require all 4 engines — cloud vision is not a substitute for missing software.
+  const hasTextLayer = (ctx.quality?.baseline?.has_text_layer ?? 1) > 0;
+  if (availableEngines.length === 0 && !hasTextLayer) {
+    const msg = `No batch OCR engines available (easyocr, paddle, doctr, kraken). All 4 engines are required for image PDFs. Verify installations and check server /health endpoint.`;
+    if (ctx.config.failFast !== false) throw new Error(msg);
+    ctx.addError('s3', new Error(msg), true);
+    ctx.endStage('s3', { pages_affected: 0, notes: 'no_engines' });
+    return ctx;
+  }
+
   // Calibration page: page 2 (first real text page after cover).
   // Winning {method, dpi} is shared via ctx._layoutCalibration before pages 3+ start.
   const calibPageNo = ctx.pages.length >= 2 ? 2 : 1;
@@ -840,14 +861,20 @@ export async function s3Ocr(ctx) {
 
         // ── All batch engines in parallel for this page's crops ─────────────────────────────
         // Engine calls use page.pageNo as scope so concurrent pages don't collide in tmpDir.
+        // Language filtering: engines only run if they support the page's primary script.
+        // This prevents noise (kraken on CJK, doctr on Arabic) while keeping full coverage
+        // for supported scripts. English/Latin/Arabic always get all 4 engines.
         const batchResults = [];
         if (pageCrops.length > 0 && (availableEngines.length > 0 || suryaOk)) {
           const tessLangs = [...new Set(pageCrops.map(c => c.lang))].join(',');
+          const pagePrimaryLang = page._lang ?? 'eng';
+          // Filter each engine by its language capability for this page
+          const pageEngines = availableEngines.filter(e => !e.langs || e.langs(pagePrimaryLang));
           const suryaCrops = suryaOk ? pageCrops.filter(c => cleanRatio(c.tessWords, cleanT) < D_SYNTH_THRESH) : [];
           const scope = `p${page.pageNo}`;
 
           await Promise.all([
-            ...availableEngines.map(engine => (async () => {
+            ...pageEngines.map(engine => (async () => {
               try {
                 const map = await runEngineBatch(engine.tool, engine.label, pageCrops, tessLangs, tmpDir, ctx, scope);
                 batchResults.push({ label: engine.label, map });
