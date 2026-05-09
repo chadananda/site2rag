@@ -5,6 +5,12 @@ Output JSON: {stem: {text, words: [{text,conf,x1,y1,x2,y2}]}}
 """
 import sys, json, os, glob
 
+try:
+    import torch
+    _GPU = torch.cuda.is_available()
+except ImportError:
+    _GPU = False
+
 TESS_TO_PADDLE = {
     'eng': 'en', 'fra': 'fr', 'deu': 'german', 'spa': 'es', 'ita': 'it',
     'por': 'pt', 'nld': 'nl', 'pol': 'pl', 'tur': 'tr', 'rus': 'ru',
@@ -22,7 +28,7 @@ def primary_lang(s):
 def make_ocr_v2(paddle_lang):
     """PaddleOCR 2.x API. angle_cls=False: avoids a buggy cls model on some paddle builds."""
     from paddleocr import PaddleOCR
-    return PaddleOCR(use_angle_cls=False, lang=paddle_lang, use_gpu=False, show_log=False), 'v2'
+    return PaddleOCR(use_angle_cls=False, lang=paddle_lang, use_gpu=_GPU, show_log=False), 'v2'
 
 def make_ocr_v3(paddle_lang):
     """PaddleOCR 3.x API — lang and use_gpu params removed."""

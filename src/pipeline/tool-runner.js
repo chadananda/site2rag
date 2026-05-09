@@ -28,14 +28,9 @@ const PYTHON_SCRIPTS = {
   kraken_ocr:  join(__pyDir, 'kraken_ocr.py'),
 };
 
-// Python worker-agent.py reports tools as 'py:easyocr' etc.; Node tool names are 'easyocr_ocr' etc.
-// This map bridges the gap so GPU workers on boss/Bayans are visible to the router.
-const TOOL_KEY_ALIASES = {
-  easyocr_ocr: 'py:easyocr',
-  paddle_ocr:  'py:paddleocr',
-  doctr_ocr:   'py:doctr',
-  kraken_ocr:  'py:kraken',
-};
+// Python worker-agent.py reports batch engine tools as 'easyocr_ocr' etc. when NFS is available.
+// No aliases needed — workers only expose these tool names when they can handle directory-based input.
+const TOOL_KEY_ALIASES = {};
 
 // Worker health cache — shared across all tool runners in this process
 const _workerCache = new Map(); // registryUrl → { workers, fetchedAt }
@@ -55,8 +50,7 @@ async function fetchWorkers(registryUrl) {
 }
 
 // Score a worker — lower is better.
-// cpu_pct drives primary selection; queue_depth penalizes heavily-queued workers
-// so a worker with pending jobs yields to a fresher one even at similar CPU.
+// cpu_pct drives primary selection; queue_depth penalizes workers with backlogged jobs.
 function scoreWorker(w) {
   const cpu = w.health.cpu_pct ?? 100;
   const q   = w.health.queue_depth ?? 0;
@@ -175,7 +169,8 @@ async function runToolHttp(tool, args, opts, baseUrl) {
   const remappedArgs = args.map(arg => {
     if (typeof arg !== 'string' || !arg.startsWith('/')) return arg;
     if (existsSync(arg)) {
-      // Directories (e.g. surya input/output dirs) pass through — worker accesses via NFS or local path
+      // Directories (e.g. batch OCR input dirs) pass through — worker accesses via NFS or local path.
+      // Only route to workers that report nfs_ok=true for paths outside their local filesystem.
       try { if (statSync(arg).isDirectory()) return arg; } catch {}
 
       const key = `__in_${keyIdx++}${extname(arg)}`;

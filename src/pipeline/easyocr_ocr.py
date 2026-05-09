@@ -42,12 +42,18 @@ except ImportError:
     print(json.dumps({'error': 'easyocr not installed — pip install easyocr'}))
     sys.exit(1)
 
+try:
+    import torch
+    _GPU = torch.cuda.is_available()
+except ImportError:
+    _GPU = False
+
 def run_batch(input_dir, output_json, langs_str):
     langs = parse_langs(langs_str)
     pngs = sorted(glob.glob(os.path.join(input_dir, '*.png')))
     results = {}
     if pngs:
-        reader = easyocr.Reader(langs, gpu=False, verbose=False)
+        reader = easyocr.Reader(langs, gpu=_GPU, verbose=False)
         for png in pngs:
             stem = os.path.splitext(os.path.basename(png))[0]
             try:
@@ -81,7 +87,7 @@ if '--serve' in sys.argv:
             langs = parse_langs(langs_str)
             lang_key = ','.join(sorted(langs))
             if lang_key not in _readers:
-                _readers[lang_key] = easyocr.Reader(langs, gpu=False, verbose=False)
+                _readers[lang_key] = easyocr.Reader(langs, gpu=_GPU, verbose=False)
             reader = _readers[lang_key]
             pngs = sorted(glob.glob(os.path.join(input_dir, '*.png')))
             results = {}
