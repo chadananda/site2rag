@@ -109,6 +109,87 @@ def mem_used_pct():
     except Exception:
         return 0.0
 
+# ── Python script mapping ──────────────────────────────────────────────────────
+# Node tool names (easyocr_ocr etc.) map to Python scripts that must be invoked
+# via sys.executable, not as bare commands. Search common project locations.
+
+def _find_pipeline_scripts_dir():
+    candidates = [
+        os.environ.get('PIPELINE_SCRIPTS_DIR', ''),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'src', 'pipeline'),
+        os.path.expanduser('~/Dropbox/Public/JS/Projects/site2rag/src/pipeline'),
+        os.path.expanduser('~/site2rag/src/pipeline'),
+        '/opt/site2rag/src/pipeline',
+    ]
+    for d in candidates:
+        if d and os.path.isfile(os.path.join(d, 'easyocr_ocr.py')):
+            return d
+    return None
+
+_SCRIPTS_DIR = _find_pipeline_scripts_dir()
+PYTHON_SCRIPTS = {}
+if _SCRIPTS_DIR:
+    for _name in ('easyocr_ocr', 'paddle_ocr', 'doctr_ocr', 'kraken_ocr'):
+        _path = os.path.join(_SCRIPTS_DIR, f'{_name}.py')
+        if os.path.isfile(_path):
+            PYTHON_SCRIPTS[_name] = _path
+
+# Engines that support --serve mode (persistent warm process, eliminates cold-start).
+SERVE_CAPABLE = {'easyocr_ocr', 'paddle_ocr'}
+
+# Warm process pool: tool_name → {'proc': Popen, 'lock': threading.Lock}
+_serve_pool = {}
+_serve_pool_lock = threading.Lock()
+
+def _get_or_start_serve_proc(tool):
+    """Return (proc, lock) for a warm --serve subprocess, starting one if needed."""
+    with _serve_pool_lock:
+        entry = _serve_pool.get(tool)
+        if entry and entry['proc'].poll() is None:
+            return entry['proc'], entry['lock']
+        # Start fresh proc
+        script = PYTHON_SCRIPTS[tool]
+        proc = subprocess.Popen(
+            [sys.executable, script, '--serve'],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL, text=True, bufsize=1,
+        )
+        # Wait for "ready" line (model load)
+        try:
+            ready_line = proc.stdout.readline().strip()
+            if ready_line != 'ready':
+                proc.kill()
+                raise RuntimeError(f'{tool} serve proc did not send "ready": {ready_line!r}')
+        except Exception as e:
+            proc.kill()
+            raise
+        lock = threading.Lock()
+        _serve_pool[tool] = {'proc': proc, 'lock': lock}
+        return proc, lock
+
+def _run_serve_job(tool, input_dir, output_json, langs, timeout):
+    """Send one job to warm serve proc; return (stdout_response, stderr_str)."""
+    proc, lock = _get_or_start_serve_proc(tool)
+    req = json.dumps({'input_dir': input_dir, 'output_json': output_json, 'langs': langs}) + '\n'
+    with lock:
+        try:
+            proc.stdin.write(req)
+            proc.stdin.flush()
+            resp_line = proc.stdout.readline()
+            if not resp_line:
+                raise RuntimeError('serve proc closed stdout')
+            resp = json.loads(resp_line)
+            if 'error' in resp:
+                raise RuntimeError(resp['error'])
+            return resp
+        except Exception:
+            # Kill dead proc so next call restarts it
+            try: proc.kill()
+            except: pass
+            with _serve_pool_lock:
+                _serve_pool.pop(tool, None)
+            raise
+
 # ── Tool probing ───────────────────────────────────────────────────────────────
 
 TOOLS_TO_PROBE = [
@@ -299,17 +380,9 @@ class WorkerHandler(BaseHTTPRequestHandler):
             if not cap['available']:
                 return self.send_json(503, {'error': 'over capacity', **cap})
 
-            # Resolve path: env override → system PATH → venv bin → bare name
-            env_paths = {'surya_ocr': os.environ.get('SURYA_PATH', '')}
-            cmd = (env_paths.get(tool)
-                   or shutil.which(tool)
-                   or shutil.which(tool, path=VENV_BIN)
-                   or tool)
-
-            # Write inputFiles to local tmp dir; remap placeholder keys in args to local paths.
+            # Write inputFiles to local tmp dir; remap placeholder keys in args.
             tmp_dir = None
-            final_args = list(args)
-            out_path_map = {}  # key → local tmp path for output files
+            out_path_map = {}
 
             if input_files or output_paths:
                 tmp_dir = tempfile.mkdtemp(prefix='worker-tool-')
@@ -321,7 +394,23 @@ class WorkerHandler(BaseHTTPRequestHandler):
                     in_path_map[key] = local
                 for key in output_paths:
                     out_path_map[key] = os.path.join(tmp_dir, key)
-                final_args = [in_path_map.get(a) or out_path_map.get(a) or a for a in args]
+                remapped = [in_path_map.get(a) or out_path_map.get(a) or a for a in args]
+            else:
+                remapped = list(args)
+
+            # Resolve command
+            is_check = '--check' in args
+            use_serve = tool in SERVE_CAPABLE and tool in PYTHON_SCRIPTS and not is_check
+            if tool in PYTHON_SCRIPTS:
+                cmd = sys.executable
+                final_args = [PYTHON_SCRIPTS[tool]] + remapped
+            else:
+                env_paths = {'surya_ocr': os.environ.get('SURYA_PATH', '')}
+                cmd = (env_paths.get(tool)
+                       or shutil.which(tool)
+                       or shutil.which(tool, path=VENV_BIN)
+                       or tool)
+                final_args = remapped
 
             sem = get_semaphore(tool)
             with _lock:
@@ -331,13 +420,28 @@ class WorkerHandler(BaseHTTPRequestHandler):
             sem.acquire()
             started = time.time()
             try:
-                result = subprocess.run(
-                    [cmd] + final_args,
-                    capture_output=True,
-                    timeout=timeout,
-                    text=True,
-                )
+                if use_serve:
+                    # Warm serve process — no cold-start model load on repeated calls.
+                    # remapped args for OCR scripts: [input_dir, output_json, langs_str]
+                    pos = [a for a in remapped if not a.startswith('--')]
+                    input_dir_s, output_json_s = pos[0], pos[1]
+                    langs_s = pos[2] if len(pos) > 2 else 'eng'
+                    _run_serve_job(tool, input_dir_s, output_json_s, langs_s, timeout)
+                    result_stdout, result_stderr = '', ''
+                    result_code = 0
+                else:
+                    r = subprocess.run(
+                        [cmd] + final_args,
+                        capture_output=True,
+                        timeout=timeout,
+                        text=True,
+                    )
+                    result_stdout, result_stderr = r.stdout, r.stderr
+                    result_code = r.returncode
                 duration_ms = round((time.time() - started) * 1000)
+
+                if result_code != 0 and not use_serve:
+                    raise subprocess.CalledProcessError(result_code, cmd, result_stdout, result_stderr)
 
                 # Collect output files and return as base64
                 output_files = {}
@@ -353,8 +457,8 @@ class WorkerHandler(BaseHTTPRequestHandler):
                     total_jobs_val = total_jobs
                     total_jobs += 1
                 self.send_json(200, {
-                    'stdout': result.stdout,
-                    'stderr': result.stderr,
+                    'stdout': result_stdout,
+                    'stderr': result_stderr,
                     'duration_ms': duration_ms,
                     'outputFiles': output_files,
                 })
@@ -362,6 +466,8 @@ class WorkerHandler(BaseHTTPRequestHandler):
                 self.send_json(404, {'error': f'tool not found: {tool}', 'code': 'ENOENT'})
             except subprocess.TimeoutExpired:
                 self.send_json(500, {'error': f'timeout after {timeout}s', 'code': 'TIMEOUT'})
+            except subprocess.CalledProcessError as e:
+                self.send_json(500, {'error': e.stderr[:200] if e.stderr else str(e)[:200], 'stdout': e.stdout or '', 'stderr': e.stderr or ''})
             except Exception as e:
                 self.send_json(500, {'error': str(e)[:200], 'stdout': '', 'stderr': ''})
             finally:

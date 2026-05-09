@@ -65,8 +65,8 @@ const BATCH_ENGINES = [
   { label: 'paddle',  script: PADDLE_PY,  tool: 'paddle_ocr',  langs: null },
   // doctr: Latin + CJK; skip for Arabic/Persian/Hebrew (produces garbage)
   { label: 'doctr',   script: DOCTR_PY,   tool: 'doctr_ocr',   langs: (lang) => !RTL_LANGS_S3.has(lang) },
-  // kraken: Latin + Arabic/Persian/Hebrew; skip for CJK (no CJK models)
-  { label: 'kraken',  script: KRAKEN_PY,  tool: 'kraken_ocr',  langs: (lang) => !CJK_LANGS.has(lang) },
+  // kraken: Latin script only; skip for CJK and RTL (produces 0 crops on Arabic/Persian)
+  { label: 'kraken',  script: KRAKEN_PY,  tool: 'kraken_ocr',  langs: (lang) => !CJK_LANGS.has(lang) && !RTL_LANGS_S3.has(lang) },
 ];
 
 const TESS_TO_SURYA = { ara: 'ar', fas: 'fa', heb: 'he', chi_sim: 'zh', 'chi_sim+chi_tra': 'zh', jpn: 'ja', kor: 'ko', rus: 'ru', fra: 'fr', deu: 'de', spa: 'es', ita: 'it', por: 'pt', nld: 'nl', pol: 'pl', tur: 'tr', eng: 'en' };

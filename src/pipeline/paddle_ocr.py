@@ -83,12 +83,7 @@ except ImportError:
     print(json.dumps({'error': 'paddleocr not installed — pip install paddleocr'}))
     sys.exit(1)
 
-if __name__ == '__main__':
-    args = [a for a in sys.argv[1:] if not a.startswith('--')]
-    if len(args) < 3:
-        print(json.dumps({'error': 'usage: paddle_ocr.py <input_dir> <output_json> <langs>'}))
-        sys.exit(1)
-    input_dir, output_json, langs_str = args[0], args[1], args[2]
+def run_batch(input_dir, output_json, langs_str):
     paddle_lang = primary_lang(langs_str)
     pngs = sorted(glob.glob(os.path.join(input_dir, '*.png')))
     results = {}
@@ -98,7 +93,7 @@ if __name__ == '__main__':
             run_fn = run_ocr_v2 if api_ver == 'v2' else run_ocr_v3
         except Exception as e:
             results['_error'] = str(e)
-            pngs = []  # skip processing
+            pngs = []
         for png in pngs:
             stem = os.path.splitext(os.path.basename(png))[0]
             try:
@@ -108,3 +103,45 @@ if __name__ == '__main__':
                 results[stem] = {'text': '', 'words': [], 'error': str(e)}
     with open(output_json, 'w') as f:
         json.dump(results, f)
+
+if '--serve' in sys.argv:
+    # Persistent server mode: read JSON jobs from stdin, write {"ok":true} or {"error":...} to stdout.
+    # OCR models cached per lang — eliminates 44s cold-start on subsequent calls.
+    _ocr_cache = {}  # paddle_lang → (ocr, run_fn)
+    print('ready', flush=True)
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+            input_dir = req['input_dir']
+            output_json = req['output_json']
+            langs_str = req.get('langs', 'eng')
+            paddle_lang = primary_lang(langs_str)
+            if paddle_lang not in _ocr_cache:
+                ocr, api_ver = make_ocr(paddle_lang)
+                _ocr_cache[paddle_lang] = (ocr, run_ocr_v2 if api_ver == 'v2' else run_ocr_v3)
+            ocr, run_fn = _ocr_cache[paddle_lang]
+            pngs = sorted(glob.glob(os.path.join(input_dir, '*.png')))
+            results = {}
+            for png in pngs:
+                stem = os.path.splitext(os.path.basename(png))[0]
+                try:
+                    words = run_fn(ocr, png)
+                    results[stem] = {'text': ' '.join(w['text'] for w in words), 'words': words}
+                except Exception as e:
+                    results[stem] = {'text': '', 'words': [], 'error': str(e)}
+            with open(output_json, 'w') as f:
+                json.dump(results, f)
+            print(json.dumps({'ok': True}), flush=True)
+        except Exception as e:
+            print(json.dumps({'error': str(e)}), flush=True)
+    sys.exit(0)
+
+if __name__ == '__main__':
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    if len(args) < 3:
+        print(json.dumps({'error': 'usage: paddle_ocr.py <input_dir> <output_json> <langs>'}))
+        sys.exit(1)
+    run_batch(args[0], args[1], args[2])

@@ -39,12 +39,16 @@ const RTL_VISION_PROMPT = 'Transcribe all text from this document page. The text
 // SURYA_CHUNK_SIZE moved to D_SURYA_CHUNK above
 
 // Python batch engines — same as s3, run on full-page PNGs in s5.
-// All support Arabic/Persian; run in parallel; outputs feed Haiku synthesis.
+// langs filter: null = always run; function(lang) = run only if true.
+const S5_RTL_LANGS = new Set(['ara', 'fas', 'per', 'heb', 'urd']);
+const S5_CJK_LANGS = new Set(['chi_sim', 'chi_tra', 'chi_sim+jpn', 'chi_sim+chi_tra', 'jpn', 'kor']);
 const S5_BATCH_ENGINES = [
-  { label: 'easyocr', tool: 'easyocr_ocr', script: join(__pyDir, 'easyocr_ocr.py') },
-  { label: 'paddle',  tool: 'paddle_ocr',  script: join(__pyDir, 'paddle_ocr.py')  },
-  { label: 'doctr',   tool: 'doctr_ocr',   script: join(__pyDir, 'doctr_ocr.py')   },
-  { label: 'kraken',  tool: 'kraken_ocr',  script: join(__pyDir, 'kraken_ocr.py')  },
+  { label: 'easyocr', tool: 'easyocr_ocr', script: join(__pyDir, 'easyocr_ocr.py'), langs: null },
+  { label: 'paddle',  tool: 'paddle_ocr',  script: join(__pyDir, 'paddle_ocr.py'),  langs: null },
+  // doctr: Latin + CJK; produces garbage on RTL scripts
+  { label: 'doctr',   tool: 'doctr_ocr',   script: join(__pyDir, 'doctr_ocr.py'),   langs: (l) => !S5_RTL_LANGS.has(l) },
+  // kraken: Latin only; 0 crops on RTL and CJK
+  { label: 'kraken',  tool: 'kraken_ocr',  script: join(__pyDir, 'kraken_ocr.py'),  langs: (l) => !S5_RTL_LANGS.has(l) && !S5_CJK_LANGS.has(l) },
 ];
 
 async function checkPythonEngine(toolName, ctx) {
@@ -471,7 +475,11 @@ export async function s5Vision(ctx) {
         s3AlreadyFull ? Promise.resolve(false) : checkSuryaCli(ctx),
         ...S5_BATCH_ENGINES.map(e => checkPythonEngine(e.tool, ctx)),
       ]);
-      const availEngines = S5_BATCH_ENGINES.filter((_, i) => engineOks[i]);
+      // Apply language capability filter — skip engines that don't support the dominant script
+      const domLang = visionPages.map(p => p._lang ?? 'eng')
+        .reduce((acc, l) => { acc[l] = (acc[l] ?? 0) + 1; return acc; }, {});
+      const docLangS5 = Object.entries(domLang).sort((a, b) => b[1] - a[1])[0]?.[0] ?? 'eng';
+      const availEngines = S5_BATCH_ENGINES.filter((e, i) => engineOks[i] && (e.langs == null || e.langs(docLangS5)));
 
       // Fail fast: local OCR engines are required for image PDFs. Cloud vision is not a substitute
       // for missing software. Fail the job now rather than spending $0.10-$0.20/page on cloud APIs.

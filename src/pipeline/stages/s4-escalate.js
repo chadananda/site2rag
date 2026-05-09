@@ -105,7 +105,7 @@ async function fetchBossDraft(pngPath, ctx) {
   try {
     const b64 = readFileSync(pngPath).toString('base64');
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 60000);
+    const timer = setTimeout(() => ctrl.abort(), 25000);
     const res = await fetch(`${bossUrl}/chat/completions`, {
       method: 'POST', signal: ctrl.signal,
       headers: { 'Content-Type': 'application/json' },

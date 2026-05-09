@@ -35,12 +35,7 @@ except ImportError:
     print(json.dumps({'error': 'easyocr not installed — pip install easyocr'}))
     sys.exit(1)
 
-if __name__ == '__main__':
-    args = [a for a in sys.argv[1:] if not a.startswith('--')]
-    if len(args) < 3:
-        print(json.dumps({'error': 'usage: easyocr_ocr.py <input_dir> <output_json> <langs>'}))
-        sys.exit(1)
-    input_dir, output_json, langs_str = args[0], args[1], args[2]
+def run_batch(input_dir, output_json, langs_str):
     langs = parse_langs(langs_str)
     pngs = sorted(glob.glob(os.path.join(input_dir, '*.png')))
     results = {}
@@ -61,3 +56,51 @@ if __name__ == '__main__':
                 results[stem] = {'text': '', 'words': [], 'error': str(e)}
     with open(output_json, 'w') as f:
         json.dump(results, f)
+
+if '--serve' in sys.argv:
+    # Persistent server mode: read JSON jobs from stdin, write {"ok":true} or {"error":...} to stdout.
+    # Model loads are cached per lang set — eliminates cold-start on subsequent calls.
+    _readers = {}
+    print('ready', flush=True)
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+            input_dir = req['input_dir']
+            output_json = req['output_json']
+            langs_str = req.get('langs', 'eng')
+            langs = parse_langs(langs_str)
+            lang_key = ','.join(sorted(langs))
+            if lang_key not in _readers:
+                _readers[lang_key] = easyocr.Reader(langs, gpu=False, verbose=False)
+            reader = _readers[lang_key]
+            pngs = sorted(glob.glob(os.path.join(input_dir, '*.png')))
+            results = {}
+            for png in pngs:
+                stem = os.path.splitext(os.path.basename(png))[0]
+                try:
+                    dets = reader.readtext(png, detail=1)
+                    words = []
+                    for bbox, text, conf in dets:
+                        xs, ys = [p[0] for p in bbox], [p[1] for p in bbox]
+                        words.append({'text': text, 'conf': round(conf * 100),
+                                      'x1': round(min(xs)), 'y1': round(min(ys)),
+                                      'x2': round(max(xs)), 'y2': round(max(ys))})
+                    results[stem] = {'text': ' '.join(w['text'] for w in words), 'words': words}
+                except Exception as e:
+                    results[stem] = {'text': '', 'words': [], 'error': str(e)}
+            with open(output_json, 'w') as f:
+                json.dump(results, f)
+            print(json.dumps({'ok': True}), flush=True)
+        except Exception as e:
+            print(json.dumps({'error': str(e)}), flush=True)
+    sys.exit(0)
+
+if __name__ == '__main__':
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    if len(args) < 3:
+        print(json.dumps({'error': 'usage: easyocr_ocr.py <input_dir> <output_json> <langs>'}))
+        sys.exit(1)
+    run_batch(args[0], args[1], args[2])
