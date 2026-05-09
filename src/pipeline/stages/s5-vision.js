@@ -1,28 +1,31 @@
-// Stage 5: Vision model escalation for pages Tesseract couldn't handle.
+// Stage 5: Vision escalation — image optimization → all OCR engines → Haiku synthesis → cloud fallback.
 // Exports: s5Vision
-//   s5Vision(ctx) → ctx  — Phase 1: Surya CLI batch; Phase 2: per-page backend chain
-// CONFIG: s5Mode:'haiku'|'sonnet' — forces ALL pages through named Anthropic model
-//         escalation.suryaVision:2 — min importance for Surya Phase 1
-//         escalation.localVision   — min importance for Phase 2 backends
-//         maxTokenBudget           — hard token cap; checked per page via withinBudget()
-//         toolBackends.surya_ocr   — route Surya to remote GPU host
-//         toolBackends.pdftoppm    — route rasterization to remote host
-// ERRORS: surya_ocr ENOENT → recoverable; surya batch fail → recoverable
-//         backend chain exhausted → page skipped (recoverable)
-//         pdftoppm fail → page skipped (recoverable)
+//   s5Vision(ctx) → ctx
+// CONFIG: escalation.suryaVision:2 — min importance for Surya/batch engines
+//         escalation.localVision   — min importance for HTTP backends
+//         escalation.cloudVision   — min importance for cloud APIs (azure/google/claude)
+//         maxTokenBudget           — hard token cap; checked per page
+//         toolBackends.*           — route tools to worker pool
+// ERRORS: all engine failures are recoverable; cloud backends are last resort only
 // CONTRACT:
-//   Reads:  ctx.pages[n]._needsFullVision, _bucketed, words, _pngPath, _lang, _suryaText
+//   Reads:  ctx.pages[n]._needsFullVision, _bucketed, words, _pngPath, _lang
 //   Writes: ctx.pages[n].visionMd — final corrected markdown; clears page.words for vision pages
 //
-// Phase 1 — Surya pre-pass (batch): surya_ocr CLI, chunked by SURYA_CHUNK_SIZE pages.
-//           Skipped if s3 already ran Surya (ctx.pages.some(p=>p._suryaText)).
-// Phase 2 — Per-page backend chain: s5Mode model → boss → azure → google → claude-opus.
-//           Only pages surya didn't cover.
-import { shouldRun, withinBudget, llmCost, pLimit } from '../config.js'; // shouldRun,withinBudget,llmCost,pLimit
+// Phase 1 — Image enhancement: preprocess full-page PNGs before OCR.
+// Phase 2 — All batch OCR engines in parallel: surya + easyocr + paddle + doctr + kraken.
+// Phase 3 — Haiku synthesis: combine all engine outputs into corrected Markdown (~$0.01/page).
+//           Pages with ANY engine output go here — avoids expensive cloud APIs.
+// Phase 4 — Cloud fallback (last resort): boss → azure → google → claude-opus.
+//           Only for pages where no batch engine produced usable text.
+import { shouldRun, withinBudget, llmCost, pLimit } from '../config.js';
+import { queryWorkerCapacity } from '../tool-runner.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
-import { join, basename } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { getTmpDir } from '../../config.js';
+
+const __pyDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 // ── config defaults ──────────────────────────────────────────────────────────
 const D_SURYA_CHUNK = 20;     // SURYA_CHUNK_SIZE — pages per surya_ocr batch call
 const D_MAX_PNG_MB  = 4;      // max PNG size in MB — Claude API limits to 5MB; stay under with headroom
@@ -34,6 +37,56 @@ const HANDWRITING_PROMPT = 'Carefully transcribe all handwritten and printed tex
 const RTL_VISION_PROMPT = 'Transcribe all text from this document page. The text is in Arabic or Persian script (right-to-left). Output only the transcribed text in clean Markdown. Preserve paragraph breaks and list structure. For tables use Markdown pipe syntax (| col | col |). Do NOT use LaTeX notation, \\begin{array}, \\text{}, or mathematical markup. Output the actual Arabic/Persian words and numbers as they appear — do not transliterate. Do not add commentary.';
 
 // SURYA_CHUNK_SIZE moved to D_SURYA_CHUNK above
+
+// Python batch engines — same as s3, run on full-page PNGs in s5.
+// All support Arabic/Persian; run in parallel; outputs feed Haiku synthesis.
+const S5_BATCH_ENGINES = [
+  { label: 'easyocr', tool: 'easyocr_ocr', script: join(__pyDir, 'easyocr_ocr.py') },
+  { label: 'paddle',  tool: 'paddle_ocr',  script: join(__pyDir, 'paddle_ocr.py')  },
+  { label: 'doctr',   tool: 'doctr_ocr',   script: join(__pyDir, 'doctr_ocr.py')   },
+  { label: 'kraken',  tool: 'kraken_ocr',  script: join(__pyDir, 'kraken_ocr.py')  },
+];
+
+async function checkPythonEngine(toolName, ctx) {
+  try {
+    const { stdout } = await ctx.run(toolName, ['--check'], { timeout: 15000 });
+    return stdout.trim() === 'ok';
+  } catch { return false; }
+}
+
+// Run one batch engine over full-page PNGs. Returns Map<pageNo, text>.
+async function runEngineOnPages(engine, pages, pageToPath, langs, tmpDir, ctx) {
+  const inputDir   = join(tmpDir, `s5-${engine.label}-in`);
+  const outputJson = join(tmpDir, `s5-${engine.label}-out.json`);
+  mkdirSync(inputDir, { recursive: true });
+  for (const page of pages) {
+    const pngPath = pageToPath.get(page.pageNo);
+    if (pngPath && existsSync(pngPath))
+      writeFileSync(join(inputDir, `p${page.pageNo}.png`), readFileSync(pngPath));
+  }
+  try {
+    await ctx.run(engine.tool, [inputDir, outputJson, langs], { timeout: 600000 });
+    if (!existsSync(outputJson)) return new Map();
+    const results = JSON.parse(readFileSync(outputJson, 'utf8'));
+    const map = new Map();
+    for (const [stem, val] of Object.entries(results)) {
+      const pageNo = parseInt(stem.replace(/^p/, ''), 10);
+      if (!isNaN(pageNo) && val.text?.trim()) map.set(pageNo, val.text.trim());
+    }
+    return map;
+  } catch { return new Map(); }
+}
+
+// Enhance a full-page PNG for OCR using preprocess_image.py.
+// Routes through ctx.run so tests can mock without spawning a real subprocess.
+async function enhancePagePng(pngPath, outPath, ctx) {
+  try {
+    const { stdout } = await ctx.run('python3',
+      [join(__pyDir, 'preprocess_image.py'), pngPath, outPath], { timeout: 30000 });
+    const result = JSON.parse(stdout.trim() || '{}');
+    return result.enhanced && existsSync(outPath) ? outPath : pngPath;
+  } catch { return pngPath; }
+}
 
 // Map Tesseract lang codes → Surya lang codes
 const TESS_TO_SURYA = {
@@ -180,13 +233,25 @@ async function runSuryaBatch(visionPages, ctx) {
   const docHash = sha256(ctx.docId).slice(0, 12);
   const base = join(getTmpDir(), `site2rag-surya-${docHash}`);
 
-  // Process in chunks to avoid OOM on large documents
+  // Build chunk list
+  const chunks = [];
   for (let i = 0; i < visionPages.length; i += D_SURYA_CHUNK) {
-    const chunk = visionPages.slice(i, i + D_SURYA_CHUNK);
-    const chunkDir = `${base}-chunk${Math.floor(i / D_SURYA_CHUNK)}`;
+    const idx = Math.floor(i / D_SURYA_CHUNK);
+    const chunkDir = `${base}-chunk${idx}`;
     mkdirSync(chunkDir, { recursive: true });
-    await runSuryaChunk(chunk, chunkDir, ctx);
+    chunks.push({ pages: visionPages.slice(i, i + D_SURYA_CHUNK), chunkDir });
   }
+
+  // Parallelize chunks across available Surya workers.
+  // Each worker has exactly 1 Surya slot (GPU-bound), so parallelism = number of Surya workers.
+  // Falls back to 1 (sequential) when not using workerPool or workers unreachable —
+  // sequential is correct for a single GPU and avoids OOM from concurrent model loads.
+  const suryaSlots = await queryWorkerCapacity('surya_ocr', ctx.config).catch(() => null);
+  const chunkLimit = pLimit(suryaSlots ?? 1);
+
+  await Promise.all(chunks.map(({ pages, chunkDir }) =>
+    chunkLimit(() => runSuryaChunk(pages, chunkDir, ctx))
+  ));
 }
 
 // ── Phase 2: per-page HTTP backends ──────────────────────────────────────────
@@ -285,23 +350,26 @@ async function visionViaCloud(b64, apiKey, model, prompt = VISION_PROMPT) {
   return { text, tokens_in: msg.usage?.input_tokens ?? 0, tokens_out: msg.usage?.output_tokens ?? 0, cost };
 }
 
-async function synthesizeWithOcrContext(b64, apiKey, model, page) {
+// Synthesize corrected text from page image + all available OCR engine outputs.
+// engineOutputs: { surya?: text, easyocr?: text, paddle?: text, doctr?: text, kraken?: text }
+async function synthesizeWithOcrContext(b64, apiKey, model, page, engineOutputs = {}) {
   const { default: Anthropic } = await import('@anthropic-ai/sdk');
   const client = new Anthropic({ apiKey, timeout: 120000 });
   const ocrDrafts = [];
   if (page?.words?.length > 0) {
     const tessText = page.words.map(w => w.text).join(' ').replace(/\s+/g, ' ').trim();
-    if (tessText) ocrDrafts.push(`Tesseract OCR:\n${tessText.slice(0, 2000)}`);
+    if (tessText) ocrDrafts.push(`Tesseract:\n${tessText.slice(0, 1500)}`);
   }
-  if (page?._suryaText) {
-    ocrDrafts.push(`Secondary OCR (Surya):\n${page._suryaText.slice(0, 2000)}`);
+  // Add all engine outputs as context drafts
+  for (const [label, text] of Object.entries(engineOutputs)) {
+    if (text?.trim()) ocrDrafts.push(`${label.charAt(0).toUpperCase() + label.slice(1)}:\n${text.slice(0, 1500)}`);
   }
   const lang = page?._lang ?? 'eng';
   const isRtlPage = RTL_LANGS.has(lang);
   const basePrompt = isRtlPage ? RTL_VISION_PROMPT : VISION_PROMPT;
   const rtlNote = isRtlPage ? ' The text is in Arabic or Persian (right-to-left). Do NOT use LaTeX. Do NOT use \\begin{array}.' : '';
   const prompt = ocrDrafts.length > 0
-    ? `You are correcting OCR output for a scanned historical document page.${rtlNote}\n\nOCR drafts:\n\n${ocrDrafts.join('\n\n')}\n\nReview the page image carefully and provide the corrected, accurate transcription. Output only the transcribed text in clean Markdown. Use Markdown pipe tables (| col | col |), NOT LaTeX. Preserve paragraph breaks, headings, and structure.`
+    ? `You are correcting OCR output for a scanned historical document page.${rtlNote}\n\nOCR engine drafts (use these as context — some may be better than others):\n\n${ocrDrafts.join('\n\n')}\n\nReview the page image and produce the accurate transcription. Output only the text in clean Markdown. Use pipe tables (| col | col |), NOT LaTeX. Preserve paragraph breaks and headings.`
     : basePrompt;
   const msg = await client.messages.create({
     model, max_tokens: 2048,
@@ -345,14 +413,6 @@ async function buildBackendChain(ctx) {
         chain.push({ name, call: (b64) => visionViaCloud(b64, ctx.config.apiKey, name, visionPrompt) });
     }
   }
-  // s5Mode: inject preferred model at front of chain for synthesis with OCR context
-  if (ctx.config.s5Mode && ctx.config.apiKey) {
-    const modeModel = ctx.config.s5Mode === 'haiku' ? 'claude-haiku-4-5-20251001' :
-                      ctx.config.s5Mode === 'sonnet' ? 'claude-sonnet-4-6' : null;
-    if (modeModel) {
-      chain.unshift({ name: modeModel, call: (b64, _lang, page) => synthesizeWithOcrContext(b64, ctx.config.apiKey, modeModel, page) });
-    }
-  }
   return chain;
 }
 
@@ -364,76 +424,169 @@ export async function s5Vision(ctx) {
   ctx.beginStage('s5');
   let pagesAffected = 0, totalCost = 0, totalIn = 0, totalOut = 0;
 
+  const docHash = sha256(ctx.docId).slice(0, 12);
+  const tmpDir  = join(getTmpDir(), `site2rag-s5-${docHash}`);
+  mkdirSync(tmpDir, { recursive: true });
+
   try {
-    const forcedByMode = !!ctx.config.s5Mode;
-    // visionQualityGate: run vision on any page whose word confidence is below this threshold.
-    // Default 0.90 — even "good" Tesseract output can be improved by Surya/cloud vision.
-    // Set to 1.0 in config to run vision on ALL pages; 0.0 to keep old behavior (dirty-only).
     const visionQualityGate = ctx.config.visionQualityGate ?? 0.90;
     for (const p of ctx.pages) p._visionQualityGate = visionQualityGate;
-    const visionPages = ctx.pages.filter(p => forcedByMode || shouldVisionPage(p).shouldVision);
+    const visionPages = ctx.pages.filter(p => shouldVisionPage(p).shouldVision);
+    if (!visionPages.length) return ctx;
 
-    // Phase 1: Surya batch pre-pass (free, run on all vision-eligible pages).
-    // s3 already ran Surya block-by-block; s5 runs it on full-page images for better context.
-    const difficulty = ctx.quality?.baseline?.processing_difficulty ?? 0;
-    const suryaGate = ctx.config.escalation?.suryaVision ?? 2;
-    // s3 runs Surya block-by-block on crops; s5 runs it on full-page images (better for layout/tables).
-    // Run s5 Surya even if s3 ran Surya, unless s3 already produced full-page visionMd.
-    const s3RanSuryaFull = ctx.pages.some(p => p.visionMd); // already have full-page output
-    if (!s3RanSuryaFull && visionPages.length > 0 && (ctx.importance >= suryaGate || difficulty >= 0.3)) {
-      const suryaOk = await checkSuryaCli(ctx);
-      if (!suryaOk) {
-        ctx.addError('s5', new Error(`surya_ocr CLI not found — install surya or set SURYA_PATH`), true);
-      } else {
-        try {
-          await runSuryaBatch(visionPages, ctx);
-          const suryaCount = visionPages.filter(p => p._suryaMd).length;
-          if (suryaCount) ctx.addDecision('s5', 'surya_batch', `${suryaCount}/${visionPages.length} pages`);
-        } catch (e) {
-          ctx.addError('s5', new Error(`surya batch failed: ${e.message}`), true);
-        }
+    const difficulty  = ctx.quality?.baseline?.processing_difficulty ?? 0;
+    const suryaGate   = ctx.config.escalation?.suryaVision ?? 2;
+    const runEngines  = visionPages.length > 0 && (ctx.importance >= suryaGate || difficulty >= 0.3);
+
+    // ── Phase 1: Enhance full-page PNGs before feeding to any OCR engine ──────
+    // preprocess_image.py detects & corrects contrast/skew/noise per page.
+    const pageToPath = new Map(); // pageNo → best available PNG path
+    await Promise.all(visionPages.map(async page => {
+      let pngBuf;
+      try { pngBuf = await getPagePng(page, ctx); } catch { return; }
+      if (!pngBuf) return;
+      const rawPath = join(tmpDir, `p${page.pageNo}_raw.png`);
+      writeFileSync(rawPath, pngBuf);
+      const enhPath = join(tmpDir, `p${page.pageNo}_enh.png`);
+      const bestPath = await enhancePagePng(rawPath, enhPath, ctx);
+      page._s5PngPath = bestPath; // track for cloud fallback
+      pageToPath.set(page.pageNo, bestPath);
+    }));
+
+    // ── Phase 2: All batch OCR engines in parallel ─────────────────────────────
+    // surya + easyocr + paddle + doctr + kraken — all support Arabic/Persian.
+    // Each engine processes ALL vision pages in one process (amortizes model load).
+    // Results keyed by pageNo; collected into pageEngineOutputs for Haiku synthesis.
+    const pageEngineOutputs = new Map(); // pageNo → {surya?, easyocr?, paddle?, doctr?, kraken?}
+    for (const page of visionPages) pageEngineOutputs.set(page.pageNo, {});
+
+    if (runEngines) {
+      const s3AlreadyFull = ctx.pages.some(p => p.visionMd);
+      const langs = [...new Set(visionPages.map(p => TESS_TO_SURYA[p._lang] ?? 'en'))].join(',');
+
+      // Check engine availability in parallel
+      const [suryaOk, ...engineOks] = await Promise.all([
+        s3AlreadyFull ? Promise.resolve(false) : checkSuryaCli(ctx),
+        ...S5_BATCH_ENGINES.map(e => checkPythonEngine(e.tool, ctx)),
+      ]);
+      const availEngines = S5_BATCH_ENGINES.filter((_, i) => engineOks[i]);
+
+      // Fail fast: local OCR engines are required for image PDFs. Cloud vision is not a substitute
+      // for missing software. Fail the job now rather than spending $0.10-$0.20/page on cloud APIs.
+      if (!suryaOk && availEngines.length === 0) {
+        const missing = S5_BATCH_ENGINES.map(e => e.label).join(', ');
+        throw new Error(
+          `No OCR engines available for ${visionPages.length} image page(s). ` +
+          `Install all required engines: ${missing}. ` +
+          `Check scripts exist in pipeline dir and run: python3 <script>.py --check. ` +
+          `Cloud vision APIs are not a fallback for missing software.`
+        );
       }
+
+      ctx.addDecision('s5', 'engines', [
+        suryaOk ? 'surya' : null,
+        ...availEngines.map(e => e.label),
+      ].filter(Boolean).join(', ') || 'none');
+
+      // Run surya (chunked) + all batch engines concurrently
+      await Promise.all([
+        suryaOk ? (async () => {
+          try {
+            await runSuryaBatch(visionPages, ctx);
+            for (const page of visionPages) {
+              if (page._suryaMd) {
+                pageEngineOutputs.get(page.pageNo).surya = page._suryaMd;
+                delete page._suryaMd;
+              }
+            }
+            const n = [...pageEngineOutputs.values()].filter(o => o.surya).length;
+            if (n) ctx.addDecision('s5', 'surya_batch', `${n}/${visionPages.length} pages`);
+          } catch (e) { ctx.addError('s5', new Error(`surya: ${e.message}`), true); }
+        })() : Promise.resolve(),
+
+        ...availEngines.map(engine => (async () => {
+          try {
+            const map = await runEngineOnPages(engine, visionPages, pageToPath, langs, tmpDir, ctx);
+            for (const [pageNo, text] of map) {
+              if (pageEngineOutputs.has(pageNo)) pageEngineOutputs.get(pageNo)[engine.label] = text;
+            }
+            ctx.addDecision('s5', `${engine.label}_batch`, `${map.size}/${visionPages.length} pages`);
+          } catch (e) { ctx.addError('s5', new Error(`${engine.label}: ${e.message}`), true); }
+        })()),
+      ]);
     }
 
-    // Phase 2: per-page chain for pages surya didn't cover
-    const chain = await buildBackendChain(ctx);
-    const remainingPages = visionPages.filter(p => !p._suryaMd);
+    // ── Phase 3: Haiku synthesis for pages with any engine or Tesseract output (~$0.01/page) ─
+    // Pages where at least one engine produced text get Haiku synthesis with image context.
+    // Pages where engines produced nothing but Tesseract has words also use Haiku (not cloud).
+    // Only pages with zero output from all sources (incl. Tesseract) go to cloud Phase 4.
+    const pagesNeedingCloud = [];
+    const synthModel = 'claude-haiku-4-5-20251001';
+    const synthLimit = pLimit(ctx.config.visionConcurrency ?? 4);
 
-    if (remainingPages.length > 0 && chain.length === 0) {
-      ctx.addDecision('s5', 'skip', 'no HTTP vision backend available');
-    }
+    await Promise.all(visionPages.map(page => synthLimit(async () => {
+      const outputs = pageEngineOutputs.get(page.pageNo) ?? {};
+      const hasAnyOutput = Object.values(outputs).some(t => t?.trim());
+      const hasTesseract = (page.words?.length ?? 0) > 0;
 
-    // Commit surya results to visionMd — always use surya when available (full-page > block-level)
-    for (const page of visionPages) {
-      const { needsFull } = shouldVisionPage(page);
-      if (page._suryaMd) {
-        const suryaText = deduplicateBlocks(page._suryaMd.trim());
-        delete page._suryaMd;
-        // Only replace existing words if surya produced meaningful text
-        if (suryaText && suryaText.length > 20) {
-          page.visionMd = suryaText;
+      // If no engine AND no Tesseract output → truly blank; only this goes to cloud
+      if (!hasAnyOutput && !hasTesseract) { pagesNeedingCloud.push(page); return; }
+      if (!ctx.config.apiKey) {
+        // No API key — use best engine output directly (surya preferred, then first available)
+        const bestText = outputs.surya || Object.values(outputs).find(t => t?.trim()) || '';
+        if (bestText) {
+          page.visionMd = deduplicateBlocks(bestText.trim());
+          const { needsFull } = shouldVisionPage(page);
           if (needsFull) page.words = [];
           pagesAffected++;
-          ctx.addDecision('s5', `page_${page.pageNo}`, 'surya', page.visionMd.length);
-        }
+          ctx.addDecision('s5', `page_${page.pageNo}`, 'engine_direct', page.visionMd.length);
+        } else { pagesNeedingCloud.push(page); }
+        return;
       }
+      if (!withinBudget(ctx, 2000)) {
+        ctx.addDecision('s5', 'budget_stop', `page ${page.pageNo}: token budget exhausted`);
+        pagesNeedingCloud.push(page); return;
+      }
+
+      // Read the enhanced PNG for the synthesis image context
+      const pngPath = page._s5PngPath;
+      if (!pngPath || !existsSync(pngPath)) { pagesNeedingCloud.push(page); return; }
+      const b64 = readFileSync(pngPath).toString('base64');
+
+      try {
+        const result = await synthesizeWithOcrContext(b64, ctx.config.apiKey, synthModel, page, outputs);
+        const cleanText = deduplicateBlocks(result.text.trim());
+        if (hasLatexArtifacts(cleanText)) page._visionHasLatex = true;
+        page.visionMd = cleanText;
+        const { needsFull } = shouldVisionPage(page);
+        if (needsFull) page.words = [];
+        totalIn += result.tokens_in; totalOut += result.tokens_out; totalCost += result.cost;
+        pagesAffected++;
+        const engineNames = Object.keys(outputs).join('+');
+        ctx.addDecision('s5', `page_${page.pageNo}`, `haiku+[${engineNames}]`, page.visionMd.length);
+      } catch (e) {
+        ctx.addDecision('s5', `haiku_failed_p${page.pageNo}`, e.message);
+        pagesNeedingCloud.push(page);
+      }
+    })));
+
+    // ── Phase 4: Cloud fallback — only pages with zero output from ALL sources ───
+    // boss → azure → google → claude-opus. Only for pages where no engine AND no Tesseract produced text.
+    // This means genuinely unreadable scans (handwriting, extreme degradation) — not software failures.
+    const chain = await buildBackendChain(ctx);
+    if (pagesNeedingCloud.length > 0 && chain.length === 0) {
+      ctx.addDecision('s5', 'cloud_skip', `${pagesNeedingCloud.length} pages need cloud but no backend configured`);
     }
 
-    // Per-page HTTP backends — all remaining pages in parallel, capped at 4
-    // (vision API calls are slow individually; 4 concurrent saturates typical API throughput)
-    const visionLimit = pLimit(4);
-    await Promise.all(remainingPages.map(page => visionLimit(async () => {
+    const cloudLimit = pLimit(ctx.config.visionConcurrency ?? 4);
+    await Promise.all(pagesNeedingCloud.map(page => cloudLimit(async () => {
       if (!withinBudget(ctx, 2000)) {
         ctx.addDecision('s5', 'budget_stop', `page ${page.pageNo}: token budget exhausted`);
         return;
       }
-
-      let pngBuf;
-      try { pngBuf = await getPagePng(page, ctx); }
-      catch (e) { ctx.addError('s5', new Error(`page ${page.pageNo} PNG failed: ${e.message}`), true); return; }
-      if (!pngBuf) { ctx.addDecision('s5', `page_${page.pageNo}`, 'skip: oversized PNG'); return; }
-
-      const b64 = pngBuf.toString('base64');
+      const pngPath = page._s5PngPath;
+      if (!pngPath || !existsSync(pngPath)) return;
+      const b64 = readFileSync(pngPath).toString('base64');
       const lang = page._lang ?? 'eng';
       let result = null, usedBackend = null;
 
@@ -441,42 +594,33 @@ export async function s5Vision(ctx) {
         try { result = await backend.call(b64, lang, page); usedBackend = backend.name; break; }
         catch (e) { ctx.addDecision('s5', `${backend.name}_failed`, `page ${page.pageNo}: ${e.message}`); }
       }
-
       if (!result) return;
 
-      const { needsFull } = shouldVisionPage(page);
-      let cleanText = deduplicateBlocks(result.text.trim());
-      // Detect and flag LaTeX artifacts — model failure on image (common with local LLaVA on Arabic)
-      if (hasLatexArtifacts(cleanText)) {
-        ctx.addDecision('s5', `page_${page.pageNo}_latex_detected`, `${usedBackend}: LaTeX artifacts in output — marking as low quality`);
-        page._visionHasLatex = true;
-        // Keep the text but mark it; s8 will still export it as a fallback
-      }
+      const cleanText = deduplicateBlocks(result.text.trim());
+      if (hasLatexArtifacts(cleanText)) page._visionHasLatex = true;
       page.visionMd = cleanText;
+      const { needsFull } = shouldVisionPage(page);
       if (needsFull) page.words = [];
-      totalIn += result.tokens_in;
-      totalOut += result.tokens_out;
-      totalCost += result.cost;
+      totalIn += result.tokens_in; totalOut += result.tokens_out; totalCost += result.cost;
       pagesAffected++;
       ctx.addDecision('s5', `page_${page.pageNo}`, usedBackend, page.visionMd.length);
     })));
 
-    // Record quality after vision: coverage × content quality (penalize LaTeX artifacts)
+    // Record quality
     if (pagesAffected > 0) {
-      const totalPages = ctx.pages.length;
-      const visionCoverage = pagesAffected / totalPages;
+      const visionCoverage = pagesAffected / ctx.pages.length;
       const latexPages = visionPages.filter(p => p._visionHasLatex).length;
-      const latexPenalty = latexPages / Math.max(1, visionPages.length); // 0–1 fraction of bad pages
+      const latexPenalty = latexPages / Math.max(1, visionPages.length);
       const s3Score = ctx.quality.perStage['s3'] ?? ctx.quality.baseline?.composite_score ?? 0;
-      // Vision fills gaps s3 missed — estimate combined quality, discounting for LaTeX failures
       const s5Score = Math.min(1, (s3Score + visionCoverage * (1 - s3Score)) * (1 - latexPenalty * 0.8));
-      if (latexPenalty > 0) ctx.addDecision('s5', 'latex_quality_penalty', `${latexPages}/${visionPages.length} pages have LaTeX artifacts`);
+      if (latexPenalty > 0) ctx.addDecision('s5', 'latex_penalty', `${latexPages}/${visionPages.length} pages`);
       ctx.recordStageQuality('s5', Math.round(s5Score * 1000) / 1000);
     }
   } catch (err) {
     ctx.addError('s5', err, true);
     if (ctx.config.failFast) throw err;
   } finally {
+    try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
     ctx.endStage('s5', { pages_affected: pagesAffected, tokens_in: totalIn, tokens_out: totalOut, cost_usd: totalCost });
   }
 

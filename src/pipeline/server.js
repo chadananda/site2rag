@@ -19,10 +19,14 @@ import { createServer } from 'http';
 import { readFileSync, existsSync } from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { PIPELINE_VERSION } from './context.js';
 import { runPipeline } from './index.js';
 import { openJobStore } from './job-store.js';
 import { getTmpDir } from '../config.js';
+
+const __pyDir = join(dirname(fileURLToPath(import.meta.url)), '.');
 
 const execFileAsync = promisify(execFile);
 const log = (msg) => console.log(`[pipeline-server] ${new Date().toISOString().slice(0,19)} ${msg}`);
@@ -54,6 +58,14 @@ for (const url of SEED_WORKERS) {
 }
 
 const REQUIRED_TOOLS = ['pdftoppm', 'tesseract', 'gs', 'surya_ocr', 'unpaper', 'convert'];
+// Python OCR engines — required for cost-effective image PDF processing.
+// Missing engines force expensive cloud vision fallback ($0.10-$0.20/page vs $0.01/page with local engines).
+const PYTHON_OCR_SCRIPTS = [
+  { name: 'easyocr', script: join(__pyDir, 'easyocr_ocr.py') },
+  { name: 'paddle',  script: join(__pyDir, 'paddle_ocr.py')  },
+  { name: 'doctr',   script: join(__pyDir, 'doctr_ocr.py')   },
+  { name: 'kraken',  script: join(__pyDir, 'kraken_ocr.py')  },
+];
 const OPTIONAL_TOOLS = [];
 
 // Resolve tool name to actual command path (mirrors ToolRunner logic)
@@ -110,17 +122,36 @@ async function checkDiskSpace() {
   }
 }
 
+// Check Python OCR engine: script must exist AND library must be importable.
+// Missing scripts or libraries cause silent cloud escalation — both are required.
+async function checkPythonOcrEngine({ name, script }) {
+  if (!existsSync(script)) return { ok: false, error: `script not found: ${script}` };
+  try {
+    const { stdout } = await execFileAsync('python3', [script, '--check'], { timeout: 15000 });
+    const ok = stdout.trim() === 'ok';
+    return ok ? { ok: true } : { ok: false, error: `library not importable (python3 ${script} --check returned: ${stdout.trim().slice(0, 60)})` };
+  } catch (e) {
+    return { ok: false, error: e.message.slice(0, 120) };
+  }
+}
+
 async function checkDeps(config = {}) {
-  const [required, optional, disk] = await Promise.all([
+  const [required, optional, pythonEngines, disk] = await Promise.all([
     Promise.all(REQUIRED_TOOLS.map(async t => [t, await probeTool(t, config)])),
     Promise.all(OPTIONAL_TOOLS.map(async t => [t, await probeTool(t, config)])),
+    Promise.all(PYTHON_OCR_SCRIPTS.map(async e => [e.name, await checkPythonOcrEngine(e)])),
     checkDiskSpace(),
   ]);
   const deps = {};
   for (const [t, r] of required) deps[t] = { ...r, required: true };
   for (const [t, r] of optional) deps[t] = { ...r, required: false };
+  for (const [t, r] of pythonEngines) {
+    deps[`python_ocr_${t}`] = { ...r, required: true };
+    if (!r.ok) log(`WARN: python OCR engine '${t}' unavailable — image PDFs will use expensive cloud fallback: ${r.error}`);
+  }
   const missing_required = [
     ...required.filter(([, r]) => !r.ok).map(([t]) => t),
+    ...pythonEngines.filter(([, r]) => !r.ok).map(([t]) => `python_ocr_${t}`),
     ...(!disk.ok ? [`disk: ${disk.error}`] : []),
   ];
   return { deps, missing_required, disk, healthy: missing_required.length === 0 };
@@ -129,7 +160,7 @@ async function checkDeps(config = {}) {
 export async function startPipelineServer({
   port        = 49900,
   dbPath      = null,
-  concurrency = 1,
+  concurrency = 2,    // process 2 PDFs in parallel; tool calls distribute across worker pool
   config: baseConfig = {},
   apiKey      = null,   // if set, require Authorization: Bearer <key> on all requests
 } = {}) {

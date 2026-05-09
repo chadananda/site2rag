@@ -127,9 +127,10 @@ describe('s5Vision — surya batch pre-pass', () => {
 
     const ctx = makeCtx({ config: { apiKey: null, azureKey: null, googleKey: null, toolBackends: {} } });
     ctx.pages = [makePageWithPng(1)];
-    // Mock ctx.run: surya ENOENT = not installed
+    // Mock ctx.run: surya ENOENT = not installed; Python engines available (--check ok) but produce no output
     ctx.run = vi.fn(async (tool, args) => {
       if (tool === 'surya_ocr') { const e = new Error('not found'); e.code = 'ENOENT'; throw e; }
+      if (args?.[0] === '--check') return { stdout: 'ok', stderr: '' };
       return { stdout: '', stderr: '' };
     });
     vi.resetModules();
@@ -149,8 +150,9 @@ describe('s5Vision — HTTP backend chain', () => {
       })}));
     const ctx = makeCtx({ config: { apiKey: null, toolBackends: {} } });
     ctx.pages = [makePageWithPng(1)];
-    ctx.run = vi.fn(async (tool) => {
+    ctx.run = vi.fn(async (tool, args) => {
       if (tool === 'surya_ocr') { const e = new Error('not found'); e.code = 'ENOENT'; throw e; }
+      if (args?.[0] === '--check') return { stdout: 'ok', stderr: '' };
       return { stdout: '', stderr: '' };
     });
     vi.resetModules();
@@ -174,8 +176,9 @@ describe('s5Vision — HTTP backend chain', () => {
       toolBackends: {},
       implementations: { vision: ['boss', 'azure'] } } });
     ctx.pages = [makePageWithPng(1)];
-    ctx.run = vi.fn(async (tool) => {
+    ctx.run = vi.fn(async (tool, args) => {
       if (tool === 'surya_ocr') { const e = new Error('not found'); e.code = 'ENOENT'; throw e; }
+      if (args?.[0] === '--check') return { stdout: 'ok', stderr: '' };
       return { stdout: '', stderr: '' };
     });
     vi.resetModules();
@@ -199,8 +202,9 @@ describe('s5Vision — HTTP backend chain', () => {
       toolBackends: {},
       implementations: { vision: ['boss', 'google'] } } });
     ctx.pages = [makePageWithPng(1, 'ara')];
-    ctx.run = vi.fn(async (tool) => {
+    ctx.run = vi.fn(async (tool, args) => {
       if (tool === 'surya_ocr') { const e = new Error('not found'); e.code = 'ENOENT'; throw e; }
+      if (args?.[0] === '--check') return { stdout: 'ok', stderr: '' };
       return { stdout: '', stderr: '' };
     });
     vi.resetModules();
