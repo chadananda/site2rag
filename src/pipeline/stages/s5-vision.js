@@ -178,21 +178,24 @@ async function getPagePng(page, ctx) {
 // ── Phase 1: Surya batch pre-pass ────────────────────────────────────────────
 
 let _suryaCliCache = null;
+function _makeSuryaCache(available, helpText) {
+  const newApi = helpText.includes('--output_dir');
+  const flag = newApi ? '--output_dir' : '--results_dir';
+  const getResultsPath = newApi
+    ? (outDir, inDir) => join(outDir, basename(inDir), 'results.json')
+    : (outDir) => join(outDir, 'results.json');
+  return { available, flag, getResultsPath };
+}
 async function checkSuryaCli(ctx) {
   if (_suryaCliCache) return _suryaCliCache.available;
   try {
     const r = await ctx.run('surya_ocr', ['--help'], { timeout: 5000 });
     const helpText = ((r.stdout ?? '') + (r.stderr ?? '')).replace(/\s+/g, ' ');
-    const newApi = helpText.includes('--output_dir');
-    const flag = newApi ? '--output_dir' : '--results_dir';
-    const getResultsPath = newApi
-      ? (outDir, inDir) => join(outDir, basename(inDir), 'results.json')
-      : (outDir) => join(outDir, 'results.json');
-    _suryaCliCache = { available: true, flag, getResultsPath };
+    _suryaCliCache = _makeSuryaCache(true, helpText);
     return true;
   } catch (e) {
-    _suryaCliCache = { available: e.code !== 'ENOENT', flag: '--output_dir',
-      getResultsPath: (outDir, inDir) => join(outDir, basename(inDir), 'results.json') };
+    const helpText = ((e.stdout ?? '') + (e.stderr ?? '')).replace(/\s+/g, ' ');
+    _suryaCliCache = _makeSuryaCache(e.code !== 'ENOENT', helpText);
     return _suryaCliCache.available;
   }
 }
