@@ -13,13 +13,20 @@ TESS_TO_EASY = {
     'chi_sim': 'ch_sim', 'chi_tra': 'ch_tra',
 }
 
+CJK_CODES = {'ch_sim', 'ch_tra', 'ja', 'ko'}
+
 def parse_langs(s):
     codes = []
     for part in s.replace(',', '+').split('+'):
         c = TESS_TO_EASY.get(part.strip())
         if c and c not in codes:
             codes.append(c)
-    return codes or ['en']
+    if not codes:
+        return ['en']
+    # CJK models require 'en' as co-language in EasyOCR
+    if any(c in CJK_CODES for c in codes) and 'en' not in codes:
+        codes.append('en')
+    return codes
 
 if '--check' in sys.argv:
     try:
