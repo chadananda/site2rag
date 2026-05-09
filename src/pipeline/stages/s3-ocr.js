@@ -671,7 +671,8 @@ export async function s3Ocr(ctx) {
             ctx.addDecision('s3', `script_p${page.pageNo}`,
               `OSD: ${osd.script} (${osd.lang}) conf=${osd.conf.toFixed(2)} — differs from metadata lang=${lang}`);
             const metaIsGeneric = ['eng', 'fra', 'deu', 'spa', 'ita', 'por'].includes(lang);
-            if (osd.lang !== 'eng' && metaIsGeneric) {
+            // Only override if OSD is confident (conf≥5 avoids false positives like Cyrillic at conf=0.73)
+            if (osd.lang !== 'eng' && metaIsGeneric && osd.conf >= 5) {
               page._langCandidates = [{ lang: osd.lang, source: 'osd' }, ...page._langCandidates];
               ctx.addDecision('s3', `script_p${page.pageNo}`, `OSD non-Latin override: using ${osd.lang} (was ${lang})`);
             }
