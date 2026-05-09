@@ -19,12 +19,14 @@ import { join, dirname, basename } from 'path';
 
 const execFileAsync = promisify(execFile);
 
-const PORT          = parseInt(process.env.WORKER_PORT ?? '49910');
-const CAPACITY_LIMIT = parseFloat(process.env.CAPACITY_LIMIT ?? '0.80');  // 80% threshold
-const PYTHON3       = process.env.PYTHON3_PATH ?? 'python3'; // override to use a venv python
-const VERSION       = '1.0.0';
-const HOST          = hostname();
-const PLATFORM      = platform();
+const PORT           = parseInt(process.env.WORKER_PORT ?? '49910');
+const CAPACITY_LIMIT = parseFloat(process.env.CAPACITY_LIMIT ?? '0.80');
+const PYTHON3        = process.env.PYTHON3_PATH ?? 'python3';
+const REGISTRY_URL   = process.env.WORKER_REGISTRY ?? '';  // e.g. http://tower-nas:49900
+const PUBLIC_URL     = process.env.WORKER_PUBLIC_URL ?? `http://${hostname()}:${parseInt(process.env.WORKER_PORT ?? '49910')}`;
+const VERSION        = '1.0.0';
+const HOST           = hostname();
+const PLATFORM       = platform();
 
 // Python batch engines — NFS path set via env or defaults to tower-nas mount.
 // Workers execute these as: python3 scriptPath args...
@@ -36,6 +38,73 @@ const PYTHON_SCRIPTS = {
   kraken_ocr:  `${PIPELINE_SCRIPTS}/kraken_ocr.py`,
 };
 const PKG_TO_TOOL = { easyocr: 'easyocr_ocr', paddleocr: 'paddle_ocr', doctr: 'doctr_ocr', kraken: 'kraken_ocr' };
+
+// Engines that support --serve mode (persistent warm subprocess, eliminates 30-60s cold-start).
+// SERVE_POOL_SIZE: number of parallel instances per engine — each handles one page at a time.
+// On a 80-core machine, 4 instances gives ~4× throughput vs single-instance serialization.
+const SERVE_CAPABLE = new Set(['easyocr_ocr', 'paddle_ocr', 'doctr_ocr']);
+const SERVE_POOL_SIZE = parseInt(process.env.SERVE_POOL_SIZE ?? '4');
+const servePools = new Map(); // tool → [{ proc, ready, pending[], buf }, ...]
+
+import { spawn } from 'child_process';
+
+function _startOneServeInstance(tool, idx) {
+  const script = PYTHON_SCRIPTS[tool];
+  const entry = { proc: null, ready: false, pending: [], buf: '' };
+  const proc = spawn(PYTHON3, [script, '--serve'], { stdio: ['pipe', 'pipe', 'pipe'] });
+  entry.proc = proc;
+  proc.stdout.on('data', chunk => {
+    entry.buf += chunk.toString();
+    const lines = entry.buf.split('\n');
+    entry.buf = lines.pop();
+    for (const line of lines) {
+      const t = line.trim();
+      if (!t) continue;
+      if (t === 'ready') { entry.ready = true; console.log(`[worker-agent] ${tool}[${idx}] serve ready`); continue; }
+      const cb = entry.pending.shift();
+      if (cb) cb(null, t);
+    }
+  });
+  proc.stderr.on('data', () => {});
+  proc.on('error', e => entry.pending.splice(0).forEach(cb => cb(e)));
+  proc.on('close', () => {
+    // Remove this instance; pool shrinks until next startServePool call
+    const pool = servePools.get(tool);
+    if (pool) { const i = pool.indexOf(entry); if (i >= 0) pool.splice(i, 1); }
+    entry.pending.splice(0).forEach(cb => cb(new Error('serve proc closed')));
+    console.log(`[worker-agent] ${tool}[${idx}] serve exited`);
+  });
+  return entry;
+}
+
+function startServePool(tool) {
+  const script = PYTHON_SCRIPTS[tool];
+  if (!script) return;
+  const existing = servePools.get(tool) ?? [];
+  const needed = SERVE_POOL_SIZE - existing.length;
+  if (needed <= 0) return;
+  const instances = existing;
+  for (let i = 0; i < needed; i++) instances.push(_startOneServeInstance(tool, existing.length + i));
+  servePools.set(tool, instances);
+}
+
+function runViaServe(tool, args) {
+  const pool = servePools.get(tool);
+  if (!pool?.length) return null;
+  // Pick the ready instance with shortest pending queue
+  const ready = pool.filter(e => e.ready);
+  if (!ready.length) return null;
+  const entry = ready.reduce((a, b) => a.pending.length <= b.pending.length ? a : b);
+  const [input_dir, output_json, langs] = args;
+  return new Promise((resolve, reject) => {
+    entry.pending.push((err, line) => {
+      if (err) return reject(err);
+      try { const r = JSON.parse(line); r.error ? reject(new Error(r.error)) : resolve({ stdout: '', stderr: '' }); }
+      catch (e) { reject(new Error(`bad serve response: ${line}`)); }
+    });
+    entry.proc.stdin.write(JSON.stringify({ input_dir, output_json, langs: langs ?? 'eng' }) + '\n');
+  });
+}
 
 // ── Resource detection ─────────────────────────────────────────────────────────
 
@@ -224,20 +293,17 @@ async function handleToolRun(req, res) {
       finalArgs = args.map(a => inPathMap[a] ?? outPathMap[a] ?? a);
     }
 
-    // Resolve command: Python batch engines use python3 + script path; others use CMD_ENV_PATHS or tool name.
-    const scriptPath = PYTHON_SCRIPTS[tool];
-    const [cmd, execArgs] = scriptPath
-      ? [PYTHON3, [scriptPath, ...finalArgs]]
-      : [CMD_ENV_PATHS[tool] ?? tool, finalArgs];
-
     activeJobs++;
     await acquireSlot(tool);
     const started = Date.now();
     try {
-      const result = await execFileAsync(cmd, execArgs, {
-        timeout,
-        maxBuffer: 50 * 1024 * 1024,
-      });
+      // Serve mode: persistent warm subprocess for OCR batch engines. Eliminates 30-60s cold-start.
+      const serveResult = SERVE_CAPABLE.has(tool) ? await runViaServe(tool, finalArgs) : null;
+      const result = serveResult ?? await execFileAsync(
+        PYTHON_SCRIPTS[tool] ? PYTHON3 : (CMD_ENV_PATHS[tool] ?? tool),
+        PYTHON_SCRIPTS[tool] ? [PYTHON_SCRIPTS[tool], ...finalArgs] : finalArgs,
+        { timeout, maxBuffer: 50 * 1024 * 1024 },
+      );
 
       // Collect output files (e.g. pdftoppm output PNGs) and return as base64
       const outputFiles = {};
@@ -286,13 +352,37 @@ const server = createServer((req, res) => {
   send(res, 404, { error: 'not found' });
 });
 
+async function registerWithRegistry() {
+  if (!REGISTRY_URL) return;
+  try {
+    const res = await fetch(`${REGISTRY_URL}/workers/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: PUBLIC_URL, hostname: HOST, platform: PLATFORM }),
+      signal: AbortSignal.timeout(8000),
+    });
+    if (res.ok) console.log(`[worker-agent] registered with ${REGISTRY_URL}`);
+    else console.warn(`[worker-agent] register failed: ${res.status}`);
+  } catch (e) {
+    console.warn(`[worker-agent] register error: ${e.message}`);
+  }
+}
+
 server.listen(PORT, () => {
   console.log(`[worker-agent] ${HOST} listening on :${PORT} (${CPU_CORES} cores, ${RAM_GB}GB RAM, limit=${Math.round(CAPACITY_LIMIT*100)}%)`);
-  // Probe tools eagerly on startup so first /health is fast
   getTools().then(tools => {
     const available = Object.entries(tools).filter(([,v]) => v).map(([k]) => k);
     console.log(`[worker-agent] tools available: ${available.join(', ')}`);
+    registerWithRegistry();
+    // Pre-warm serve pools so first OCR job doesn't pay 30-60s cold-start
+    for (const tool of SERVE_CAPABLE) {
+      if (PYTHON_SCRIPTS[tool]) {
+        startServePool(tool); // starts SERVE_POOL_SIZE instances
+        console.log(`[worker-agent] pre-warming ${tool} (${SERVE_POOL_SIZE} instances)`);
+      }
+    }
   });
+  setInterval(registerWithRegistry, 60_000);
 });
 
 server.on('error', err => {

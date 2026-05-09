@@ -26,6 +26,11 @@ import time
 import urllib.request
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from socketserver import ThreadingMixIn
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
+    request_queue_size = 64  # allow many concurrent connections
 
 # ── Config ─────────────────────────────────────────────────────────────────────
 
@@ -135,47 +140,62 @@ if _SCRIPTS_DIR:
             PYTHON_SCRIPTS[_name] = _path
 
 # Engines that support --serve mode (persistent warm process, eliminates cold-start).
-SERVE_CAPABLE = {'easyocr_ocr', 'paddle_ocr'}
+# SERVE_POOL_SIZE: parallel instances per engine for throughput (each handles one page at a time).
+SERVE_CAPABLE = {'easyocr_ocr', 'paddle_ocr', 'doctr_ocr'}
+SERVE_POOL_SIZE = int(os.environ.get('SERVE_POOL_SIZE', '4'))
 
-# Warm process pool: tool_name → {'proc': Popen, 'lock': threading.Lock}
-_serve_pool = {}
+# Warm process pool: tool_name → [{'proc': Popen, 'lock': Lock}, ...]
+_serve_pool = {}       # tool → list of instance dicts
 _serve_pool_lock = threading.Lock()
 
-def _get_or_start_serve_proc(tool):
-    """Return (proc, lock) for a warm --serve subprocess, starting one if needed."""
-    with _serve_pool_lock:
-        entry = _serve_pool.get(tool)
-        if entry and entry['proc'].poll() is None:
-            return entry['proc'], entry['lock']
-        # Start fresh proc
-        script = PYTHON_SCRIPTS[tool]
-        proc = subprocess.Popen(
-            [sys.executable, script, '--serve'],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, bufsize=1,
-        )
-        # Wait for "ready" line (model load)
-        try:
-            ready_line = proc.stdout.readline().strip()
-            if ready_line != 'ready':
-                proc.kill()
-                raise RuntimeError(f'{tool} serve proc did not send "ready": {ready_line!r}')
-        except Exception as e:
+def _start_serve_instance(tool):
+    """Start one --serve subprocess and wait for 'ready'. Returns instance dict or raises."""
+    script = PYTHON_SCRIPTS[tool]
+    proc = subprocess.Popen(
+        [sys.executable, script, '--serve'],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL, text=True, bufsize=1,
+    )
+    try:
+        ready_line = proc.stdout.readline().strip()
+        if ready_line != 'ready':
             proc.kill()
-            raise
-        lock = threading.Lock()
-        _serve_pool[tool] = {'proc': proc, 'lock': lock}
-        return proc, lock
+            raise RuntimeError(f'{tool} serve proc did not send "ready": {ready_line!r}')
+    except Exception:
+        proc.kill()
+        raise
+    return {'proc': proc, 'lock': threading.Lock(), 'jobs': 0}
+
+def _get_serve_instance(tool):
+    """Return the least-loaded ready instance for tool, starting pool if needed."""
+    with _serve_pool_lock:
+        pool = _serve_pool.get(tool, [])
+        # Remove dead instances
+        pool = [e for e in pool if e['proc'].poll() is None]
+        # Start new instances if pool is below target size
+        while len(pool) < SERVE_POOL_SIZE:
+            try:
+                pool.append(_start_serve_instance(tool))
+                print(f'[worker-agent] {tool}[{len(pool)-1}] serve ready', flush=True)
+            except Exception as e:
+                print(f'[worker-agent] {tool} serve start failed: {e}', flush=True)
+                break
+        _serve_pool[tool] = pool
+        if not pool:
+            raise RuntimeError(f'no serve instances available for {tool}')
+        # Pick instance with fewest in-flight jobs
+        return min(pool, key=lambda e: e['jobs'])
 
 def _run_serve_job(tool, input_dir, output_json, langs, timeout):
-    """Send one job to warm serve proc; return (stdout_response, stderr_str)."""
-    proc, lock = _get_or_start_serve_proc(tool)
+    """Send one job to least-loaded serve instance; return response."""
+    entry = _get_serve_instance(tool)
     req = json.dumps({'input_dir': input_dir, 'output_json': output_json, 'langs': langs}) + '\n'
-    with lock:
+    with entry['lock']:
+        entry['jobs'] += 1
         try:
-            proc.stdin.write(req)
-            proc.stdin.flush()
-            resp_line = proc.stdout.readline()
+            entry['proc'].stdin.write(req)
+            entry['proc'].stdin.flush()
+            resp_line = entry['proc'].stdout.readline()
             if not resp_line:
                 raise RuntimeError('serve proc closed stdout')
             resp = json.loads(resp_line)
@@ -183,12 +203,14 @@ def _run_serve_job(tool, input_dir, output_json, langs, timeout):
                 raise RuntimeError(resp['error'])
             return resp
         except Exception:
-            # Kill dead proc so next call restarts it
-            try: proc.kill()
+            try: entry['proc'].kill()
             except: pass
             with _serve_pool_lock:
-                _serve_pool.pop(tool, None)
+                pool = _serve_pool.get(tool, [])
+                if entry in pool: pool.remove(entry)
             raise
+        finally:
+            entry['jobs'] -= 1
 
 # ── Tool probing ───────────────────────────────────────────────────────────────
 
@@ -238,6 +260,13 @@ def get_tools():
         tools['gpu:cuda'] = probe_python_pkg('torch') and _has_cuda()
         tools['gpu:rocm'] = probe_python_pkg('torch') and _has_rocm()
         tools['gpu:metal'] = PLATFORM == 'darwin' and probe_python_pkg('torch')
+        # Batch OCR engines need shared filesystem (NFS) for input directories.
+        # Report them only when /tank/site2rag is accessible.
+        nfs_ok = os.path.isdir('/tank/site2rag')
+        tools['nfs_ok'] = nfs_ok
+        for pkg, tool_name in [('easyocr', 'easyocr_ocr'), ('paddleocr', 'paddle_ocr'),
+                                ('doctr', 'doctr_ocr'), ('kraken', 'kraken_ocr')]:
+            tools[tool_name] = tools.get(f'py:{pkg}', False) and nfs_ok
         _cached_tools = tools
         _tools_probe_time = time.time()
     return _cached_tools
@@ -510,13 +539,14 @@ if __name__ == '__main__':
     parser.add_argument('--port', type=int, default=PORT)
     parser.add_argument('--registry', default=REGISTRY_URL)
     parser.add_argument('--capacity-limit', type=float, default=CAPACITY_LIMIT)
+    parser.add_argument('--public-url', default='', help='URL to advertise to registry (overrides hostname-based default)')
     args = parser.parse_args()
 
     PORT = args.port
     CAPACITY_LIMIT = args.capacity_limit
     registry_url = args.registry
 
-    server = HTTPServer(('0.0.0.0', PORT), WorkerHandler)
+    server = ThreadingHTTPServer(('0.0.0.0', PORT), WorkerHandler)
 
     def shutdown(sig, frame):
         print('\n[worker-agent] shutting down')
@@ -533,11 +563,26 @@ if __name__ == '__main__':
         tools = get_tools()
         available = [k for k, v in tools.items() if v]
         print(f'[worker-agent] tools: {", ".join(available) or "none"}')
-        worker_url = f'http://{HOST}:{PORT}'
+        worker_url = args.public_url or f'http://{HOST}:{PORT}'
         while True:
             if registry_url:
                 register_with_registry(registry_url, worker_url)
             time.sleep(60)
 
     threading.Thread(target=heartbeat_loop, daemon=True).start()
+
+    # Pre-warm serve pools in background — models load once at startup so the
+    # first real job doesn't pay the 30-60s cold-start cost.
+    def prewarm_serve_pools():
+        for tool in SERVE_CAPABLE:
+            if tool not in PYTHON_SCRIPTS:
+                continue
+            try:
+                _get_serve_instance(tool)
+                print(f'[worker-agent] pre-warmed {tool} ({SERVE_POOL_SIZE} instances)', flush=True)
+            except Exception as e:
+                print(f'[worker-agent] pre-warm {tool} failed: {e}', flush=True)
+
+    threading.Thread(target=prewarm_serve_pools, daemon=True).start()
+
     server.serve_forever()
