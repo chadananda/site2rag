@@ -94,5 +94,22 @@ class Handler(BaseHTTPRequestHandler):
             _sem.release()
 
 
+import socket, signal
+# Kill any orphaned process holding our port before binding (handles pm2 crash-restart cycles)
+try:
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    probe.bind(('0.0.0.0', PORT))
+    probe.close()
+except OSError:
+    import subprocess, re
+    out = subprocess.run(['ss', '-tlnp', f'sport = :{PORT}'], capture_output=True, text=True).stdout
+    m = re.search(r'pid=(\d+)', out)
+    if m:
+        os.kill(int(m.group(1)), signal.SIGTERM)
+        time.sleep(1)
+
+server = ThreadingHTTPServer(('0.0.0.0', PORT), Handler)
+server.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 print(f'[marker-service] ready on :{PORT} ({WORKERS} workers)', flush=True)
-ThreadingHTTPServer(('0.0.0.0', PORT), Handler).serve_forever()
+server.serve_forever()
