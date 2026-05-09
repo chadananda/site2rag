@@ -56,7 +56,7 @@ export const wordQuality = (text, lang = 'english') => {
     const td = tokenDistribution(text);
     // sc dominates: Latin OCR garbage on an Arabic scan has sc≈0, so td (which can be decent
     // for any varied token set) cannot rescue the score. Real text in the right script has sc≥0.6.
-    return Math.round((sc * 0.85 + td * 0.15) * 100) / 100;
+    return Math.min(1, Math.round((sc * 0.85 + td * 0.15) * 100) / 100);
   }
   // Latin scripts: word-list + vowel-ratio heuristic
   const tokens = text.replace(/[^a-zA-ZÀ-ÿ\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && w.length <= 20);
