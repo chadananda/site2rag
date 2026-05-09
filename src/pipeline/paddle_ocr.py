@@ -5,9 +5,23 @@ Output JSON: {stem: {text, words: [{text,conf,x1,y1,x2,y2}]}}
 """
 import sys, json, os, glob
 
+import subprocess as _subprocess
+
+def _gpu_works():
+    """Return True only if GPU matrix ops succeed (rocBLAS/CUDA actually functional)."""
+    try:
+        r = _subprocess.run(
+            [sys.executable, '-c',
+             'import torch; a=torch.ones(32,32).cuda(); b=torch.matmul(a,a); print("ok")'],
+            capture_output=True, timeout=15,
+        )
+        return r.returncode == 0 and b'ok' in r.stdout
+    except Exception:
+        return False
+
 try:
-    import torch
-    _GPU = torch.cuda.is_available()
+    import torch as _torch
+    _GPU = _torch.cuda.is_available() and _gpu_works()
 except ImportError:
     _GPU = False
 
