@@ -36,18 +36,20 @@ const log = (msg) => console.log(`[pipeline-server] ${new Date().toISOString().s
 // Workers self-register via POST /workers/register on startup.
 // Health snapshots are refreshed on GET /workers.
 const workerRegistry = new Map(); // url → { url, hostname, platform, lastSeen, health }
-const WORKER_HEALTH_TTL_MS = 60_000; // re-poll health at most once per minute
+const WORKER_HEALTH_TTL_MS = 30_000; // re-poll health every 30s
 
 async function fetchWorkerHealth(url) {
   try {
-    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3000) });
+    const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(8000) }); // 8s: enough for Tailscale
     return res.ok ? await res.json() : null;
   } catch { return null; }
 }
 
 async function refreshWorkerHealth(entry) {
   if (Date.now() - (entry.healthAt ?? 0) < WORKER_HEALTH_TTL_MS) return;
-  entry.health = await fetchWorkerHealth(entry.url);
+  const fresh = await fetchWorkerHealth(entry.url);
+  // Keep last-known health if fetch failed — don't null it out and lose routing info
+  if (fresh !== null) entry.health = fresh;
   entry.healthAt = Date.now();
 }
 

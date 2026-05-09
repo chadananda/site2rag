@@ -72,13 +72,13 @@ function workerHasTool(w, tool) {
 }
 
 function pickWorker(workers, tool, excludeUrls = new Set()) {
-  const candidates = workers.filter(w =>
-    !excludeUrls.has(w.url) &&
-    w.health?.available &&
-    workerHasTool(w, tool)
-  );
-  if (!candidates.length) return null;
-  return candidates.sort((a, b) => scoreWorker(a) - scoreWorker(b))[0];
+  // Prefer workers with confirmed availability; fall back to workers with stale/null health
+  // if they have the tool — we'd rather try and get a 503 than skip a healthy worker
+  const confirmed = workers.filter(w => !excludeUrls.has(w.url) && w.health?.available === true && workerHasTool(w, tool));
+  if (confirmed.length) return confirmed.sort((a, b) => scoreWorker(a) - scoreWorker(b))[0];
+  const optimistic = workers.filter(w => !excludeUrls.has(w.url) && w.health?.available !== false && workerHasTool(w, tool));
+  if (!optimistic.length) return null;
+  return optimistic.sort((a, b) => scoreWorker(a) - scoreWorker(b))[0];
 }
 
 /**
