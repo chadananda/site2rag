@@ -9,9 +9,9 @@ import { upsertAsset, addAssetRef } from './db.js';
 import { DOC_EXTS, DOC_MIMES, IMAGE_MIMES } from './constants.js';
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 /** Resolve URL relative to page URL. */
-const resolveUrl = (href, pageUrl) => { try { return new URL(href, pageUrl).toString().split('#')[0]; } catch { return null; } };
+export const resolveUrl = (href, pageUrl) => { try { return new URL(href, pageUrl).toString().split('#')[0]; } catch { return null; } };
 /** Return asset type based on URL and MIME. */
-const classifyAsset = (url, mime = '') => {
+export const classifyAsset = (url, mime = '') => {
   const ext = extname(new URL(url).pathname).toLowerCase();
   if (IMAGE_MIMES.has(mime) || ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif'].includes(ext)) return 'image';
   if (DOC_MIMES.has(mime) || DOC_EXTS.has(ext)) return 'document';

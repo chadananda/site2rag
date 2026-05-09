@@ -10,6 +10,34 @@ describe('compileRules', () => {
     const compiled = compileRules({ classify_overrides: [{ pattern: '/docs/.*', role: 'content' }] });
     expect(compiled.classify_overrides[0].pattern).toBeInstanceOf(RegExp);
   });
+  it('preserves prefer_format value from rules', () => {
+    const compiled = compileRules({ prefer_format: 'html' });
+    expect(compiled.prefer_format).toBe('html');
+  });
+  it('prefer_format defaults to null when not set', () => {
+    const compiled = compileRules({});
+    expect(compiled.prefer_format).toBeNull();
+  });
+  it('preserves content_selector and title_selector', () => {
+    const compiled = compileRules({ content_selector: 'article', title_selector: 'h1.title' });
+    expect(compiled.content_selector).toBe('article');
+    expect(compiled.title_selector).toBe('h1.title');
+  });
+  it('compiles undefined rules gracefully (no args)', () => {
+    const compiled = compileRules();
+    expect(compiled.classify_overrides).toEqual([]);
+    expect(compiled.prefer_format).toBeNull();
+  });
+
+  it('preserves date_selector', () => {
+    const compiled = compileRules({ date_selector: 'time.published' });
+    expect(compiled.date_selector).toBe('time.published');
+  });
+
+  it('preserves exclude_selectors array', () => {
+    const compiled = compileRules({ exclude_selectors: ['.nav', '.footer'] });
+    expect(compiled.exclude_selectors).toEqual(['.nav', '.footer']);
+  });
 });
 describe('applyClassifyOverride', () => {
   it('returns role for matching URL', () => {

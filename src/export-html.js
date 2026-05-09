@@ -14,7 +14,7 @@ import { compileRules } from './rules.js';
 const sha256 = (s) => createHash('sha256').update(s).digest('hex');
 const mkTurndown = () => { const td = new TurndownService({ codeBlockStyle: 'fenced', linkStyle: 'inlined' }); td.use(gfm); return td; };
 /** Build YAML frontmatter block from object. */
-const buildFrontmatter = (obj) => {
+export const buildFrontmatter = (obj) => {
   const yamlVal = (v) => {
     if (typeof v === 'object') return JSON.stringify(v);
     const s = String(v);

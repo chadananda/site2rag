@@ -129,6 +129,21 @@ describe('runArchive', () => {
     expect(row.backup_url).toBeTruthy();
   });
 
+  it('rewrites asset URLs in HTML when rewrite_html_assets is true', async () => {
+    const path = insertPage('rewrite', `<html><body><img src="${SITE_URL}/logo.png"></body></html>`);
+    // Add an asset with backup_url in the DB
+    db.prepare('INSERT INTO assets (hash, path, original_url, mime_type, bytes, ref_count, backup_url) VALUES (?,?,?,?,?,?,?)')
+      .run('sha256:logoabc', path, `${SITE_URL}/logo.png`, 'image/png', 10, 1, 'https://cdn.example.com/logo.png');
+    mockSend.mockResolvedValue({ ETag: '"rewrite123"' });
+
+    await runArchive(db, { domain: DOMAIN, archive: { ...archiveCfg, rewrite_html_assets: true } });
+    // Should have called send with a rewritten body containing the CDN URL
+    const sendCall = mockSend.mock.calls.find(c => c[0]._cmd === 'Put');
+    expect(sendCall).toBeTruthy();
+    const uploadedBody = sendCall[0].Body.toString('utf8');
+    expect(uploadedBody).toContain('https://cdn.example.com/logo.png');
+  });
+
   it('gone pages are excluded from upload', async () => {
     const path = join(pagesDir, 'gone.html');
     writeFileSync(path, '<html>gone</html>');

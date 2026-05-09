@@ -24,9 +24,9 @@ Entry: `index.js` → `runPipeline(opts)` → chains s0–s8, writes receipt + a
 | s0 | s0-baseline.js | `s0Baseline` | quality score, domain detect, early-exit flags |
 | s1 | s1-preprocess.js | `s1Preprocess`, `CORRUPT_PATTERN` | gs normalize, unpaper per page |
 | s2 | s2-classify.js | `s2Classify`, `langToRegionType` | Haiku region classification on thumbnails |
-| s3 | s3-ocr.js | `s3Ocr`, `parseHocr`, `repairHyphens`, `resolveLang`, `cleanRatio` | Tesseract hOCR + Surya batch |
-| s4 | s4-escalate.js | `s4Escalate`, `buildDraftPrompt` | 600dpi re-OCR, boss+marker vision drafts |
-| s5 | s5-vision.js | `s5Vision` | Surya batch pre-pass + backend chain (boss/azure/google/claude) |
+| s3 | s3-ocr.js | `s3Ocr`, `parseHocr`, `repairHyphens`, `resolveLang`, `cleanRatio` | All CPU engines on every block crop → Surya only if dirty → Haiku synthesis always (unless all engines failed) → dirty blocks marked for s4 |
+| s4 | s4-escalate.js | `s4Escalate`, `buildDraftPrompt` | Local vision escalation (boss/Surya at higher res) on dirty block crops from s3 |
+| s5 | s5-vision.js | `s5Vision` | Specialist API escalation per block type: Mistral OCR (Arabic/Persian), Claude Opus (handwritten), Gemini (tables) |
 | s6 | s6-spellfix.js | `s6SpellFix` | Haiku spell-fix on fuzzy-confidence words |
 | s7 | s7-archive.js | `s7Archive` | rebuild archival PDF with corrected text layer |
 | s8 | s8-export.js | `s8Export`, `adaptWord` | export corrected Markdown with page anchors |

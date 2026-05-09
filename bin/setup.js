@@ -19,12 +19,17 @@ if (!existsSync(resolve(APP_DIR, '.env'))) {
   console.warn('[setup] .env not found -- copy .env.example to .env and fill in secrets.');
 }
 if (isRegistered('site2rag')) {
-  console.log('[setup] site2rag already registered with PM2, skipping. Run "pm2 startOrReload ecosystem.config.cjs" to pick up config changes.');
+  console.log('[setup] site2rag already registered with PM2, skipping. Run "npm run deploy:backend" to pick up config changes.');
   process.exit(0);
 }
 try {
-  execSync(`pm2 start ${resolve(APP_DIR, 'ecosystem.config.cjs')} && pm2 save`, { cwd: APP_DIR, stdio: 'inherit' });
-  console.log('[setup] PM2 apps registered and saved.');
+  // startOrReload only touches processes named in our ecosystem file — never deletes or saves
+  // other projects' processes that share this PM2 instance.
+  // pm2 save is intentionally omitted: caller should run "pm2 save" manually after verifying
+  // all expected processes (from every project on this box) are present.
+  execSync(`pm2 startOrReload ${resolve(APP_DIR, 'ecosystem.config.cjs')}`, { cwd: APP_DIR, stdio: 'inherit' });
+  console.log('[setup] PM2 apps registered.');
+  console.log('[setup] Run "pm2 save" manually after confirming all processes on this box are present.');
   console.log('[setup] Run "pm2 startup" (with sudo) once to enable autostart on reboot.');
 } catch (err) {
   console.error(`[setup] PM2 registration failed: ${err.message}`);

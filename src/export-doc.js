@@ -16,13 +16,13 @@ const OCR_TIMEOUT_MS = 30000;
 const RASTER_TIMEOUT_MS = 60000;
 const PAGE_RENDER_TIMEOUT_MS = 30000;
 
-const buildFrontmatter = (obj) => {
+export const buildFrontmatter = (obj) => {
   const yaml = Object.entries(obj).filter(([, v]) => v !== null && v !== undefined)
     .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`).join('\n');
   return `---\n${yaml}\n---\n\n`;
 };
 
-const withTimeout = (promise, ms, label) =>
+export const withTimeout = (promise, ms, label) =>
   Promise.race([promise, new Promise((_, r) => setTimeout(() => r(new Error(`${label} timed out after ${ms}ms`)), ms))]);
 
 const tryPdfParse = async (buf) => {

@@ -1,9 +1,20 @@
 // Config loader -- reads websites.yaml, merges per-site keys over defaults, resolves SITE2RAG_ROOT.
 // Path helpers are lazy (read env at call time) for test isolation with ESM module hoisting.
+// Auto-loads APP_DIR/.env on import so API keys are available without manual shell export.
 import { readFileSync, existsSync } from 'fs';
 import { resolve, join } from 'path';
 import yaml from 'js-yaml';
 export const APP_DIR = resolve(import.meta.dirname, '..');
+
+// Load .env from project root if present — sets process.env for all subsequent imports.
+// Skips keys already set (shell export wins over .env).
+const envPath = join(APP_DIR, '.env');
+if (existsSync(envPath)) {
+  for (const line of readFileSync(envPath, 'utf8').split('\n')) {
+    const m = line.match(/^([A-Z][A-Z0-9_]*)=["']?([^"'\n]*)["']?$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2];
+  }
+}
 /** Lazy root -- reads process.env at call time so tests can set SITE2RAG_ROOT after module load. */
 export const getSiteRoot = () => process.env.SITE2RAG_ROOT || resolve(import.meta.dirname, '../..');
 /** Return mirror root dir. */

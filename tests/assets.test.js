@@ -11,7 +11,7 @@ vi.mock('undici', () => ({ fetch: vi.fn() }));
 
 import { fetch } from 'undici';
 import { openDb } from '../src/db.js';
-import { runAssets } from '../src/assets.js';
+import { runAssets, resolveUrl, classifyAsset } from '../src/assets.js';
 
 const DOMAIN = 'assets.example.com';
 const SITE_URL = `https://${DOMAIN}`;
@@ -159,5 +159,64 @@ describe('runAssets', () => {
     const stats = await runAssets(db, { domain: DOMAIN });
     expect(stats.new_assets).toBe(0);
     expect(stats.skipped).toBe(1);
+  });
+
+  it('downloads SVG images classified by extension (not MIME)', async () => {
+    insertPage('svgpage', `<html><body><img src="${SITE_URL}/logo.svg"></body></html>`);
+    const fakeSvg = Buffer.from('<svg><circle r="10"/></svg>');
+    fetch.mockResolvedValue(mockAsset('image/svg+xml', fakeSvg));
+    const stats = await runAssets(db, { domain: DOMAIN });
+    expect(stats.new_assets).toBe(1);
+    const asset = db.prepare('SELECT * FROM assets WHERE original_url=?').get(`${SITE_URL}/logo.svg`);
+    expect(asset).toBeTruthy();
+    expect(asset.mime_type).toBe('image/svg+xml');
+  });
+
+  it('bytes stat reflects downloaded file size', async () => {
+    insertPage('bytepage', `<html><body><img src="${SITE_URL}/icon.png"></body></html>`);
+    fetch.mockResolvedValue(mockAsset('image/png', fakePng));
+    const stats = await runAssets(db, { domain: DOMAIN });
+    expect(stats.bytes).toBe(fakePng.length);
+  });
+});
+
+describe('resolveUrl', () => {
+  it('resolves relative URL against base', () => {
+    expect(resolveUrl('/images/logo.png', 'https://example.com/page')).toBe('https://example.com/images/logo.png');
+  });
+
+  it('returns absolute URL unchanged', () => {
+    expect(resolveUrl('https://cdn.example.com/img.jpg', 'https://example.com/')).toBe('https://cdn.example.com/img.jpg');
+  });
+
+  it('strips hash fragment', () => {
+    expect(resolveUrl('/page#section', 'https://example.com/')).toBe('https://example.com/page');
+  });
+
+  it('returns null when both href and base are invalid', () => {
+    expect(resolveUrl(':::invalid:::', ':::invalid-base:::')).toBeNull();
+  });
+});
+
+describe('classifyAsset', () => {
+  it('classifies image by MIME type', () => {
+    expect(classifyAsset('https://example.com/photo', 'image/jpeg')).toBe('image');
+    expect(classifyAsset('https://example.com/photo', 'image/png')).toBe('image');
+  });
+
+  it('classifies image by extension', () => {
+    expect(classifyAsset('https://example.com/photo.jpg', '')).toBe('image');
+    expect(classifyAsset('https://example.com/icon.svg', '')).toBe('image');
+    expect(classifyAsset('https://example.com/anim.webp', '')).toBe('image');
+  });
+
+  it('classifies document by extension', () => {
+    expect(classifyAsset('https://example.com/report.pdf', '')).toBe('document');
+    expect(classifyAsset('https://example.com/data.docx', '')).toBe('document');
+  });
+
+  it('returns null for unrecognized type', () => {
+    expect(classifyAsset('https://example.com/page.html', 'text/html')).toBeNull();
+    expect(classifyAsset('https://example.com/script.js', 'application/javascript')).toBeNull();
   });
 });

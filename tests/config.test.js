@@ -56,6 +56,21 @@ describe('deepMerge', () => {
     expect(result.level1.level2).toBe('value');
   });
 });
+describe('path helpers', () => {
+  it('mirrorDir returns path under getMirrorRoot with domain', async () => {
+    const { mirrorDir, getMirrorRoot } = await import('../src/config.js');
+    expect(mirrorDir('example.com')).toBe(getMirrorRoot() + '/example.com');
+  });
+  it('mdDir returns path under getMdRoot with domain', async () => {
+    const { mdDir, getMdRoot } = await import('../src/config.js');
+    expect(mdDir('example.com')).toBe(getMdRoot() + '/example.com');
+  });
+  it('assetsDir returns path ending in _assets', async () => {
+    const { assetsDir } = await import('../src/config.js');
+    expect(assetsDir('example.com')).toMatch(/_assets$/);
+  });
+});
+
 describe('compileRules invalid regex', () => {
   it('compileRules with invalid regex pattern does not throw', async () => {
     // If the caller passes a bad regex pattern, compileRules must not blow up the whole process.
@@ -72,6 +87,38 @@ describe('compileRules invalid regex', () => {
     expect(typeof threw).toBe('boolean'); // just assert the test ran without crashing the suite
   });
 });
+describe('constants', () => {
+  it('DOC_MIMES contains application/pdf', async () => {
+    const { DOC_MIMES } = await import('../src/constants.js');
+    expect(DOC_MIMES.has('application/pdf')).toBe(true);
+  });
+
+  it('DOC_EXTS contains .pdf and .docx', async () => {
+    const { DOC_EXTS } = await import('../src/constants.js');
+    expect(DOC_EXTS.has('.pdf')).toBe(true);
+    expect(DOC_EXTS.has('.docx')).toBe(true);
+  });
+
+  it('IMAGE_MIMES contains common image types', async () => {
+    const { IMAGE_MIMES } = await import('../src/constants.js');
+    expect(IMAGE_MIMES.has('image/png')).toBe(true);
+    expect(IMAGE_MIMES.has('image/jpeg')).toBe(true);
+  });
+});
+
+describe('config — additional path helpers', () => {
+  it('getLogsRoot returns path containing logs', async () => {
+    const { getLogsRoot } = await import('../src/config.js');
+    expect(getLogsRoot()).toContain('logs');
+  });
+
+  it('metaDir includes domain and _meta segment', async () => {
+    const { metaDir } = await import('../src/config.js');
+    expect(metaDir('example.com')).toContain('example.com');
+    expect(metaDir('example.com')).toContain('_meta');
+  });
+});
+
 describe('loadConfig missing file', () => {
   it('loadConfig throws a useful message when websites.yaml is missing', async () => {
     const origRoot = process.env.SITE2RAG_ROOT;

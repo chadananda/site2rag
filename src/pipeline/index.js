@@ -27,6 +27,18 @@ export const STAGES = { s0: s0Baseline, s1: s1Preprocess, s2: s2Classify, s3: s3
  */
 export async function runPipeline(opts) {
   const config = mergeConfig(opts.config ?? {});
+
+  // stopAfter: skip all stages after the named stage (inclusive of everything after)
+  if (config.stopAfter) {
+    const allStages = Object.keys(STAGES);
+    const idx = allStages.indexOf(config.stopAfter);
+    if (idx >= 0) {
+      const toSkip = allStages.slice(idx + 1);
+      config.skip = [...new Set([...(config.skip ?? []), ...toSkip])];
+    }
+  }
+
+  config._log = log;
   const ctx = new PipelineContext({ ...opts, config });
   const stagesToRun = config.stages ?? Object.keys(STAGES);
 

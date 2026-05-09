@@ -108,6 +108,106 @@ describe('mirror resume: pre-populates visited from DB', () => {
   });
 });
 
+describe('mirror robots.txt: respect_robots_txt option', () => {
+  const robotsResponse = (body) => ({
+    ok: true, status: 200,
+    headers: { get: (h) => h === 'content-type' ? 'text/plain' : null },
+    text: async () => body,
+    arrayBuffer: async () => Buffer.from(body)
+  });
+
+  it('respects robots.txt disallow when respect_robots_txt=true', async () => {
+    const db = openDb(DOMAIN);
+    fetch.mockImplementation(async (url) => {
+      if (url.endsWith('/robots.txt')) return robotsResponse('User-agent: *\nDisallow: /private/\n');
+      if (url === SEED || url === `${SEED}/`) return mockResponse(htmlPage([`${SEED}/private/secret`, `${SEED}/public`]));
+      if (url === `${SEED}/public`) return mockResponse(htmlPage([]));
+      return { ok: false, status: 404, headers: { get: () => null } };
+    });
+    await runMirror(db, { domain: DOMAIN, url: SEED, timeout_seconds: 30, respect_robots_txt: true });
+    const calls = fetch.mock.calls.map(c => c[0]);
+    expect(calls).not.toContain(`${SEED}/private/secret`);
+    db.close();
+  });
+
+  it('crawls disallowed paths when respect_robots_txt=false', async () => {
+    const db = openDb(DOMAIN);
+    fetch.mockImplementation(async (url) => {
+      if (url.endsWith('/robots.txt')) return robotsResponse('User-agent: *\nDisallow: /private/\n');
+      if (url === SEED || url === `${SEED}/`) return mockResponse(htmlPage([`${SEED}/private/secret`]));
+      if (url === `${SEED}/private/secret`) return mockResponse(htmlPage([]));
+      return { ok: false, status: 404, headers: { get: () => null } };
+    });
+    await runMirror(db, { domain: DOMAIN, url: SEED, timeout_seconds: 30, respect_robots_txt: false });
+    const calls = fetch.mock.calls.map(c => c[0]);
+    expect(calls).toContain(`${SEED}/private/secret`);
+    db.close();
+  });
+});
+
+describe('mirror 404 response', () => {
+  it('marks existing page as gone when server returns 404', async () => {
+    const db = openDb(DOMAIN);
+    const knownUrl = `${SEED}/known-page`;
+    const now = new Date().toISOString();
+    db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone, last_seen_at, first_seen_at) VALUES (?,?,?,?,?,?,?)')
+      .run(knownUrl, 'known-page', null, 'text/html', 0, now, now);
+
+    fetch.mockImplementation(async (url) => {
+      if (url === SEED || url === `${SEED}/`) return mockResponse(htmlPage([knownUrl]));
+      return { ok: false, status: 404, headers: { get: () => null } };
+    });
+
+    await runMirror(db, { domain: DOMAIN, url: SEED, timeout_seconds: 30 });
+
+    const row = db.prepare('SELECT gone FROM pages WHERE url=?').get(knownUrl);
+    expect(row?.gone).toBe(1);
+    db.close();
+  });
+});
+
+describe('mirror depth limiting', () => {
+  it('does not crawl links discovered beyond max_depth', async () => {
+    const db = openDb(DOMAIN);
+    const level1 = `${SEED}/level1`;
+    const level2 = `${SEED}/level2`;
+
+    fetch.mockImplementation(async (url) => {
+      if (url === SEED || url === `${SEED}/`) return mockResponse(htmlPage([level1]));
+      if (url === level1) return mockResponse(htmlPage([level2]));
+      if (url === level2) return mockResponse(htmlPage([]));
+      return { ok: false, status: 404, headers: { get: () => null } };
+    });
+
+    // max_depth=1 means seed (depth=0) is crawled, level1 (depth=1) is crawled, level2 (depth=2) is NOT
+    await runMirror(db, { domain: DOMAIN, url: SEED, timeout_seconds: 30, max_depth: 1 });
+
+    const calls = fetch.mock.calls.map(c => c[0]);
+    expect(calls.some(u => u === level1)).toBe(true);
+    expect(calls).not.toContain(level2);
+    db.close();
+  });
+});
+
+describe('mirror follow_overrides', () => {
+  it('does not fetch URLs when follow_override=false', async () => {
+    const db = openDb(DOMAIN);
+    const skippedUrl = `${SEED}/skip-this/page`;
+
+    fetch.mockImplementation(async (url) => {
+      if (url === SEED || url === `${SEED}/`) return mockResponse(htmlPage([skippedUrl]));
+      return mockResponse(htmlPage([]));
+    });
+
+    await runMirror(db, { domain: DOMAIN, url: SEED, timeout_seconds: 30,
+      rules: { follow_overrides: [{ pattern: '/skip-this/', follow: false }] } });
+
+    const calls = fetch.mock.calls.map(c => c[0]);
+    expect(calls).not.toContain(skippedUrl);
+    db.close();
+  });
+});
+
 describe('mirror markGoneUrls: only on complete runs', () => {
   it('does NOT mark pages gone when run times out (partial crawl)', async () => {
     const db = openDb(DOMAIN);
@@ -124,6 +224,40 @@ describe('mirror markGoneUrls: only on complete runs', () => {
     // existingUrl was not seen — but run was incomplete, so must NOT be marked gone
     const row = db.prepare('SELECT gone FROM pages WHERE url=?').get(existingUrl);
     expect(row?.gone).toBe(0);
+    db.close();
+  });
+
+  it('304 response updates last_seen_at and extracts links from cached HTML', async () => {
+    const db = openDb(DOMAIN);
+    const childUrl = `${SEED}/child-discovered`;
+    // Pre-populate the seed page with cached HTML that has a link to childUrl
+    const cachedHtml = htmlPage([childUrl]);
+    const mirrorDir = join(testRoot, DOMAIN);
+    mkdirSync(mirrorDir, { recursive: true });
+    const cachedPath = join(mirrorDir, 'index.html');
+    writeFileSync(cachedPath, cachedHtml);
+    const oldDate = new Date(Date.now() - 2 * 86400000).toISOString();
+    db.prepare('INSERT INTO pages (url, path_slug, local_path, mime_type, gone, last_seen_at, first_seen_at) VALUES (?,?,?,?,?,?,?)')
+      .run(SEED, 'index', cachedPath, 'text/html', 0, oldDate, oldDate);
+
+    let childFetched = false;
+    fetch.mockImplementation(async (url) => {
+      if (url === SEED || url === `${SEED}/`) {
+        return { ok: true, status: 304, headers: { get: () => null }, arrayBuffer: async () => Buffer.from('') };
+      }
+      if (url === childUrl) {
+        childFetched = true;
+        return mockResponse(htmlPage([]));
+      }
+      return { ok: false, status: 404, headers: { get: () => null } };
+    });
+
+    await runMirror(db, { domain: DOMAIN, url: SEED, timeout_seconds: 30 });
+
+    // 304 path should have extracted links from cached HTML and queued child
+    expect(childFetched).toBe(true);
+    const seedRow = db.prepare('SELECT last_seen_at FROM pages WHERE url=?').get(SEED);
+    expect(seedRow.last_seen_at).not.toBe(oldDate);
     db.close();
   });
 

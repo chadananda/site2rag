@@ -13,14 +13,14 @@ const mkS3Client = (archiveCfg) => new S3Client({
   forcePathStyle: true
 });
 /** Compute net_loss over window_days. */
-const computeNetLoss = (db, windowDays) => {
+export const computeNetLoss = (db, windowDays) => {
   const since = new Date(Date.now() - windowDays * 86400000).toISOString();
   const gone = db.prepare('SELECT COUNT(*) as cnt FROM pages WHERE gone=1 AND gone_since >= ?').get(since)?.cnt || 0;
   const added = db.prepare('SELECT COUNT(*) as cnt FROM pages WHERE first_seen_at >= ? AND gone=0').get(since)?.cnt || 0;
   return gone - added;
 };
 /** Check if degradation freeze should trigger. */
-const shouldFreeze = (db, retentionCfg) => {
+export const shouldFreeze = (db, retentionCfg) => {
   if (retentionCfg.preserve_always) return true;
   const freezeCfg = retentionCfg.freeze_on_degradation;
   if (!freezeCfg?.enabled) return false;

@@ -68,7 +68,20 @@ def enhance_contrast(img, issues=None):
     bw = gray.point(lambda p: 0 if p < thresh else 255).convert('RGB')
     variants.append(('otsu_threshold', bw))
 
-    # 4. Bleed-through suppression — for reverse-side bleed on old newspaper/book scans.
+    # 4. Sharpen — corrects blur introduced by downscaling; sharpens column gutter edges.
+    gray_s = img.convert('L')
+    sharpened = ImageEnhance.Sharpness(gray_s.convert('RGB')).enhance(2.0)
+    variants.append(('sharpen', sharpened))
+
+    # 5. Unsharp mask — stronger edge accentuation; good when resize DPI is low.
+    umask = img.filter(ImageFilter.UnsharpMask(radius=1, percent=200, threshold=3))
+    variants.append(('unsharp_mask', umask.convert('RGB')))
+
+    # 6. Otsu + sharpen — binarize then re-sharpen; can clarify blurry binarized edges.
+    bw_sharpened = ImageEnhance.Sharpness(bw).enhance(2.0)
+    variants.append(('otsu+sharpen', bw_sharpened))
+
+    # 8. Bleed-through suppression — for reverse-side bleed on old newspaper/book scans.
     # Bleed pixels live in the 130-220 mid-gray range; real text is below 100.
     # Strategy: whiten the bleed zone, then autocontrast what remains.
     if 'bleed_through' in issues:
@@ -94,7 +107,7 @@ def enhance_contrast(img, issues=None):
         auto_inv = ImageOps.autocontrast(inv, cutoff=1)
         variants.append(('bg_subtract', auto_inv))
 
-    # 5. Faded text: aggressive contrast + brightness push
+    # 9. Faded text: aggressive contrast + brightness push
     if 'faded' in issues or 'low_contrast' in issues:
         gray3 = img.convert('L')
         stretched = ImageOps.autocontrast(gray3, cutoff=5).convert('RGB')

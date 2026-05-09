@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 // Patch SITE2RAG_ROOT for tests
 const testRoot = join(tmpdir(), `site2rag-test-${Date.now()}`);
 process.env.SITE2RAG_ROOT = testRoot;
-import { openDb, startRun, finishRun, upsertPage, getMeta, setMeta, upsertSitemap, markGoneUrls, logLlmCall, llmCost, getOcrPage, saveOcrPage, upsertAsset, addAssetRef, markSitemapRemoved } from '../src/db.js';
+import { openDb, startRun, finishRun, upsertPage, getMeta, setMeta, upsertSitemap, markGoneUrls, logLlmCall, llmCost, getOcrPage, saveOcrPage, upsertAsset, addAssetRef, markSitemapRemoved, upsertExport } from '../src/db.js';
 const TEST_DOMAIN = 'test.example.com';
 describe('db', () => {
   let db;
@@ -30,6 +30,33 @@ describe('db', () => {
     expect(row.status).toBe('success');
     expect(row.pages_new).toBe(5);
     expect(row.finished_at).toBeTruthy();
+  });
+
+  it('startRun marks any previously running run as interrupted', () => {
+    const id1 = startRun(db);
+    // id1 is now 'running' — start a new run without finishing id1
+    const id2 = startRun(db);
+    const first = db.prepare('SELECT status FROM runs WHERE id=?').get(id1);
+    expect(first.status).toBe('interrupted');
+    expect(id2).toBeGreaterThan(id1);
+  });
+
+  it('startRun clears mirror_progress and mirror_run_started_at from site_meta', () => {
+    setMeta(db, 'mirror_progress', '{"checked":5}');
+    setMeta(db, 'mirror_run_started_at', new Date().toISOString());
+    setMeta(db, 'current_stage', 'mirror');
+    startRun(db);
+    expect(getMeta(db, 'mirror_progress')).toBeUndefined();
+    expect(getMeta(db, 'mirror_run_started_at')).toBeUndefined();
+    expect(getMeta(db, 'current_stage')).toBeUndefined();
+  });
+
+  it('upsertSitemap clears removed=1 when URL is re-seen', () => {
+    upsertSitemap(db, { url: 'https://example.com/page', lastmod: null, source_sitemap: null });
+    db.prepare('UPDATE sitemaps SET removed=1 WHERE url=?').run('https://example.com/page');
+    upsertSitemap(db, { url: 'https://example.com/page', lastmod: '2024-06-01', source_sitemap: null });
+    const row = db.prepare('SELECT removed FROM sitemaps WHERE url=?').get('https://example.com/page');
+    expect(row.removed).toBe(0);
   });
   it('upsertPage inserts new page', () => {
     upsertPage(db, { url: 'https://test.example.com/', path_slug: 'index', local_path: '/tmp/index.html', from_sitemap: 0, content_hash: 'sha256:abc', mime_type: 'text/html', status_code: 200, depth: 0 });
@@ -116,6 +143,18 @@ describe('db', () => {
     const cost = llmCost('claude-sonnet-4-5', 1000000, 0);
     expect(cost).toBeCloseTo(3.00, 5);
   });
+  it('llmCost computes claude-haiku-4-5-20251001 at $0.80/M input', () => {
+    const cost = llmCost('claude-haiku-4-5-20251001', 1000000, 0);
+    expect(cost).toBeCloseTo(0.80, 5);
+  });
+  it('llmCost computes claude-opus-4-7 at $15.00/M input', () => {
+    const cost = llmCost('claude-opus-4-7', 1000000, 0);
+    expect(cost).toBeCloseTo(15.00, 5);
+  });
+  it('llmCost computes claude-sonnet-4-5-20251001 at $3.00/M input', () => {
+    const cost = llmCost('claude-sonnet-4-5-20251001', 1000000, 0);
+    expect(cost).toBeCloseTo(3.00, 5);
+  });
   it('logLlmCall inserts row and cost is retrievable', () => {
     logLlmCall(db, { stage: 'ocr', url: 'https://test.example.com/doc.pdf', page_no: 1, provider: 'anthropic', model: 'claude-haiku-3-5-20241022', tokens_in: 500, tokens_out: 200, cost_usd: 0.001, ok: 1 });
     const row = db.prepare('SELECT * FROM llm_calls WHERE url=?').get('https://test.example.com/doc.pdf');
@@ -140,6 +179,23 @@ describe('db', () => {
     expect(after).toBeTruthy();
     expect(after >= before).toBe(true);
   });
+  it('upsertPage revives a gone page (sets gone=0, clears gone_since)', () => {
+    const url = 'https://test.example.com/revived';
+    db.prepare('INSERT INTO pages (url, path_slug, gone, gone_since, last_seen_at) VALUES (?,?,?,?,?)').run(url, 'revived', 1, '2024-01-01T00:00:00.000Z', '2024-01-01T00:00:00.000Z');
+    upsertPage(db, { url, path_slug: 'revived', content_hash: 'sha256:new', mime_type: 'text/html', status_code: 200, depth: 0 });
+    const row = db.prepare('SELECT * FROM pages WHERE url=?').get(url);
+    expect(row.gone).toBe(0);
+    expect(row.gone_since).toBeNull();
+  });
+
+  it('upsertPage preserves existing page_role when updating with page_role=null', () => {
+    const url = 'https://test.example.com/rolepreserve';
+    upsertPage(db, { url, path_slug: 'rp', content_hash: 'sha256:a', mime_type: 'text/html', status_code: 200, depth: 0, page_role: 'content' });
+    upsertPage(db, { url, path_slug: 'rp', content_hash: 'sha256:b', mime_type: 'text/html', status_code: 200, depth: 0, page_role: null });
+    const row = db.prepare('SELECT page_role FROM pages WHERE url=?').get(url);
+    expect(row.page_role).toBe('content');
+  });
+
   it('upsertPage does NOT update last_changed_at when hash is same', () => {
     const url = 'https://test.example.com/unchanged-hash';
     upsertPage(db, { url, path_slug: 'uh', content_hash: 'sha256:same', mime_type: 'text/html', status_code: 200, depth: 0 });
@@ -149,6 +205,58 @@ describe('db', () => {
     upsertPage(db, { url, path_slug: 'uh', content_hash: 'sha256:same', mime_type: 'text/html', status_code: 200, depth: 0 });
     const row2 = db.prepare('SELECT last_changed_at FROM pages WHERE url=?').get(url);
     expect(row2.last_changed_at).toBe('2020-01-01T00:00:00.000Z');
+  });
+
+  it('finishRun with no fields sets status and finished_at only', () => {
+    const id = startRun(db);
+    finishRun(db, id, 'success');
+    const row = db.prepare('SELECT * FROM runs WHERE id=?').get(id);
+    expect(row.status).toBe('success');
+    expect(row.finished_at).toBeTruthy();
+  });
+
+  it('finishRun with multiple fields stores all values', () => {
+    const id = startRun(db);
+    finishRun(db, id, 'failed', { pages_new: 3, pages_changed: 1, message: 'disk full' });
+    const row = db.prepare('SELECT * FROM runs WHERE id=?').get(id);
+    expect(row.status).toBe('failed');
+    expect(row.pages_new).toBe(3);
+    expect(row.message).toBe('disk full');
+  });
+
+  it('upsertPage sets from_sitemap=1 when passed', () => {
+    const url = 'https://test.example.com/sitemap-page';
+    upsertPage(db, { url, path_slug: 'sp', content_hash: 'sha256:sp', mime_type: 'text/html', status_code: 200, depth: 1, from_sitemap: 1 });
+    const row = db.prepare('SELECT from_sitemap FROM pages WHERE url=?').get(url);
+    expect(row.from_sitemap).toBe(1);
+  });
+
+  it('upsertPage stores depth value correctly', () => {
+    const url = 'https://test.example.com/deep-page';
+    upsertPage(db, { url, path_slug: 'dp', content_hash: 'sha256:dp', mime_type: 'text/html', status_code: 200, depth: 4 });
+    const row = db.prepare('SELECT depth FROM pages WHERE url=?').get(url);
+    expect(row.depth).toBe(4);
+  });
+});
+
+describe('db — upsertExport', () => {
+  let db;
+  beforeEach(() => { db = openDb(TEST_DOMAIN); });
+  afterEach(() => { db.close(); rmSync(testRoot, { recursive: true, force: true }); });
+
+  it('inserts a new export row', () => {
+    upsertExport(db, {
+      url: 'https://test.example.com/page', md_path: '/tmp/page.md',
+      source_hash: 'sha256:abc', md_hash: 'sha256:def',
+      exported_at: new Date().toISOString(), conversion_method: 'readability+turndown',
+      word_count: 500, ocr_used: 0, ocr_engines: null, reconciler: null,
+      pages: null, agreement_avg: null, flagged_pages: null, host_page_url: null,
+      status: 'ok', error: null
+    });
+    const row = db.prepare('SELECT * FROM exports WHERE url=?').get('https://test.example.com/page');
+    expect(row).toBeTruthy();
+    expect(row.status).toBe('ok');
+    expect(row.source_hash).toBe('sha256:abc');
   });
 });
 

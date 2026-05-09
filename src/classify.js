@@ -8,9 +8,9 @@ import { DOC_EXTS } from './constants.js';
 /** Strip HTML to plain text. */
 const toText = (html) => cheerio.load(html).text().replace(/\s+/g, ' ').trim();
 /** Count words in text. */
-const wordCount = (text) => text.split(/\s+/).filter(Boolean).length;
+export const wordCount = (text) => text.split(/\s+/).filter(Boolean).length;
 /** String similarity -- Jaccard on word sets. Used for title_doc_overlap. */
-const jaccard = (a, b) => {
+export const jaccard = (a, b) => {
   const sa = new Set(a.toLowerCase().split(/\W+/).filter(Boolean));
   const sb = new Set(b.toLowerCase().split(/\W+/).filter(Boolean));
   const intersection = [...sa].filter(w => sb.has(w)).length;
@@ -32,7 +32,7 @@ const extractCleanText = ($, html, compiled) => {
   } catch { return toText(html); } finally { dom?.window.close(); }
 };
 /** Compute doc_link_count and title_doc_overlap for host_page detection. */
-const computeDocFeatures = ($, pageTitle) => {
+export const computeDocFeatures = ($, pageTitle) => {
   let doc_link_count = 0;
   let max_overlap = 0;
   $('a[href]').each((_, el) => {
@@ -48,13 +48,13 @@ const computeDocFeatures = ($, pageTitle) => {
   return { doc_link_count, title_doc_overlap: max_overlap };
 };
 /** Compute text-to-link ratio. */
-const textToLinkRatio = ($, text) => {
+export const textToLinkRatio = ($, text) => {
   const linkCount = $('a[href]').length;
   const wc = wordCount(text);
   return linkCount > 0 ? wc / linkCount : wc;
 };
 /** Heuristic 4-role classification based on computed features. */
-const heuristicRole = (features, wordThreshold) => {
+export const heuristicRole = (features, wordThreshold) => {
   const { wc, doc_link_count, title_doc_overlap, outbound_link_count, ttr } = features;
   if (wc < wordThreshold && doc_link_count >= 1 && (title_doc_overlap > 0.3 || doc_link_count >= 1)) return 'host_page';
   if (wc < 50 && outbound_link_count === 1) return 'redirect';

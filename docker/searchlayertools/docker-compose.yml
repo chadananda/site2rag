@@ -1,0 +1,32 @@
+# searchlayertools worker — drop-in replacement for native worker-agent install
+# Usage: docker compose up -d
+# GPU (AMD): uncomment the devices section
+# GPU (NVIDIA): uncomment the deploy section
+
+services:
+  worker:
+    image: searchlayertools:latest
+    build:
+      context: ../..
+      dockerfile: docker/searchlayertools/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "${WORKER_PORT:-49910}:49910"
+    environment:
+      WORKER_PORT: "49910"
+      WORKER_REGISTRY: "${WORKER_REGISTRY:-}"
+      CAPACITY_LIMIT: "${CAPACITY_LIMIT:-0.80}"
+    # AMD ROCm GPU passthrough (uncomment on ROCm-capable Linux hosts):
+    # devices:
+    #   - /dev/kfd
+    #   - /dev/dri
+    # group_add:
+    #   - video
+    # NVIDIA GPU passthrough (uncomment + requires nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]

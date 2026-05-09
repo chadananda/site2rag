@@ -1,4 +1,4 @@
-// PDF quality scoring -- heuristics only, no AI. Exports: scorePdf, saveQualityScore, maybeQueue, extractBadSample. Re-exports: detectLanguage, LANG_COST, LANG_PRIORITY. Deps: pdf-parse, language
+// PDF quality scoring -- heuristics only, no AI. Exports: scorePdf, saveQualityScore, maybeQueue, extractBadSample, ocrNoiseRatio. Re-exports: detectLanguage, LANG_COST, LANG_PRIORITY. Deps: pdf-parse, language
 import pdfParse from 'pdf-parse';
 import { readFileSync } from 'fs';
 import { detectLanguage, detectLanguageFromUrl, LANG_COST, LANG_PRIORITY, LANG_WORDS } from '../language.js';
@@ -47,6 +47,23 @@ const tokenDistribution = (text) => {
   return reasonable * 0.6 + unique * 0.4;
 };
 
+/**
+ * OCR digit-substitution noise ratio for Latin-script text.
+ * Detects confusable digit↔letter substitutions (0↔O, 1↔l, 5↔S, 8↔B, 2↔Z).
+ * Real prose: ~0%. OCR scans: 5-20%.
+ * Returns 0-1 (fraction of letter-dominant tokens with embedded digit in letter run).
+ */
+export const ocrNoiseRatio = (text) => {
+  const tokens = text.split(/\s+/).filter(w => w.length >= 3 && w.length <= 25);
+  const letterTokens = tokens.filter(w => {
+    const letters = (w.match(/[a-zA-Z]/g) || []).length;
+    return letters / w.length >= 0.5;
+  });
+  if (letterTokens.length < 10) return 0;
+  const noisy = letterTokens.filter(w => /[a-zA-Z][0-9][a-zA-Z]/.test(w));
+  return noisy.length / letterTokens.length;
+};
+
 /** Estimate word quality from a text sample. Returns 0-1. lang param selects word set. */
 export const wordQuality = (text, lang = 'english') => {
   if (!text || !text.trim()) return 0;
@@ -70,7 +87,8 @@ export const wordQuality = (text, lang = 'english') => {
     const ratio = vowels / lower.length;
     return ratio >= 0.2 && ratio <= 0.75 && !/(.)\1{3,}/.test(lower);
   });
-  return realWords.length / sample.length;
+  const noise = ocrNoiseRatio(text);
+  return Math.max(0, realWords.length / sample.length - noise * 3);
 };
 /**
  * Score a PDF file for OCR quality. Returns quality metrics object.

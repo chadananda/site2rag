@@ -124,17 +124,26 @@ export async function s6SpellFix(ctx) {
     ctx.addDecision('s6', 'completed',
       `${pagesFixed} pages fixed, $${totalCost.toFixed(4)} cost`, totalCost);
 
-    // Record quality after spell-fix: prior score + correction bonus
+    // Retroactive scoring: corrections reveal the prior stage's score was overstated.
+    // e.g. s5=1.00, 3% of words corrected → s5 retroactively becomes 0.97, s6=1.00.
     if (pagesFixed > 0) {
-      const prior = ctx.quality.perStage['s5'] ?? ctx.quality.perStage['s3'] ?? ctx.quality.baseline?.composite_score ?? 0;
-      const totalFuzzy = ctx.pages.reduce((s, p) => s + (p.words?.filter(w => {
-        const conf = w.conf ?? 100;
-        return conf >= (ctx.config.thresholds?.fuzzyWord ?? 0.60) * 100 &&
-               conf < (ctx.config.thresholds?.cleanPage ?? 0.90) * 100;
-      }).length ?? 0), 0);
-      const totalFixed = ctx.pages.reduce((s, p) => s + (p._spellFixCount ?? 0), 0);
-      const fixRate = totalFuzzy > 0 ? totalFixed / totalFuzzy : 0;
-      ctx.recordStageQuality('s6', Math.min(1, Math.round((prior + fixRate * (1 - prior) * 0.5) * 1000) / 1000));
+      const priorStageName = ctx.quality.perStage['s5'] !== undefined ? 's5'
+                           : ctx.quality.perStage['s3'] !== undefined ? 's3' : null;
+      const priorScore = priorStageName
+        ? ctx.quality.perStage[priorStageName]
+        : (ctx.quality.baseline?.composite_score ?? 0);
+
+      const totalPageWords = ctx.pages.reduce((s, p) => s + (p.words?.length ?? 0), 0);
+      const totalFixed     = ctx.pages.reduce((s, p) => s + (p._spellFixCount ?? 0), 0);
+      const correctionRate = totalPageWords > 0 ? totalFixed / totalPageWords : 0;
+
+      if (correctionRate > 0 && priorStageName) {
+        ctx.quality.perStage[priorStageName] = Math.round(priorScore * (1 - correctionRate) * 1000) / 1000;
+        ctx.addDecision('s6', 'retroactive_adjust',
+          `${priorStageName} adjusted ${priorScore.toFixed(3)} → ${ctx.quality.perStage[priorStageName].toFixed(3)} (${totalFixed}/${totalPageWords} words corrected)`);
+      }
+      // s6 quality = the un-adjusted prior (we corrected back up to it)
+      ctx.recordStageQuality('s6', Math.min(1, Math.round(priorScore * 1000) / 1000));
     }
 
   } catch (err) {

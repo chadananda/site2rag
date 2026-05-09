@@ -1,18 +1,28 @@
 // Language detection pipeline for image PDFs: free Unicode scan → Tesseract+Haiku identify. Exports: detectLanguageForImagePdfs. Deps: score, identify, language, fs
 import { existsSync, readFileSync } from 'fs';
 import { cpus } from 'os';
-import { detectLanguage, LANG_PRIORITY } from '../language.js';
+import { detectLanguage, detectLanguageFromUrlPath, LANG_PRIORITY } from '../language.js';
 import { identifyDocument } from './identify.js';
 
 const log = (msg) => console.log(`[pdf-upgrade] ${new Date().toISOString().slice(0,19)} ${msg}`);
 const FREE_BATCH = 200;
 const IDENTIFY_BATCH = 40;
 const URL_LANG_HINTS = {
-  arabic:  /\/arabic\/|[_-]ar[_-]|\/ar\//,
-  persian: /\/persian\/|\/farsi\/|[_-]fa[_-]|\/fa\//,
-  hebrew:  /\/hebrew\/|[_-]he[_-]|\/he\//,
-  japanese: /\/japanese\/|[_-]ja[_-]|\/ja\//,
-  chinese: /\/chinese\/|[_-]zh[_-]|\/zh\//,
+  french:     /\/french\/|\/francais\/|[/_-]fr[/_-]/i,
+  spanish:    /\/spanish\/|\/espanol\/|[/_-]es[/_-]/i,
+  german:     /\/german\/|\/deutsch\/|[/_-]de[/_-]/i,
+  italian:    /\/italian\/|\/italiano\/|[/_-]it[/_-]/i,
+  portuguese: /\/portuguese\/|\/portugues\/|[/_-]pt[/_-]/i,
+  dutch:      /\/dutch\/|\/nederland\/|[/_-]nl[/_-]/i,
+  polish:     /\/polish\/|\/polski\/|[/_-]pl[/_-]/i,
+  turkish:    /\/turkish\/|\/turkce\/|[/_-]tr[/_-]/i,
+  arabic:     /\/arabic\/|[/_-]ar[/_-]|\/ar\//i,
+  persian:    /\/persian\/|\/farsi\/|[/_-]fa[/_-]|\/fa\//i,
+  hebrew:     /\/hebrew\/|[/_-]he[/_-]|\/he\//i,
+  japanese:   /\/japanese\/|[/_-]ja[/_-]|\/ja\//i,
+  chinese:    /\/chinese\/|\/zhong\/|[/_-]zh[/_-]|\/zh\//i,
+  korean:     /\/korean\/|[/_-]ko[/_-]|\/ko\//i,
+  russian:    /\/russian\/|\/russki\/|[/_-]ru[/_-]|\/ru\//i,
 };
 
 const saveAndReprioritize = (db, url, langKey, topic) => {
@@ -50,7 +60,8 @@ export const detectLanguageForImagePdfs = async (db, domain) => {
     LEFT JOIN pages p ON pq.url=p.url
     WHERE (pq.ai_language IS NULL OR pq.ai_language='unknown'
       OR (pq.ai_language='english' AND pq.readable_pages_pct < 0.4 AND pq.word_quality_estimate < 0.5)
-      OR (pq.ai_language='english' AND pq.has_text_layer=1 AND (pq.word_quality_estimate IS NULL OR pq.word_quality_estimate < 0.05)))
+      OR (pq.ai_language='english' AND pq.has_text_layer=1 AND (pq.word_quality_estimate IS NULL OR pq.word_quality_estimate < 0.05))
+      OR (pq.ai_language='english' AND pq.has_text_layer=0))
     LIMIT ?`).all(FREE_BATCH);
 
   let freeDetected = 0;
@@ -58,6 +69,10 @@ export const detectLanguageForImagePdfs = async (db, domain) => {
     let langKey = 'unknown';
     for (const [lang, re] of Object.entries(URL_LANG_HINTS)) {
       if (re.test(row.url)) { langKey = lang; break; }
+    }
+    if (langKey === 'unknown') {
+      const urlPathLang = detectLanguageFromUrlPath(row.url);
+      if (urlPathLang) langKey = urlPathLang;
     }
     if (langKey === 'unknown') {
       const titleSample = [row.hosted_title, row.pdf_title, row.excerpt].filter(Boolean).join(' ');

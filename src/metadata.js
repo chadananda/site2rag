@@ -9,11 +9,11 @@ const extractJsonLd = ($) => {
   return results;
 };
 /** Find first JSON-LD object matching type. */
-const findJsonLd = (items, ...types) => items.find(item => types.some(t => item['@type'] === t || (Array.isArray(item['@type']) && item['@type'].includes(t))));
+export const findJsonLd = (items, ...types) => items.find(item => types.some(t => item['@type'] === t || (Array.isArray(item['@type']) && item['@type'].includes(t))));
 /** Normalize ISO date string or return null. */
-const normDate = (v) => { try { return v ? new Date(v).toISOString() : null; } catch { return null; } };
+export const normDate = (v) => { try { return v ? new Date(v).toISOString() : null; } catch { return null; } };
 /** Extract authors from JSON-LD Person/Organization or string. */
-const parseAuthors = (raw) => {
+export const parseAuthors = (raw) => {
   if (!raw) return [];
   const arr = Array.isArray(raw) ? raw : [raw];
   return arr.map(a => {

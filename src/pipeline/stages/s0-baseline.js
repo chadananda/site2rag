@@ -78,42 +78,16 @@ export async function s0Baseline(ctx) {
       costUsd   += usage.cost_usd;
     }
 
-    const threshold = ctx.config.thresholds?.goodDoc ?? 0.75;
-    if (score.composite_score >= threshold) {
-      ctx.config.skip = [...new Set([...(ctx.config.skip ?? []), 's1', 's2', 's3', 's4', 's5'])];
-      ctx.addDecision('s0', 'early_exit',
-        `composite ${score.composite_score.toFixed(3)} >= threshold ${threshold} — skipping heavy stages`,
-        score.composite_score);
-      notes = 'early_exit: doc already good enough';
-    }
-
-    // Text-layer PDFs with substantial content need no OCR at all — skip s1-s5 entirely.
-    // pdf-parse can't decode Persian/Arabic fonts, so composite_score may be low even when the
-    // text layer is perfect (e.g. bilingual PDFs generated from Word/Google Docs). avg_chars_per_page
-    // is a reliable signal: if text is extractable at scale, OCR will only make things worse.
+    // Text-layer PDFs: skip OCR stages entirely — PDF text encoding is authoritative.
+    // pdf-parse can't decode Persian/Arabic fonts, so use avg_chars_per_page as the signal:
+    // if the text layer delivers substantial content, OCR would only degrade quality.
+    // Note: this does NOT skip s6 (spellfix) or s8 (export) — those still run on extracted text.
     if (score.has_text_layer === 1 && score.avg_chars_per_page >= 300) {
       ctx.config.skip = [...new Set([...(ctx.config.skip ?? []), 's1', 's2', 's3', 's4', 's5'])];
       ctx.addDecision('s0', 'skip_all_ocr',
-        `has_text_layer=1 avg_chars=${score.avg_chars_per_page} — text PDF needs no OCR`,
+        `has_text_layer=1 avg_chars=${score.avg_chars_per_page} — text PDF, skip OCR`,
         score.composite_score);
       notes = (notes ? notes + '; ' : '') + 'text_layer_skip: no OCR needed';
-    } else if (score.has_text_layer === 1 && !ctx.config.skip?.includes('s4')) {
-      // Sparse text layer: still skip the escalation stages (re-OCR + Vision AI)
-      ctx.config.skip = [...new Set([...(ctx.config.skip ?? []), 's4', 's5'])];
-      ctx.addDecision('s0', 'skip_ocr_escalation',
-        `has_text_layer=1 — 600dpi re-scan and Vision AI only apply to image PDFs`,
-        score.composite_score);
-    }
-
-    // Skip s5 only if below localVision gate AND not a hard image PDF.
-    // Hard docs (difficulty >= 0.3) need vision even at low importance — they're hard because
-    // local OCR fails on them and escalation is the only path to usable text.
-    const visionGate = ctx.config.escalation?.localVision ?? 1;
-    const difficulty = score.processing_difficulty ?? 0;
-    if (ctx.importance < visionGate && difficulty < 0.3 && !ctx.config.skip?.includes('s5')) {
-      ctx.config.skip = [...new Set([...(ctx.config.skip ?? []), 's5'])];
-      ctx.addDecision('s0', 'skip_vision',
-        `importance ${ctx.importance} < gate ${visionGate} and difficulty ${difficulty} < 0.3`, ctx.importance);
     }
 
   } catch (err) {

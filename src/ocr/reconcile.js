@@ -3,7 +3,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { readFileSync } from 'fs';
 import { logLlmCall, llmCost } from '../db.js';
 /** Normalized Levenshtein distance between two strings (0=identical, 1=completely different). */
-const levenshtein = (a, b) => {
+export const levenshtein = (a, b) => {
   const la = a.length, lb = b.length;
   if (!la) return lb ? 1 : 0;
   if (!lb) return 1;
@@ -17,7 +17,7 @@ const levenshtein = (a, b) => {
   return dp[la][lb] / Math.max(la, lb);
 };
 /** Compute normalized agreement score between two markdown strings (1=identical). */
-const agreementScore = (a, b) => {
+export const agreementScore = (a, b) => {
   const norm = (s) => s.toLowerCase().replace(/\s+/g, ' ').trim();
   return 1 - levenshtein(norm(a), norm(b));
 };
@@ -34,9 +34,9 @@ export const computeAgreement = (results) => {
   return minAgreement;
 };
 /** Pick highest-confidence engine result. */
-const pickBestEngine = (results) => results.reduce((best, r) => r.confidence > best.confidence ? r : best, results[0]);
+export const pickBestEngine = (results) => results.reduce((best, r) => r.confidence > best.confidence ? r : best, results[0]);
 /** Build reconciler prompt. */
-const buildReconcilerPrompt = (engineResults, passBboxes) => {
+export const buildReconcilerPrompt = (engineResults, passBboxes) => {
   const transcripts = engineResults.map(r => ({
     name: r.engine,
     transcript: r.text_md,

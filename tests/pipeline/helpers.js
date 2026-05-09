@@ -46,7 +46,7 @@ export const makeCtx = (overrides = {}) => {
     sourcePath,
     sourceUrl: 'https://example.com/test.pdf',
     importance,
-    config: { ...DEFAULT_CONFIG, failFast: false, ...config },
+    config: { ...DEFAULT_CONFIG, failFast: false, toolBackends: {}, ...config },
     meta: { title: 'Test Document' },
   });
 };

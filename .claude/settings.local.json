@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -f .git/index.lock)",
+      "Bash(rtk git *)",
+      "WebFetch(domain:bahai.works)",
+      "WebFetch(domain:hurqalya.ucmerced.edu)",
+      "WebFetch(domain:blog.loomofreality.org)",
+      "WebFetch(domain:loom.loomofreality.org)",
+      "WebFetch(domain:bahai-library.com)",
+      "WebFetch(domain:bhcollection.netlify.app)",
+      "WebSearch"
+    ]
+  }
+}

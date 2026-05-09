@@ -24,6 +24,69 @@ import { createHash } from 'crypto';
 import { getTmpDir } from '../../config.js';
 // ── config defaults ──────────────────────────────────────────────────────────
 const D_DIRTY_WORD = 0.40;   // thresholds.dirtyWord
+const MISTRAL_OCR_MODEL = 'mistral-ocr-latest';
+const MISTRAL_OCR_URL   = 'https://api.mistral.ai/v1/ocr';
+
+// ── Mistral block OCR ─────────────────────────────────────────────────────────
+// Mistral returns MD text only — no bboxes. It is synthesis CONTEXT, not a replacement OCR engine.
+// Flow: re-crop block at 600dpi → send to Mistral → get MD text → second Haiku keyed-correction
+// pass using tessWords as spatial anchor + Mistral text as high-quality reference → apply
+// corrections to tessWords, preserving all bboxes. Mistral never overrides positions.
+//
+// 600dpi crop: dirty blocks failed at 300dpi; giving Mistral a 2× resolution image improves accuracy.
+// Crops are re-extracted from the 600dpi rasterization already done for Tesseract re-OCR.
+async function mistralOcrBlock(cropPath, apiKey) {
+  try {
+    const imgB64 = readFileSync(cropPath).toString('base64');
+    const res = await fetch(MISTRAL_OCR_URL, {
+      method: 'POST',
+      headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: MISTRAL_OCR_MODEL, document: { type: 'image_url', image_url: `data:image/png;base64,${imgB64}` } }),
+      signal: AbortSignal.timeout(30000),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const text = (data.pages ?? []).map(p => p.markdown || p.text || '').join('\n').trim();
+    return text || null;
+  } catch { return null; }
+}
+
+// Parse Haiku correction dict {"idx": "corrected"|null} — same contract as s3 parseCorrectionResponse.
+function parseCorrectionDict(text) {
+  try {
+    const match = text.match(/\{[\s\S]*?\}/);
+    if (!match) return {};
+    const raw = JSON.parse(match[0]);
+    const out = {};
+    for (const [k, v] of Object.entries(raw)) {
+      const idx = parseInt(k, 10);
+      if (!isNaN(idx) && (v === null || typeof v === 'string')) out[idx] = v;
+    }
+    return out;
+  } catch { return {}; }
+}
+
+// Apply corrections to tessWords preserving bboxes — same contract as s3 applyCorrections.
+function applyBlockCorrections(tessWords, corrections) {
+  if (!Object.keys(corrections).length) return tessWords;
+  const result = [];
+  for (let i = 0; i < tessWords.length; i++) {
+    const w = tessWords[i];
+    if (!(i in corrections)) { result.push({ ...w }); continue; }
+    const v = corrections[i];
+    if (v === null) {
+      if (result.length > 0) {
+        const prev = result[result.length - 1];
+        const lineH = Math.max(1, prev.y2 - prev.y1);
+        if (Math.abs((prev.y1 + prev.y2) / 2 - (w.y1 + w.y2) / 2) < lineH * 0.75)
+          prev.x2 = Math.max(prev.x2, w.x2);
+      }
+    } else {
+      result.push({ ...w, text: v + ' ', source: 'mistral-synthesis' });
+    }
+  }
+  return result;
+}
 
 // ── vision draft helpers (boss + marker, run in parallel) ─────────────────────
 
@@ -182,6 +245,7 @@ export async function s4Escalate(ctx) {
           const delta = newMean - oldMean;
           if (words600.length > 0 && newMean > oldMean + 5) {
             page.words = words600;
+            page._words600 = true; // coords are now 600dpi; Mistral block replacement must scale _escalateBlocks bboxes
             ctx.addDecision('s4', `page_${page.pageNo}`, 'replaced-600dpi', delta);
           } else {
             ctx.addDecision('s4', `page_${page.pageNo}`, 'kept-original', delta);
@@ -193,6 +257,76 @@ export async function s4Escalate(ctx) {
           page._needsFullVision = true;
           ctx.addDecision('s4', `page_${page.pageNo}`, 'needs-full-vision', 0);
         }
+        // Mistral block escalation — only for blocks s3 flagged dirty after local OCR + Haiku synthesis.
+        // Mistral returns MD text used as HIGH-QUALITY CONTEXT for a second Haiku keyed-correction pass.
+        // tessWords remain the spatial anchor; Mistral never overrides bboxes.
+        // Blocks re-cropped at 600dpi (already rasterized above) for best Mistral accuracy.
+        const mistralKey = process.env.MISTRAL_API_KEY;
+        const dirtyBlocks = page._escalateBlocks ?? [];
+        if (mistralKey && ctx.config.apiKey && dirtyBlocks.length > 0) {
+          // _escalateBlocks coords are in 300dpi space; if words600 replaced page.words, scale for matching
+          const coordScale = page._words600 ? 2 : 1;
+          const pngPath600 = await rasterizeAt(ctx.sourcePath, page.pageNo, tmpDir, 600, ctx).catch(() => null);
+
+          const synthLimit = pLimit(4);
+          const resynthesized = await Promise.all(dirtyBlocks.map(blk => synthLimit(async () => {
+            try {
+              // Re-crop the block from 600dpi page image for Mistral (2× resolution of original crop)
+              let mistralCropPath = blk.cropPath; // fallback to 300dpi crop
+              if (pngPath600 && existsSync(pngPath600)) {
+                const mx1 = blk.x1 * 2, my1 = blk.y1 * 2;
+                const mw = (blk.x2 - blk.x1) * 2, mh = (blk.y2 - blk.y1) * 2;
+                const mCrop = join(tmpDir, `mistral_p${page.pageNo}_${blk.x1}_${blk.y1}.png`);
+                await ctx.run('convert', [pngPath600, '-crop', `${mw}x${mh}+${mx1}+${my1}`, '+repage', mCrop], { timeout: 10000 });
+                if (existsSync(mCrop)) mistralCropPath = mCrop;
+              }
+
+              const mistralText = await mistralOcrBlock(mistralCropPath, mistralKey);
+              if (!mistralText) return null;
+
+              // Second Haiku keyed-correction: tessWords anchor + all batch engine context + Mistral
+              const cleanT = (ctx.config.thresholds?.cleanPage ?? 0.9) * 100;
+              const tessLine = blk.tessWords
+                .map((w, i) => `${i}:${w.conf < cleanT ? '*' : ''}${w.text.trim()}`)
+                .join(' ');
+              const contextLines = (blk.batchContext ?? []).join('\n');
+              const prompt = `Correct OCR errors in this ${blk.lang} text. Tesseract words are the spatial anchor (* = low confidence). Other engines and Mistral are context only.\n\nTESSERACT:\n${tessLine}${contextLines ? `\n\n${contextLines}` : ''}\n\nMISTRAL (high-quality reference):\n${mistralText.slice(0, 600)}\n\nReturn ONLY JSON mapping word index to corrected string or null. Omit unchanged. Example: {"3":"corrected","7":null}\nJSON only.`;
+
+              const resp = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: { 'x-api-key': ctx.config.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+                body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 200, messages: [{ role: 'user', content: prompt }] }),
+              });
+              const data = await resp.json();
+              const corrections = parseCorrectionDict(data.content?.[0]?.text?.trim() ?? '{}');
+              if (!Object.keys(corrections).length) return null;
+
+              const correctedWords = applyBlockCorrections(blk.tessWords, corrections);
+              return { blk, correctedWords };
+            } catch { return null; }
+          })));
+
+          const succeeded = resynthesized.filter(Boolean);
+          if (succeeded.length > 0) {
+            let words = [...page.words];
+            for (const { blk, correctedWords } of succeeded) {
+              // Scale block bbox to match current page.words coordinate space
+              const sx1 = blk.x1 * coordScale, sy1 = blk.y1 * coordScale;
+              const sx2 = blk.x2 * coordScale, sy2 = blk.y2 * coordScale;
+              words = words.filter(w => !(w.x1 >= sx1 && w.y1 >= sy1 && w.x2 <= sx2 && w.y2 <= sy2));
+              // correctedWords are in 300dpi space (tessWords coords); scale if needed
+              const scaled = coordScale === 1 ? correctedWords : correctedWords.map(w => ({
+                ...w, x1: w.x1 * coordScale, y1: w.y1 * coordScale, x2: w.x2 * coordScale, y2: w.y2 * coordScale,
+              }));
+              words.push(...scaled);
+            }
+            words.sort((a, b) => a.y1 - b.y1 || a.x1 - b.x1);
+            page.words = words;
+            ctx.addDecision('s4', `mistral_p${page.pageNo}`,
+              `${succeeded.length}/${dirtyBlocks.length} blocks re-synthesized with Mistral context`);
+          }
+        }
+
         page._bucketed = page._bucketed ?? { clean: 0, fuzzy: 0, dirty: 0, needs_vision: 0 };
         page._bucketed.needs_vision = page.words.filter(w => w.needs_vision).length;
         pagesAffected++;

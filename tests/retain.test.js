@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 const testRoot = join(tmpdir(), `site2rag-retain-test-${Date.now()}`);
 process.env.SITE2RAG_ROOT = testRoot;
 import { openDb, upsertPage } from '../src/db.js';
-import { runRetain } from '../src/retain.js';
+import { runRetain, computeNetLoss, shouldFreeze } from '../src/retain.js';
 const DOMAIN = 'retain.example.com';
 describe('runRetain', () => {
   let db;
@@ -138,5 +138,60 @@ describe('runRetain', () => {
     const stats = await runRetain(db, { domain: DOMAIN, retention: { gone_grace_days: 90, freeze_on_degradation: { enabled: false } } }, DOMAIN);
     // The page was marked gone 91 days ago, so it IS eligible for GC by retain stage
     expect(stats.gc_deleted).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('computeNetLoss', () => {
+  let db;
+  beforeEach(() => { db = openDb('netloss.retain.example.com'); });
+  afterEach(() => { db.close(); rmSync(testRoot, { recursive: true, force: true }); });
+
+  it('returns 0 when no pages exist', () => {
+    expect(computeNetLoss(db, 30)).toBe(0);
+  });
+
+  it('counts recently gone pages as positive loss', () => {
+    const now = new Date().toISOString();
+    db.prepare("INSERT INTO pages (url, path_slug, mime_type, gone, gone_since) VALUES (?,?,?,?,?)")
+      .run('https://netloss.retain.example.com/old', 'old', 'text/html', 1, now);
+    expect(computeNetLoss(db, 30)).toBeGreaterThan(0);
+  });
+
+  it('recently added pages reduce net loss', () => {
+    const now = new Date().toISOString();
+    db.prepare("INSERT INTO pages (url, path_slug, mime_type, gone, gone_since, first_seen_at) VALUES (?,?,?,?,?,?)")
+      .run('https://netloss.retain.example.com/gone', 'gone', 'text/html', 1, now, now);
+    db.prepare("INSERT INTO pages (url, path_slug, mime_type, gone, first_seen_at) VALUES (?,?,?,?,?)")
+      .run('https://netloss.retain.example.com/new', 'new', 'text/html', 0, now);
+    // 1 gone - 1 added = 0
+    expect(computeNetLoss(db, 30)).toBe(0);
+  });
+});
+
+describe('shouldFreeze', () => {
+  let db;
+  beforeEach(() => { db = openDb('freeze.retain.example.com'); });
+  afterEach(() => { db.close(); rmSync(testRoot, { recursive: true, force: true }); });
+
+  it('returns true when preserve_always is set', () => {
+    expect(shouldFreeze(db, { preserve_always: true })).toBe(true);
+  });
+
+  it('returns false when freeze_on_degradation.enabled is false', () => {
+    expect(shouldFreeze(db, { freeze_on_degradation: { enabled: false } })).toBe(false);
+  });
+
+  it('returns false when freeze_on_degradation is not set', () => {
+    expect(shouldFreeze(db, {})).toBe(false);
+  });
+
+  it('returns false when net loss is below threshold', () => {
+    // No pages gone, many alive pages
+    for (let i = 0; i < 10; i++) {
+      db.prepare("INSERT INTO pages (url, path_slug, mime_type, gone) VALUES (?,?,?,?)")
+        .run(`https://freeze.retain.example.com/page${i}`, `page${i}`, 'text/html', 0);
+    }
+    const cfg = { freeze_on_degradation: { enabled: true, window_days: 30, net_loss_threshold_pct: 20, net_loss_min_pages: 50 } };
+    expect(shouldFreeze(db, cfg)).toBe(false);
   });
 });

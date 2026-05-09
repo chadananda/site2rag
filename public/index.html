@@ -27,15 +27,15 @@ if ('serviceWorker' in navigator) {
   .mono{font-family:ui-monospace,monospace}
 
   /* Thumbnail */
-  .thumb{width:72px;height:96px;object-fit:cover;object-position:top;background:#f3f4f6;flex-shrink:0;border-radius:3px;
+  .thumb{width:112px;height:100%;min-height:120px;object-fit:cover;object-position:top;background:#f3f4f6;flex-shrink:0;border-radius:3px;
     box-shadow:0 1px 3px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06);}
   .thumb-placeholder{display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:1.5rem;
-    width:72px;height:96px;flex-shrink:0;border-radius:3px;background:#f3f4f6;
+    width:112px;min-height:120px;flex-shrink:0;border-radius:3px;background:#f3f4f6;
     box-shadow:0 1px 3px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06);}
 
   /* Score block */
   .score-block{display:flex;flex-direction:column;align-items:center;justify-content:center;
-    width:72px;flex-shrink:0;border-radius:6px;padding:6px 4px;}
+    width:80px;flex-shrink:0;border-radius:6px;padding:6px 4px;}
   .score-num{font-family:ui-monospace,monospace;font-weight:900;font-size:2rem;line-height:1;letter-spacing:-.03em}
   .score-sub{font-size:.6rem;font-weight:600;text-align:center;margin-top:3px;line-height:1.2}
 
@@ -110,6 +110,22 @@ if ('serviceWorker' in navigator) {
   </div>
 
   <!-- Admin login modal -->
+  <!-- Receipt modal -->
+  <template x-if="receiptUrl">
+    <div class="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" @click.self="receiptUrl=null">
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl h-[90vh] flex flex-col overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b bg-gray-50 rounded-t-xl shrink-0">
+          <span class="text-sm font-semibold text-gray-700">Document Analysis Receipt</span>
+          <div class="flex items-center gap-3">
+            <a :href="receiptUrl" target="_blank" class="text-xs text-indigo-600 hover:underline">open in new tab ↗</a>
+            <button @click="receiptUrl=null" class="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
+          </div>
+        </div>
+        <iframe :src="receiptUrl" class="flex-1 w-full border-0 rounded-b-xl"></iframe>
+      </div>
+    </div>
+  </template>
+
   <template x-if="showLoginModal">
     <div class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" @click.self="showLoginModal=false">
       <div class="bg-white rounded-xl shadow-2xl p-6 w-80 flex flex-col gap-4">
@@ -435,29 +451,49 @@ if ('serviceWorker' in navigator) {
                    @click="openDetail(doc)"
                    :class="[
                      doc.skip ? 'opacity-40' : '',
-                     doc.status==='processing' ? 'bg-green-50 border-green-200 ring-1 ring-green-300' :
-                     activeTab==='upgraded'     ? 'bg-green-50 border-green-200' :
-                     doc.status==='failed'      ? 'bg-red-50 border-red-200' :
-                                                  'bg-white border-gray-200'
+                     activeTab==='upgraded' && doc.status==='processing' ? 'bg-green-50 border-green-200 ring-1 ring-green-300' :
+                     activeTab==='upgraded'                               ? 'bg-green-50 border-green-200' :
+                     activeTab!=='upgraded' && doc.status==='failed'     ? 'bg-red-50 border-red-200' :
+                                                                           'bg-white border-gray-200'
                    ]">
 
                 <!-- Thumbnail -->
-                <div class="shrink-0 self-start mt-0.5">
+                <div class="shrink-0 self-stretch flex flex-col">
                   <img :src="thumbSrc(doc)" :alt="docTitle(doc)"
                        class="thumb hover:opacity-80 transition-opacity"
                        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
                   <div class="thumb-placeholder" style="display:none">📄</div>
                 </div>
 
-                <!-- Score block -->
-                <div class="score-block shrink-0 self-start mt-0.5" :class="scoreBlockCls(doc)">
-                  <template x-if="doc.composite_score!=null">
-                    <div class="score-num" x-text="Math.round(doc.composite_score*100)+'%'"></div>
+                <!-- Score block(s) -->
+                <div class="shrink-0 self-stretch flex flex-col gap-1.5 mt-0.5">
+                  <!-- Upgraded tab: show after score with 'from X%' label -->
+                  <template x-if="activeTab==='upgraded' && doc.effective_after != null">
+                    <div class="score-block" :class="scoreBlockCls({composite_score: doc.effective_after})">
+                      <div class="score-num" x-text="Math.round(doc.effective_after*100)+'%'"></div>
+                      <div class="score-sub" x-text="doc.effective_before != null ? 'from '+Math.round(doc.effective_before*100)+'%' : scoreLabel(doc).label"></div>
+                    </div>
                   </template>
-                  <template x-if="doc.composite_score==null">
-                    <div class="score-num text-gray-300">—</div>
+                  <!-- Other tabs: show composite_score -->
+                  <template x-if="activeTab!=='upgraded' || doc.effective_after == null">
+                    <div class="score-block" :class="scoreBlockCls(doc)">
+                      <template x-if="doc.composite_score!=null">
+                        <div class="score-num" x-text="Math.round(doc.composite_score*100)+'%'"></div>
+                      </template>
+                      <template x-if="doc.composite_score==null">
+                        <div class="score-num text-gray-300">—</div>
+                      </template>
+                      <div class="score-sub" x-text="scoreLabel(doc).label"></div>
+                    </div>
                   </template>
-                  <div class="score-sub" x-text="scoreLabel(doc).label"></div>
+                  <!-- Improvement box: upgraded tab only -->
+                  <template x-if="activeTab==='upgraded' && doc.effective_improvement > 0.005">
+                    <button @click.stop="receiptUrl=`/receipt.html?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
+                            class="score-block bg-green-100 border border-green-300 hover:bg-green-200 hover:border-green-400 transition-colors cursor-pointer">
+                      <div class="score-num text-green-700" x-text="'+'+Math.round(doc.effective_improvement*100)+'%'"></div>
+                      <div class="score-sub text-green-600">View report</div>
+                    </button>
+                  </template>
                 </div>
 
                 <!-- Main content -->
@@ -467,14 +503,14 @@ if ('serviceWorker' in navigator) {
                     <a :href="pdfSrc(doc)" target="_blank" rel="noopener" @click.stop
                        class="font-semibold text-sm text-gray-900 hover:text-blue-600 leading-snug line-clamp-2 flex-1"
                        x-text="docTitle(doc)"></a>
-                    <!-- Status badge -->
-                    <template x-if="activityLabel(doc.url)">
+                    <!-- Status badges: only on upgraded tab -->
+                    <template x-if="activeTab==='upgraded' && activityLabel(doc.url)">
                       <span class="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
                         <span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 processing-pulse shrink-0"></span>
                         <span x-text="'processing'"></span>
                       </span>
                     </template>
-                    <template x-if="doc.status==='failed' && !activityLabel(doc.url)">
+                    <template x-if="activeTab==='upgraded' && doc.status==='failed' && !activityLabel(doc.url)">
                       <span class="shrink-0 text-xs font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full" title="Upgrade failed">✗ failed</span>
                     </template>
                     <template x-if="activeTab==='upgraded' && doc.status==='done'">
@@ -494,8 +530,8 @@ if ('serviceWorker' in navigator) {
                        x-text="doc.ai_summary"></p>
                   </template>
 
-                  <!-- Rich pipeline progress card (when actively processing) -->
-                  <template x-if="processingActivity[doc.url]?.stage && processingActivity[doc.url]?.stage !== 'queued'">
+                  <!-- Rich pipeline progress card (upgraded tab only) -->
+                  <template x-if="activeTab==='upgraded' && processingActivity[doc.url]?.stage && processingActivity[doc.url]?.stage !== 'queued'">
                     <div class="mt-2 rounded-lg border border-blue-100 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 overflow-hidden">
                       <!-- Header -->
                       <div class="flex items-center justify-between px-3 py-1.5 border-b border-blue-100/80">
@@ -586,9 +622,25 @@ if ('serviceWorker' in navigator) {
                           </template>
                         </span>
                       </div>
-                      <!-- Processing details row — always show pages + time, method if known -->
+                      <!-- Processing details row — method steps with per-stage gain -->
                       <div class="px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 text-gray-600 border-b border-gray-100">
-                        <template x-if="doc.method">
+                        <template x-if="doc.method_steps">
+                          <span class="flex items-center gap-1 flex-wrap">
+                            <template x-if="doc.method_steps.totalGainPct > 0">
+                              <span class="text-green-700 font-bold" x-text="'+'+doc.method_steps.totalGainPct+'%:'"></span>
+                            </template>
+                            <template x-for="(step, i) in doc.method_steps.steps" :key="i">
+                              <span class="flex items-center gap-1">
+                                <span class="font-semibold text-gray-700" x-text="step.label"></span>
+                                <template x-if="step.delta > 0">
+                                  <span class="text-green-600 text-xs font-mono" x-text="'(+'+step.delta+'%)'"></span>
+                                </template>
+                                <span x-show="i < doc.method_steps.steps.length - 1" class="text-gray-300">›</span>
+                              </span>
+                            </template>
+                          </span>
+                        </template>
+                        <template x-if="!doc.method_steps && doc.method">
                           <span><span class="text-gray-400">method</span> <span class="font-semibold text-gray-700" x-text="methodLabel(doc.method)"></span></span>
                         </template>
                         <template x-if="doc.pages_processed">
@@ -596,9 +648,6 @@ if ('serviceWorker' in navigator) {
                         </template>
                         <template x-if="!doc.pages_processed && doc.pages">
                           <span class="text-gray-500 mono"><span x-text="fmt(doc.pages)"></span> pages</span>
-                        </template>
-                        <template x-if="doc.word_quality_estimate != null">
-                          <span><span class="text-gray-400">word quality</span> <span class="font-semibold text-gray-700" x-text="Math.round(doc.word_quality_estimate*100)+'%'"></span></span>
                         </template>
                         <template x-if="doc.ai_language && doc.lang_key !== 'english' && doc.lang_key !== 'unknown'">
                           <span class="text-gray-500" x-text="doc.ai_language"></span>
@@ -629,11 +678,13 @@ if ('serviceWorker' in navigator) {
                       </template>
                       <!-- Download footer -->
                       <template x-if="doc.upgraded_pdf_path">
-                        <div class="px-3 py-1.5 flex items-center gap-3 bg-green-50/50">
+                        <div class="px-3 py-1.5 flex items-center gap-3 bg-green-50/50 flex-wrap">
                           <a :href="`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
-                             @click.stop class="font-semibold text-green-700 hover:underline">↓ Download upgraded PDF</a>
-                          <a :href="`${API_BASE}/api/docs/receipt?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
-                             target="_blank" @click.stop class="text-gray-400 hover:text-indigo-600 hover:underline">receipt ↗</a>
+                             @click.stop class="font-semibold text-green-700 hover:underline">↓ PDF</a>
+                          <a :href="`${API_BASE}/api/docs/download-md?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
+                             @click.stop class="font-semibold text-blue-700 hover:underline">↓ Markdown</a>
+                          <button @click.stop="receiptUrl=`/receipt.html?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
+                                  class="text-xs text-indigo-500 hover:text-indigo-700 font-medium hover:underline">📋 View Analysis</button>
                         </div>
                       </template>
                     </div>
@@ -865,9 +916,8 @@ if ('serviceWorker' in navigator) {
             <a x-show="expandedDoc.archive_url && !expandedDoc.upgraded_pdf_path" :href="expandedDoc.archive_url" target="_blank"
                class="px-3 py-1.5 text-xs rounded-lg bg-green-100 hover:bg-green-200 text-green-800 font-semibold">↓ Upgraded PDF</a>
             <template x-if="expandedDoc.status === 'done'">
-              <a :href="`${API_BASE}/api/docs/receipt?site=${activeSite.domain}&url=${encodeURIComponent(expandedDoc.url)}`"
-                 target="_blank"
-                 class="px-3 py-1.5 text-xs rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold">📋 View Receipt</a>
+              <button @click="receiptUrl=`/receipt.html?site=${activeSite.domain}&url=${encodeURIComponent(expandedDoc.url)}`"
+                 class="px-3 py-1.5 text-xs rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 font-semibold">📋 View Analysis</button>
             </template>
 
             <!-- Admin-only upgrade controls -->
@@ -1052,6 +1102,7 @@ function app() {
     _searchTimer: null,
     adminToken: localStorage.getItem('adminToken') || '',
     showLoginModal: false, loginPassword: '', loginError: '',
+    receiptUrl: null,
     focusDomain: null,
     fmt, scorePillCls, scoreBlockCls, scoreLabel, effortEstimate, cannotUpgrade, langBadgeCls,
 

@@ -11,6 +11,7 @@ if (fs.existsSync(envFile)) {
   });
 }
 const ANTHROPIC_API_KEY = envVars.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '';
+const MISTRAL_API_KEY   = envVars.MISTRAL_API_KEY   || process.env.MISTRAL_API_KEY   || '';
 const SURYA_PATH = envVars.SURYA_PATH || process.env.SURYA_PATH || 'surya_ocr';
 const TMPDIR = path.join(SITE2RAG_ROOT, 'tmp'); // all processes write temp files to the data drive, never the OS drive
 module.exports = {
@@ -77,6 +78,7 @@ module.exports = {
         TMPDIR,
         SITE2RAG_ROOT,
         ANTHROPIC_API_KEY,
+        MISTRAL_API_KEY,
         PIPELINE_PORT: '49900',
         PIPELINE_DB: path.join(SITE2RAG_ROOT, 'pipeline-jobs.db'),
         PIPELINE_CONCURRENCY: '1',
@@ -85,6 +87,8 @@ module.exports = {
         AZURE_KEY: envVars.AZURE_KEY || '',
         AZURE_ENDPOINT: envVars.AZURE_ENDPOINT || '',
         GOOGLE_KEY: envVars.GOOGLE_KEY || '',
+        // Worker agents: comma-separated http://host:port URLs; seeded at startup, self-register on connect
+        WORKER_URLS: envVars.WORKER_URLS || 'http://jafar:49910,http://tower-nas:49910,http://boss:49910',
       },
       autorestart: true,
       watch: false,

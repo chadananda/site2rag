@@ -8,7 +8,7 @@ const testRoot = join(tmpdir(), `site2rag-score-test-${Date.now()}`);
 process.env.SITE2RAG_ROOT = testRoot;
 
 import { openDb } from '../src/db.js';
-import { scorePdf, saveQualityScore, maybeQueue, extractBadSample, wordQuality, extractExcerpt, scriptConsistency } from '../src/pdf-upgrade/score.js';
+import { scorePdf, saveQualityScore, maybeQueue, extractBadSample, wordQuality, extractExcerpt, scriptConsistency, ocrNoiseRatio } from '../src/pdf-upgrade/score.js';
 
 const DOMAIN = 'score.example.com';
 
@@ -291,6 +291,29 @@ describe('wordQuality', () => {
     const frenchText = 'le la les de du des un une et est dans pour par sur avec ce qui que'.split(' ').join(' ') + ' ';
     const score = wordQuality(frenchText.repeat(3), 'french');
     expect(score).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('ocrNoiseRatio', () => {
+  it('returns near zero for clean English prose', () => {
+    const clean = 'The quick brown fox jumps over the lazy dog. Natural language text with many common words. '.repeat(5);
+    expect(ocrNoiseRatio(clean)).toBeLessThan(0.05);
+  });
+
+  it('returns high ratio for text with digit substitutions', () => {
+    // Words like c1one, d0ne, 0nce, b8se, s5op embedded in otherwise normal text
+    const noisy = 'c1one d0ne 0nce b8se s5op l1ve g0ne w1th m0re f1nd t1me h1gh b1g c0de d1g '.repeat(5);
+    expect(ocrNoiseRatio(noisy)).toBeGreaterThan(0.5);
+  });
+
+  it('returns 0 for too few letter-dominant tokens (<10)', () => {
+    expect(ocrNoiseRatio('c1one d0ne')).toBe(0);
+  });
+
+  it('penalises wordQuality for noisy Latin text', () => {
+    const clean = 'The quick brown fox jumps over the lazy dog. '.repeat(10);
+    const noisy = 'c1one d0ne 0nce b8se s5op l1ve g0ne w1th m0re f1nd t1me h1gh c0de '.repeat(8);
+    expect(wordQuality(clean, 'english')).toBeGreaterThan(wordQuality(noisy, 'english'));
   });
 });
 

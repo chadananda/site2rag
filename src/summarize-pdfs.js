@@ -8,7 +8,7 @@ const CONCURRENCY = Math.max(4, Math.floor(cpus().length / 4));
 const BUDGET_MS = 10 * 60 * 1000;
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 
-const buildPrompt = (row) => {
+export const buildPrompt = (row) => {
   const slug = (row.url || '').split('/').pop().replace(/\.pdf$/i, '').replace(/[-_]/g, ' ').trim();
   const title = row.hosted_title || row.pdf_title || (slug.length > 3 ? slug : null);
   const parts = [];

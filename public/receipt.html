@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Document Analysis Receipt</title>
+<link rel="stylesheet" href="/tailwind.css?v=5">
+<style>
+  :root { color-scheme: light; }
+  body { font-family: ui-sans-serif, system-ui, sans-serif; background: #0f172a; min-height: 100vh; }
+  .mono { font-family: ui-monospace, monospace; }
+
+  /* Animated score ring */
+  .ring-track { stroke: rgba(255,255,255,0.1); }
+  .ring-fill { stroke: #22c55e; stroke-linecap: round; transition: stroke-dashoffset 1.2s cubic-bezier(.4,0,.2,1); }
+  .ring-fill.yellow { stroke: #eab308; }
+  .ring-fill.red { stroke: #ef4444; }
+
+  /* Stage timeline */
+  .timeline-line { position: absolute; left: 19px; top: 24px; bottom: 0; width: 2px; background: rgba(255,255,255,0.08); }
+  .stage-icon { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; position: relative; z-index: 1; }
+  .stage-icon.done { background: rgba(99,102,241,0.2); border: 1.5px solid #6366f1; }
+  .stage-icon.skipped { background: rgba(255,255,255,0.04); border: 1.5px solid rgba(255,255,255,0.1); }
+  .stage-icon.error { background: rgba(239,68,68,0.15); border: 1.5px solid #ef4444; }
+
+  /* Quality bar */
+  .q-bar-track { height: 6px; background: rgba(255,255,255,0.08); border-radius: 9999px; overflow: hidden; }
+  .q-bar-fill { height: 100%; border-radius: 9999px; transition: width 1s ease; }
+  .q-bar-fill.green { background: linear-gradient(90deg, #22c55e, #4ade80); }
+  .q-bar-fill.yellow { background: linear-gradient(90deg, #eab308, #facc15); }
+  .q-bar-fill.red { background: linear-gradient(90deg, #ef4444, #f87171); }
+
+  /* Delta pill */
+  .delta-pill { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 9999px; }
+  .delta-pos { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
+  .delta-neg { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
+  .delta-zero { background: rgba(255,255,255,0.05); color: #94a3b8; border: 1px solid rgba(255,255,255,0.1); }
+
+  /* Decision chip */
+  .decision-chip { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: rgba(255,255,255,0.05); color: #94a3b8; border: 1px solid rgba(255,255,255,0.08); font-family: ui-monospace, monospace; }
+  .decision-chip.alert { background: rgba(239,68,68,0.1); color: #fca5a5; border-color: rgba(239,68,68,0.25); }
+  .decision-chip.success { background: rgba(34,197,94,0.1); color: #86efac; border-color: rgba(34,197,94,0.25); }
+
+  /* Score summary cards */
+  .score-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 20px; text-align: center; }
+  .score-card.highlight { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.3); }
+
+  /* Report header */
+  .report-header { background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 60%); border-bottom: 1px solid rgba(99,102,241,0.3); }
+  .certified-badge { background: linear-gradient(135deg, #22c55e, #16a34a); color: white; font-size: 10px; font-weight: 800; letter-spacing: 0.08em; padding: 3px 10px; border-radius: 9999px; text-transform: uppercase; }
+  .section-heading { font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6366f1; border-bottom: 1px solid rgba(99,102,241,0.2); padding-bottom: 8px; margin-bottom: 16px; }
+
+  /* Metric row */
+  .meta-item { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; }
+  .meta-item:last-child { border-bottom: none; }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  .fade-up { animation: fadeUp 0.4s ease forwards; }
+</style>
+</head>
+<body>
+
+<div id="loading" class="flex items-center justify-center min-h-screen">
+  <div class="text-center">
+    <div class="text-indigo-400 text-4xl mb-4">⟳</div>
+    <div class="text-slate-400 text-sm">Loading analysis receipt…</div>
+  </div>
+</div>
+
+<div id="error-view" class="hidden flex items-center justify-center min-h-screen">
+  <div class="text-center text-red-400">
+    <div class="text-4xl mb-3">⚠</div>
+    <div id="error-msg" class="text-sm"></div>
+  </div>
+</div>
+
+<div id="content" class="hidden">
+
+  <!-- REPORT HEADER -->
+  <div class="report-header px-6 py-6">
+    <div class="max-w-3xl mx-auto">
+      <div class="flex items-start justify-between gap-4">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-3 mb-2">
+            <span class="text-slate-500 text-xs font-medium">site2rag</span>
+            <span class="text-slate-600">·</span>
+            <span class="text-slate-500 text-xs">Document Analysis Receipt</span>
+            <span id="cert-badge" class="certified-badge hidden">Certified</span>
+          </div>
+          <h1 id="doc-title" class="text-xl font-bold text-white break-all leading-snug"></h1>
+          <div id="doc-url" class="text-xs text-slate-500 mt-1 break-all"></div>
+        </div>
+        <div class="text-right shrink-0">
+          <div id="header-score" class="text-4xl font-black text-white"></div>
+          <div class="text-xs text-slate-500 mt-1">final quality</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- BODY -->
+  <div class="max-w-3xl mx-auto px-4 py-6 space-y-6">
+
+    <!-- Score overview cards -->
+    <div class="grid grid-cols-3 gap-3 fade-up">
+      <div class="score-card">
+        <div class="text-xs text-slate-500 mb-1">Original quality</div>
+        <div id="score-before" class="text-3xl font-black text-slate-300"></div>
+        <div class="q-bar-track mt-2"><div id="bar-before" class="q-bar-fill" style="width:0%"></div></div>
+      </div>
+      <div class="score-card highlight">
+        <div class="text-xs text-indigo-400 mb-1">After upgrade</div>
+        <div id="score-after" class="text-3xl font-black text-white"></div>
+        <div class="q-bar-track mt-2"><div id="bar-after" class="q-bar-fill" style="width:0%"></div></div>
+      </div>
+      <div class="score-card">
+        <div class="text-xs text-slate-500 mb-1">Improvement</div>
+        <div id="score-gain" class="text-3xl font-black"></div>
+        <div class="text-xs text-slate-600 mt-2" id="gain-sub"></div>
+      </div>
+    </div>
+
+    <!-- Document fingerprint -->
+    <div class="fade-up" style="animation-delay:0.1s">
+      <div class="section-heading">Document Profile</div>
+      <div class="bg-slate-800/40 rounded-xl border border-white/5 px-4" id="doc-profile"></div>
+    </div>
+
+    <!-- Strategic assessment -->
+    <div id="assessment-block" class="fade-up hidden" style="animation-delay:0.15s">
+      <div class="section-heading">Assessment &amp; Strategy</div>
+      <div class="bg-slate-800/40 rounded-xl border border-white/5 p-4">
+        <div id="assessment-text" class="text-sm text-slate-300 leading-relaxed"></div>
+      </div>
+    </div>
+
+    <!-- Pipeline stages timeline -->
+    <div class="fade-up" style="animation-delay:0.2s">
+      <div class="section-heading">Processing Pipeline</div>
+      <div class="relative pl-2">
+        <div class="timeline-line"></div>
+        <div id="stages-list" class="space-y-3"></div>
+      </div>
+    </div>
+
+    <!-- Errors if any -->
+    <div id="errors-block" class="hidden fade-up" style="animation-delay:0.25s">
+      <div class="section-heading text-red-400" style="color:#f87171;border-color:rgba(239,68,68,0.3)">Errors Encountered</div>
+      <div id="errors-list" class="space-y-2"></div>
+    </div>
+
+    <!-- Cost & performance -->
+    <div class="fade-up" style="animation-delay:0.3s">
+      <div class="section-heading">Cost &amp; Performance</div>
+      <div class="grid grid-cols-2 gap-3" id="perf-grid"></div>
+    </div>
+
+    <!-- Footer -->
+    <div class="text-center text-xs text-slate-600 py-4 border-t border-white/5 fade-up">
+      <div id="footer-line"></div>
+      <div class="mt-1">Processed by site2rag pipeline · <a href="/" class="text-indigo-500 hover:underline">← Return to dashboard</a></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+const params = new URLSearchParams(location.search);
+const site = params.get('site');
+const url = params.get('url');
+const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? `http://${location.hostname}:4242` : '';
+
+const pct = n => n == null ? '—' : Math.round(n * 100) + '%';
+const fmtMs = ms => {
+  if (!ms) return null;
+  if (ms >= 60000) return (ms/60000).toFixed(1) + ' min';
+  if (ms >= 1000) return (ms/1000).toFixed(1) + 's';
+  return ms + 'ms';
+};
+const fmtCost = c => c > 0 ? '$' + c.toFixed(4) : null;
+const barColor = s => s >= 0.8 ? 'green' : s >= 0.5 ? 'yellow' : 'red';
+
+const STAGE_META = {
+  s0: { icon: '🔬', label: 'Baseline Assessment', desc: 'Measures original document quality: character density, text layer integrity, word recognition rate, and language detection. Establishes the benchmark all subsequent stages are measured against.' },
+  s1: { icon: '🖼', label: 'Image Preprocessing', desc: 'Normalizes page orientation, removes skew from scanned pages, reduces noise artifacts, and binarizes images for optimal OCR input.' },
+  s2: { icon: '🗂', label: 'Region Classification', desc: 'Analyzes low-resolution page thumbnails to classify content regions: text blocks, figures, tables, and margins. Routes each region to the appropriate processing strategy.' },
+  s3: { icon: '📝', label: 'Tesseract OCR', desc: 'Applies language-aware optical character recognition using Tesseract, producing word-level bounding boxes with confidence scores. Words are bucketed into clean (≥90%), fuzzy (60–90%), and dirty (<60%) tiers.' },
+  s4: { icon: '🔍', label: 'Quality Escalation', desc: 'Evaluates OCR confidence across all regions. Dirty or low-confidence regions are flagged for escalation to higher-fidelity processing strategies.' },
+  s5: { icon: '👁', label: 'Vision OCR', desc: 'Sends low-confidence regions to a multimodal vision model for precision character recognition. Particularly effective for damaged documents, unusual typefaces, historical scripts, and mixed-language content.' },
+  s6: { icon: '✏️', label: 'Linguistic Spell Fix', desc: 'Applies Claude Haiku to correct fuzzy-confidence words using document context. Preserves bounding box geometry while correcting OCR artifacts, improving downstream search and indexing quality.' },
+  s7: { icon: '📦', label: 'Archival PDF Rebuild', desc: 'Reconstructs the document as a PDF/A-3 archival file with the corrected text layer embedded. The original scan is preserved as the visual layer; the improved text layer enables full-text search and accessibility.' },
+  s8: { icon: '📄', label: 'Markdown Export', desc: 'Exports the corrected text as structured Markdown with page anchors, preserving document hierarchy for downstream RAG indexing and semantic search.' },
+};
+
+const DECISION_LABELS = {
+  baseline_computed: { type: 'info', label: 'Baseline computed' },
+  domain_detected: { type: 'success', label: 'Domain identified' },
+  routing_summary: { type: 'info', label: 'OCR language routing' },
+  skip: { type: 'info', label: 'Stage skipped' },
+  budget_stop: { type: 'alert', label: 'Budget stop' },
+  boss_failed: { type: 'alert', label: 'Boss vision failed' },
+  claude_failed: { type: 'alert', label: 'Claude vision failed' },
+  rebuilt: { type: 'success', label: 'PDF rebuilt' },
+  wrote_md: { type: 'success', label: 'Markdown written' },
+  kept_original: { type: 'info', label: 'Original kept' },
+  completed: { type: 'success', label: 'Completed' },
+};
+
+function renderDecision(d) {
+  const meta = Object.entries(DECISION_LABELS).find(([k]) => d.decision?.includes(k));
+  const chipClass = meta?.[1]?.type === 'alert' ? 'alert' : meta?.[1]?.type === 'success' ? 'success' : '';
+  const chipLabel = meta?.[1]?.label ?? d.decision;
+  const reason = d.reason ? `<span class="text-slate-500 ml-1">${d.reason}</span>` : '';
+  return `<div class="flex items-start gap-2 text-xs"><span class="decision-chip ${chipClass} mt-0.5">${chipLabel}</span>${reason}</div>`;
+}
+
+function renderStage(stage, perStage, prevScore, decisions) {
+  const id = stage.stage;
+  const meta = STAGE_META[id];
+  if (!meta) return '';
+  const hasWork = stage.pages_affected > 0;
+  const hasError = decisions.some(d => d.decision?.includes('fail') || d.decision?.includes('error'));
+  const stageScore = perStage[id] ?? null;
+  const delta = (stageScore != null && prevScore != null && hasWork)
+    ? Math.round((stageScore - prevScore) * 100) : null;
+
+  const iconClass = hasError ? 'error' : hasWork ? 'done' : 'skipped';
+  const scoreHtml = stageScore != null && hasWork ? `
+    <div class="text-right min-w-[80px]">
+      <div class="text-lg font-bold ${stageScore >= 0.8 ? 'text-green-400' : stageScore >= 0.5 ? 'text-yellow-400' : 'text-red-400'}">${pct(stageScore)}</div>
+      ${delta !== null ? `<div class="delta-pill ${delta > 0 ? 'delta-pos' : delta < 0 ? 'delta-neg' : 'delta-zero'} mt-0.5 inline-block">${delta > 0 ? '+' : ''}${delta}%</div>` : ''}
+    </div>` : `<div class="min-w-[80px]"></div>`;
+
+  const statsHtml = [
+    hasWork && stage.pages_affected ? `<span>${stage.pages_affected} page${stage.pages_affected !== 1 ? 's' : ''} processed</span>` : null,
+    stage.approach ? `<span class="mono">${stage.approach}</span>` : null,
+    stage.notes ? `<span class="mono">${stage.notes}</span>` : null,
+    fmtMs(stage.duration_ms) ? `<span>⏱ ${fmtMs(stage.duration_ms)}</span>` : null,
+    fmtCost(stage.cost_usd) ? `<span>💰 ${fmtCost(stage.cost_usd)}</span>` : null,
+    stage.tokens_in ? `<span class="mono">${stage.tokens_in.toLocaleString()} / ${stage.tokens_out?.toLocaleString() ?? 0} tokens</span>` : null,
+  ].filter(Boolean).join('<span class="text-slate-700 mx-1">·</span>');
+
+  const decisionHtml = decisions.length
+    ? `<div class="mt-2 space-y-1">${decisions.map(renderDecision).join('')}</div>` : '';
+
+  return `
+    <div class="flex gap-3 pl-2">
+      <div class="stage-icon ${iconClass}">${meta.icon}</div>
+      <div class="flex-1 bg-slate-800/40 rounded-xl border ${hasError ? 'border-red-500/20' : hasWork ? 'border-white/8' : 'border-white/4'} p-3 -mt-1 min-w-0">
+        <div class="flex items-start gap-2 justify-between">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-2 flex-wrap">
+              <span class="font-semibold text-sm ${hasWork ? 'text-white' : 'text-slate-500'}">${meta.label}</span>
+              ${!hasWork ? `<span class="text-xs text-slate-600 italic">skipped</span>` : ''}
+              ${hasError ? `<span class="decision-chip alert">error</span>` : ''}
+            </div>
+            <div class="text-xs text-slate-500 mt-0.5 leading-snug">${meta.desc}</div>
+            ${statsHtml ? `<div class="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 mt-1.5">${statsHtml}</div>` : ''}
+            ${decisionHtml}
+          </div>
+          ${scoreHtml}
+        </div>
+      </div>
+    </div>`;
+}
+
+function perfCard(label, value, sub) {
+  return `<div class="bg-slate-800/40 rounded-xl border border-white/5 p-4">
+    <div class="text-xs text-slate-500 mb-1">${label}</div>
+    <div class="text-xl font-bold text-white">${value}</div>
+    ${sub ? `<div class="text-xs text-slate-600 mt-0.5">${sub}</div>` : ''}
+  </div>`;
+}
+
+function metaRow(label, value) {
+  return `<div class="meta-item">
+    <span class="text-xs text-slate-500">${label}</span>
+    <span class="text-sm font-medium text-slate-200">${value}</span>
+  </div>`;
+}
+
+function buildAssessment(r, beforeScore, afterScore, gainPct) {
+  const baseline = r.quality?.baseline ?? {};
+  const lang = baseline.language ?? 'unknown';
+  const type = baseline.has_text_layer ? 'text-layer PDF' : 'image-only PDF';
+  const pages = r.page_count ?? 1;
+  const difficulty = baseline.processing_difficulty ?? 0;
+  const stages = (r.stages ?? []).filter(s => s.pages_affected > 0).map(s => STAGE_META[s.stage]?.label).filter(Boolean);
+
+  let parts = [];
+  parts.push(`This ${pages}-page ${lang} ${type} was analyzed and processed through ${stages.length} active pipeline stage${stages.length !== 1 ? 's' : ''}.`);
+
+  if (beforeScore < 0.3) {
+    parts.push(`The original document had very poor text quality (${pct(beforeScore)}), indicating a heavily degraded scan with minimal recoverable text layer.`);
+  } else if (beforeScore < 0.7) {
+    parts.push(`The original document had moderate text quality (${pct(beforeScore)}), with significant portions requiring correction.`);
+  } else {
+    parts.push(`The original document had good baseline quality (${pct(beforeScore)}), with targeted corrections applied to improve precision.`);
+  }
+
+  if (stages.includes('Vision OCR')) {
+    parts.push(`Low-confidence regions were escalated to vision-based OCR for precision character recognition.`);
+  }
+  if (stages.includes('Linguistic Spell Fix')) {
+    parts.push(`Fuzzy-confidence words were corrected using context-aware language modeling.`);
+  }
+  if (gainPct > 20) {
+    parts.push(`The upgrade achieved a substantial ${gainPct}% quality gain, significantly improving searchability and downstream processing fidelity.`);
+  } else if (gainPct > 5) {
+    parts.push(`The upgrade achieved a ${gainPct}% quality improvement, refining text accuracy for better indexing and retrieval.`);
+  } else if (gainPct > 0) {
+    parts.push(`The document was already high quality; the pipeline applied minor corrections and produced an archival PDF/A-3 output.`);
+  }
+
+  return parts.join(' ');
+}
+
+async function load() {
+  const res = await fetch(`${API_BASE}/api/docs/receipt?site=${encodeURIComponent(site)}&url=${encodeURIComponent(url)}`);
+  if (!res.ok) throw new Error(`Receipt not available (HTTP ${res.status})`);
+  return res.json();
+}
+
+load().then(r => {
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('content').classList.remove('hidden');
+
+  const q = r.quality ?? {};
+  const baseline = q.baseline ?? {};
+  const perStage = q.per_stage ?? {};
+  const totals = r.totals ?? {};
+  const beforeScore = baseline.composite_score ?? 0;
+  const afterScore = q.final ?? 0;
+  const gainPct = Math.round((afterScore - beforeScore) * 100);
+
+  const filename = (r.source_url ?? '').split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ') || 'Document';
+
+  // Header
+  document.getElementById('doc-title').textContent = decodeURIComponent(filename);
+  document.getElementById('doc-url').textContent = r.source_url ?? '';
+  document.getElementById('header-score').textContent = pct(afterScore);
+  if (afterScore >= 0.85) document.getElementById('cert-badge').classList.remove('hidden');
+
+  // Score cards
+  document.getElementById('score-before').textContent = pct(beforeScore);
+  document.getElementById('score-after').textContent = pct(afterScore);
+  document.getElementById('score-gain').textContent = (gainPct > 0 ? '+' : '') + gainPct + '%';
+  document.getElementById('score-gain').className = 'text-3xl font-black ' + (gainPct > 0 ? 'text-green-400' : 'text-slate-400');
+  document.getElementById('gain-sub').textContent = gainPct > 0 ? `${pct(beforeScore)} → ${pct(afterScore)}` : 'No change';
+
+  setTimeout(() => {
+    const setBars = (id, score) => {
+      const el = document.getElementById(id);
+      const c = barColor(score);
+      el.style.width = pct(score);
+      el.classList.add(c);
+    };
+    setBars('bar-before', beforeScore);
+    setBars('bar-after', afterScore);
+  }, 100);
+
+  // Doc profile
+  const profile = document.getElementById('doc-profile');
+  const lang = baseline.language ? baseline.language.charAt(0).toUpperCase() + baseline.language.slice(1) : '—';
+  const docType = baseline.has_text_layer != null ? (baseline.has_text_layer ? 'Text-layer PDF' : 'Image-only PDF (scanned)') : '—';
+  const processedDate = r.processed_at ? new Date(r.processed_at).toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' }) : '—';
+  profile.innerHTML = [
+    metaRow('Document type', docType),
+    metaRow('Language', lang),
+    metaRow('Pages', r.page_count ?? '—'),
+    metaRow('Average characters per page', Math.round(baseline.avg_chars_per_page ?? 0).toLocaleString()),
+    metaRow('Analysis date', processedDate),
+    metaRow('Pipeline version', r.pipeline_version ?? '—'),
+  ].join('');
+
+  // Assessment
+  const assessText = buildAssessment(r, beforeScore, afterScore, gainPct);
+  if (assessText) {
+    document.getElementById('assessment-text').textContent = assessText;
+    document.getElementById('assessment-block').classList.remove('hidden');
+  }
+
+  // Pipeline stages
+  const stagesEl = document.getElementById('stages-list');
+  const stageOrder = ['s0','s1','s2','s3','s4','s5','s6','s7','s8'];
+  let prevScore = perStage['s0'] ?? beforeScore;
+  let html = '';
+  for (const id of stageOrder) {
+    const stage = (r.stages ?? []).find(s => s.stage === id);
+    if (!stage) continue;
+    const decisions = (r.decisions ?? []).filter(d => d.stage === id);
+    html += renderStage(stage, perStage, prevScore, decisions);
+    if (perStage[id] != null && (r.stages.find(s => s.stage === id)?.pages_affected ?? 0) > 0) prevScore = perStage[id];
+  }
+  stagesEl.innerHTML = html;
+
+  // Errors
+  if (r.errors?.length) {
+    document.getElementById('errors-block').classList.remove('hidden');
+    document.getElementById('errors-list').innerHTML = r.errors.map(e =>
+      `<div class="bg-red-950/40 border border-red-500/20 rounded-lg p-3 text-sm text-red-300 mono">${e.stage ? `[${e.stage}] ` : ''}${e.message ?? JSON.stringify(e)}</div>`
+    ).join('');
+  }
+
+  // Performance
+  const activeStages = (r.stages ?? []).filter(s => s.pages_affected > 0);
+  const perfEl = document.getElementById('perf-grid');
+  perfEl.innerHTML = [
+    totals.cost_usd != null ? perfCard('Total processing cost', fmtCost(totals.cost_usd) ?? '$0.0000', `${activeStages.length} active stage${activeStages.length !== 1 ? 's' : ''}`) : '',
+    totals.duration_ms ? perfCard('Total processing time', fmtMs(totals.duration_ms), `${r.page_count ?? 0} page${r.page_count !== 1 ? 's' : ''}`) : '',
+    totals.tokens_in ? perfCard('Tokens used', `${(totals.tokens_in + (totals.tokens_out ?? 0)).toLocaleString()}`, `${totals.tokens_in.toLocaleString()} in · ${(totals.tokens_out ?? 0).toLocaleString()} out`) : '',
+    q.cost_per_quality_point != null && q.cost_per_quality_point > 0 ? perfCard('Cost per quality point', '$' + q.cost_per_quality_point.toFixed(4), 'efficiency ratio') : '',
+  ].filter(Boolean).join('');
+
+  // Footer
+  document.getElementById('footer-line').textContent =
+    `Job ID: ${r.doc_id ?? '—'} · Processed ${processedDate}`;
+
+}).catch(e => {
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('error-msg').textContent = e.message;
+  document.getElementById('error-view').classList.remove('hidden');
+});
+</script>
+</body>
+</html>

@@ -138,7 +138,7 @@ export const createMediaWikiAdapter = (siteConfig) => {
 };
 
 /** Parse <item> blocks from RSS XML. Returns [{link, title, pubDate, author, description}]. */
-const parseRssItems = (xml) => {
+export const parseRssItems = (xml) => {
   const items = [];
   for (const m of xml.matchAll(/<item>([\s\S]*?)<\/item>/g)) {
     const s = m[1];

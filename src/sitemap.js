@@ -89,7 +89,7 @@ const resolveSitemap = async (sitemapUrl, ua, db, depth = 0) => {
   return { entries: urls.map(u => ({ url: u.url, lastmod: u.lastmod, source_sitemap: sitemapUrl })), allUnchanged: false };
 };
 /** Filter sitemap entries by include/exclude rules and optional language filter. */
-const filterEntries = (entries, siteConfig) => {
+export const filterEntries = (entries, siteConfig) => {
   const { include = [], exclude = [], sitemap: sitemapCfg = {} } = siteConfig;
   const langs = sitemapCfg.include_languages || [];
   return entries.filter(e => {

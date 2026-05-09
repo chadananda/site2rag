@@ -5,7 +5,7 @@
 // Multiple pages passed together so cross-page paragraph joining can work.
 
 /** Median of a numeric array. */
-const median = (arr) => {
+export const median = (arr) => {
   if (!arr.length) return 0;
   const s = [...arr].sort((a, b) => a - b);
   const m = Math.floor(s.length / 2);
@@ -16,7 +16,7 @@ const median = (arr) => {
  * Group a page's words into lines by y-coordinate proximity.
  * Returns [{y0, y1, words: [...]}] sorted top-to-bottom, words sorted left-to-right.
  */
-const groupIntoLines = (words, lineGap) => {
+export const groupIntoLines = (words, lineGap) => {
   if (!words.length) return [];
   const sorted = [...words].sort((a, b) => (a.bbox.y0 - b.bbox.y0) || (a.bbox.x0 - b.bbox.x0));
   const lines = [];

@@ -26,7 +26,7 @@ export const llmCost = (model, tokensIn, tokensOut) => {
 
 export const DEFAULT_CONFIG = {
   // Which stages to run (remove entries to skip permanently; use ctx.config.skip for per-run skips)
-  stages: ['s0', 's1', 's2', 's3', 's4', 's5', 's6', 's7', 's8'],
+  stages: ['s0', 's1', 's2', 's3', 's4', 's5', 's7', 's8'],
 
   // Per-run skip list (set dynamically, e.g. by s0 for already-good docs)
   skip: [],
@@ -67,6 +67,11 @@ export const DEFAULT_CONFIG = {
     deskew: ['imagemagick', 'opencv'],
   },
 
+  // Vision quality gate: run s5 multi-engine synthesis on all pages below this confidence.
+  // 1.0 = run on any page with even one word below 100% confidence (effectively all scanned pages).
+  // This is our core value: cheap Haiku synthesis of multiple OCR engines beats any single engine.
+  visionQualityGate: 1.0,
+
   // Token budget: null = unlimited; set to a number to hard-cap LLM spend
   maxTokenBudget: null,
 
@@ -87,13 +92,17 @@ export const DEFAULT_CONFIG = {
   registryUrl: process.env.PIPELINE_URL ?? 'http://localhost:49900',
 
   // Tool routing: 'workerPool' picks least-loaded worker via /tools/run API; falls back to local.
-  // Workers expose all tools through their HTTP API — no shared filesystem required for tool dispatch.
+  // Workers expose all tools through their HTTP API — paths must be reachable (NFS or same host).
   toolBackends: {
-    surya_ocr:    { type: 'workerPool' }, // GPU-accelerated; routes to boss/jafar
-    easyocr_ocr:  { type: 'workerPool' }, // GPU batch engine; routes to boss/jafar/chads-air
-    paddle_ocr:   { type: 'workerPool' }, // GPU batch engine; routes to boss (CUDA) or chads-air (Metal)
-    doctr_ocr:    { type: 'workerPool' }, // GPU batch engine; routes to any worker with py:doctr
-    kraken_ocr:   { type: 'workerPool' }, // CPU/GPU batch engine; routes to any capable worker
+    // Slow CPU tools — distribute page-by-page across all NFS-accessible workers
+    tesseract:    { type: 'workerPool' }, // OCR — main bottleneck; split every page call
+    // GPU tools — route to machines with GPU acceleration
+    surya_ocr:    { type: 'workerPool' }, // GPU-accelerated layout+OCR
+    easyocr_ocr:  { type: 'workerPool' }, // GPU batch engine
+    paddle_ocr:   { type: 'workerPool' }, // GPU batch engine (boss CUDA preferred)
+    doctr_ocr:    { type: 'workerPool' }, // GPU batch engine
+    kraken_ocr:   { type: 'workerPool' }, // CPU/GPU batch engine
+    // pdftoppm, gs, unpaper intentionally omitted — fast enough locally, no benefit distributing
   },
 };
 

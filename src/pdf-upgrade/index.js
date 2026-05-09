@@ -53,12 +53,59 @@ const findUpgradedDuplicate = (contentHash, allDomains, skipDomain) => {
       if (!existsSync(dbPath)) continue;
       db = openDb(domain);
       const hit = db.prepare(`
-        SELECT u.upgraded_pdf_path, u.after_score, u.score_improvement, u.pages_processed, u.method
+        SELECT u.upgraded_pdf_path, u.after_score, u.score_improvement, u.pages_processed, u.method, u.receipt_json
         FROM pdf_upgrade_queue u JOIN pdf_quality pq ON u.url=pq.url
         WHERE pq.content_hash=? AND u.status='done' AND u.upgraded_pdf_path IS NOT NULL
         LIMIT 1`).get(contentHash);
       if (hit && existsSync(hit.upgraded_pdf_path)) return hit;
     } catch {} finally { try { db?.close(); } catch {} }
+  }
+  return null;
+};
+
+/** Apply a completed upgrade result to a duplicate URL (same content hash). */
+const applyDuplicateResult = async (db, url, donor, beforeScore) => {
+  const existing = db.prepare('SELECT pipeline_job_id, status FROM pdf_upgrade_queue WHERE url=?').get(url);
+  if (!existing || existing.status === 'done') return;
+  if (existing.pipeline_job_id && pipelineClient) {
+    try { await pipelineClient.deleteJob(existing.pipeline_job_id); } catch {}
+  }
+  db.prepare(`UPDATE pdf_upgrade_queue
+    SET status='done', finished_at=?, upgraded_pdf_path=?,
+        after_score=?, score_improvement=?, pages_processed=?,
+        method=?, receipt_json=?, pipeline_job_id=NULL
+    WHERE url=?`)
+    .run(now(), donor.upgraded_pdf_path,
+      donor.after_score, donor.score_improvement,
+      donor.pages_processed, (donor.method || 'pipeline-v2') + '+dedup',
+      donor.receipt_json ?? null, url);
+  if (donor.after_score != null) {
+    db.prepare('UPDATE pdf_quality SET composite_score=? WHERE url=?').run(donor.after_score, url);
+  }
+  logUpgradeHistory(db, url, { method: (donor.method || 'pipeline-v2') + '+dedup',
+    score_before: beforeScore, score_after: donor.after_score, pages_processed: donor.pages_processed });
+  log(`Dedup: ${url.split('/').pop()} ← cached`);
+};
+
+/** Find a cached upgrade result for a content hash: checks same DB first, then all open DBs. */
+const findCachedResult = (contentHash, currentDb, currentUrl, openDbs) => {
+  if (!contentHash) return null;
+  const localHit = currentDb.prepare(`
+    SELECT upgraded_pdf_path, after_score, score_improvement, pages_processed, method, receipt_json
+    FROM pdf_upgrade_queue
+    WHERE content_hash=? AND url!=? AND status='done' AND upgraded_pdf_path IS NOT NULL
+    LIMIT 1`).get(contentHash, currentUrl);
+  if (localHit && existsSync(localHit.upgraded_pdf_path)) return localHit;
+  for (const { db } of (openDbs || [])) {
+    if (db === currentDb) continue;
+    try {
+      const hit = db.prepare(`
+        SELECT upgraded_pdf_path, after_score, score_improvement, pages_processed, method, receipt_json
+        FROM pdf_upgrade_queue
+        WHERE content_hash=? AND status='done' AND upgraded_pdf_path IS NOT NULL
+        LIMIT 1`).get(contentHash);
+      if (hit && existsSync(hit.upgraded_pdf_path)) return hit;
+    } catch {}
   }
   return null;
 };
@@ -83,7 +130,14 @@ const ensurePipelineJobIdColumn = (db) => {
 };
 
 /** Submit one doc to the pipeline service and mark it processing. No waiting — checkPipelineJobs polls. */
-const submitViaPipeline = async (db, domain, row, page, siteConfig) => {
+const submitViaPipeline = async (db, domain, row, page, siteConfig, openDbs = []) => {
+  // Cache hit: same PDF already upgraded elsewhere — copy result instead of reprocessing
+  const cached = findCachedResult(row.content_hash, db, row.url, openDbs)
+    || (row.content_hash ? findUpgradedDuplicate(row.content_hash, openDbs.map(o => o.domain), domain) : null);
+  if (cached) {
+    await applyDuplicateResult(db, row.url, cached, row.before_score);
+    return;
+  }
   const quality = db.prepare('SELECT * FROM pdf_quality WHERE url=?').get(row.url) ?? {};
   // Difficulty-based ordering: text PDFs (spell-fix only, seconds) → high importance;
   // image PDFs (need OCR, minutes) → lower importance. Min difficulty 0.3 for image PDFs
@@ -106,8 +160,8 @@ const submitViaPipeline = async (db, domain, row, page, siteConfig) => {
         keywords:        ['site2rag', domain],
       },
     });
-    db.prepare("UPDATE pdf_upgrade_queue SET status='submitted', started_at=?, pipeline_job_id=? WHERE url=?")
-      .run(now(), jobId, row.url);
+    db.prepare("UPDATE pdf_upgrade_queue SET status='submitted', started_at=?, pipeline_job_id=?, before_score=? WHERE url=?")
+      .run(now(), jobId, quality.composite_score ?? null, row.url);
     log(`Pipeline submitted: ${row.url.split('/').pop()}`);
   } catch (err) {
     db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=? WHERE url=?")
@@ -117,13 +171,13 @@ const submitViaPipeline = async (db, domain, row, page, siteConfig) => {
 };
 
 /** Poll all in-flight pipeline jobs and update site DB when done/failed. */
-const checkPipelineJobs = async (db) => {
+const checkPipelineJobs = async (db, openDbs = []) => {
   // Include any status with a pipeline_job_id — catches rows where status was
   // accidentally left at 'pending' but the job is actually running in the pipeline.
   const running = db.prepare(
-    "SELECT url, pipeline_job_id, before_score FROM pdf_upgrade_queue WHERE pipeline_job_id IS NOT NULL AND status NOT IN ('done','failed')"
+    "SELECT url, pipeline_job_id, before_score, content_hash FROM pdf_upgrade_queue WHERE pipeline_job_id IS NOT NULL AND status NOT IN ('done','failed')"
   ).all();
-  for (const { url, pipeline_job_id: jobId, before_score } of running) {
+  for (const { url, pipeline_job_id: jobId, before_score, content_hash } of running) {
     try {
       const job = await pipelineClient.getJob(jobId);
       if (job.status === 'done') {
@@ -136,13 +190,26 @@ const checkPipelineJobs = async (db) => {
           .run(now(), job.pdf_out_path ?? null,
             afterScore, receipt.quality?.gain ?? null,
             receipt.page_count ?? null, 'pipeline-v2', JSON.stringify(receipt), url);
-        // Update pdf_quality so the score badge reflects post-upgrade quality
-        if (afterScore != null) {
-          db.prepare('UPDATE pdf_quality SET composite_score=? WHERE url=?').run(afterScore, url);
-        }
+        // Do NOT overwrite composite_score — it holds the original pre-upgrade score for comparison
         logUpgradeHistory(db, url, { method: 'pipeline-v2', score_before: before_score,
           score_after: receipt.quality?.final ?? null, pages_processed: receipt.page_count ?? null });
         log(`Pipeline done: ${url.split('/').pop()}`);
+
+        // Propagate cached result to all siblings with same content hash (same + other domains)
+        if (content_hash) {
+          const donor = { upgraded_pdf_path: job.pdf_out_path ?? null, after_score: afterScore,
+            score_improvement: receipt.quality?.gain ?? null, pages_processed: receipt.page_count ?? null,
+            method: 'pipeline-v2', receipt_json: JSON.stringify(receipt) };
+          const sameSibs = db.prepare(`SELECT url, before_score FROM pdf_upgrade_queue WHERE content_hash=? AND url!=? AND status NOT IN ('done','failed') AND content_hash IS NOT NULL`).all(content_hash, url);
+          for (const sib of sameSibs) await applyDuplicateResult(db, sib.url, donor, sib.before_score);
+          for (const { db: otherDb } of openDbs) {
+            if (otherDb === db) continue;
+            try {
+              const crossSibs = otherDb.prepare(`SELECT url, before_score FROM pdf_upgrade_queue WHERE content_hash=? AND status NOT IN ('done','failed') AND content_hash IS NOT NULL`).all(content_hash);
+              for (const sib of crossSibs) await applyDuplicateResult(otherDb, sib.url, donor, sib.before_score);
+            } catch {}
+          }
+        }
       } else if (job.status === 'failed') {
         db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=?, pipeline_job_id=NULL WHERE url=?")
           .run(now(), (job.error || 'pipeline failed').slice(0, 300), url);
@@ -455,7 +522,7 @@ const tick = async () => {
       let pipelineReachable = true;
       try {
         await pipelineClient.health();
-        await Promise.all(openDbs.map(({ db }) => checkPipelineJobs(db)));
+        await Promise.all(openDbs.map(({ db }) => checkPipelineJobs(db, openDbs)));
       } catch (err) {
         pipelineReachable = false;
         log(`ERROR: Pipeline service unreachable (${err.message}) — skipping pass-1 this tick. Fix PIPELINE_URL or start pipeline-server.`);
@@ -487,7 +554,7 @@ const tick = async () => {
                 .run('local_path missing', row.url);
               return;
             }
-            return submitViaPipeline(db, domain, row, page, siteConfig);
+            return submitViaPipeline(db, domain, row, page, siteConfig, openDbs);
           }));
         }
         return;

@@ -81,32 +81,31 @@ Heuristic quality scoring for every mirrored PDF:
 - **Language detection**: Unicode script composition → english / arabic / persian / hebrew / russian / japanese / chinese / unknown
 - **Queue decision**: PDFs with `composite_score < 0.7` and no skip flag are queued for upgrade
 
-### 4. PDF Upgrade (`src/pdf-upgrade/`)
-The upgrade pipeline processes queued image PDFs through multiple stages:
+### 4. PDF Upgrade (`src/pipeline/`)
+The upgrade pipeline chains stages s0–s8 on each image PDF. Core design: multi-engine synthesis at the block level is the product — not any single OCR engine.
 
-**identify.js** — Cheap pre-screening (no GPU required):
-1. Rasterizes a sample page with `pdftoppm`
-2. Runs **Tesseract OSD** (`--psm 0`) for script detection
-3. Runs **Tesseract OCR** for a text sample
-4. If text is sparse, calls **Claude Haiku** for metadata extraction (title, author, language)
-5. Results saved to `pdf_quality` (sets `summary_tier='identified'`)
+**s0** — Quality baseline: score composite quality, detect language, detect domain context. Text PDFs (has_text_layer + avg_chars_per_page ≥ 300) skip s1–s5 entirely — PDF text encoding is authoritative.
 
-**reocr.js** — Full re-OCR via vision LLM:
-- Each page rasterized at high resolution
-- Sent to a vision language model (LLaVA or Claude) for structured Markdown transcription
-- Preserves headings, paragraphs, lists, tables — context-aware, not naive character recognition
-- Two-engine reconciliation (`src/ocr/reconcile.js`) for quality verification
+**s1** — Preprocess: ghostscript normalize, unpaper deskew/denoise per page.
 
-**rebuild.js** — PDF reconstruction:
-- OCR text embedded as invisible layer via **OCRmyPDF** (ISO 19005-3 PDF/A compliant)
-- Fallback: direct layer injection via `pdf-lib`
-- Metadata enriched: `/Title`, `/Author`, `/Subject`, `/Keywords` from AI analysis
-- Original filename preserved; drop-in replacement for the original file
+**s2** — Region classify: Haiku labels each page region (printed_arabic, handwritten, table, figure, etc.) for downstream engine routing.
 
-**score.js** — Queue management:
-- Assigns priority based on score, language cost multiplier, and page count
-- Tracks `before_score` / `after_score` / `score_improvement` for each upgraded PDF
-- Language cost multipliers (English=1.0x, Arabic/Persian/Hebrew=1.35x, Japanese/Chinese=1.5x)
+**s3** — Block OCR + synthesis (core stage):
+- Detect column blocks per page via layout analysis
+- **All CPU engines always run on every block crop**: Tesseract + EasyOCR + PaddleOCR + docTR + Kraken
+- **Surya (GPU vision) runs only on dirty blocks** where Tesseract cleanRatio < 0.70 — skipped on clean blocks to avoid a GPU bottleneck
+- Any engine produced readable text → **Haiku synthesis always runs** over all engine outputs (never skipped — multi-engine synthesis is the core value)
+- All engines failed → mark block for s4 escalation, skip Haiku
+
+**s4** — Local vision escalation: boss/Surya vision model on dirty block crops that s3 couldn't solve.
+
+**s5** — Specialist API escalation per block type: Mistral OCR (printed Arabic/Persian), Claude Opus (handwritten), Gemini (tables/figures). Only for blocks still dirty after s4.
+
+**s6** — Spell-fix: Haiku corrects fuzzy-confidence words using domain context.
+
+**s7** — Archive: rebuild PDF with corrected invisible text layer (OCRmyPDF / pdf-lib fallback).
+
+**s8** — Export: corrected Markdown with page anchors for RAG ingestion.
 
 ### 5. Classify (`src/classify.js`)
 Labels HTML pages as `content` (article/report), `index` (list/category), `host_page` (a page that links to PDFs), or `redirect`. Drives export prioritization and deduplication.

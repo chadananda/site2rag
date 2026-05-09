@@ -26,7 +26,7 @@ Do NOT fix proper nouns, names, numbers, dates, foreign terms, or anything uncer
 Output: one correction per line as N:corrected text. Emit nothing for correct words.`;
 
 /** Build system prompt with optional document context and vision drafts for broker mode. */
-const buildSystem = ({ title, pageNo, totalPages, prevPageTail, language, domainContext, visionDraft } = {}) => {
+export const buildSystem = ({ title, pageNo, totalPages, prevPageTail, language, domainContext, visionDraft } = {}) => {
   const lines = [];
   if (title) lines.push(`Document: "${title}"`);
   if (language) lines.push(`Language: ${language}`);
@@ -53,7 +53,7 @@ const buildSystem = ({ title, pageNo, totalPages, prevPageTail, language, domain
  *   srcIdx = index in bboxWords for this entry's primary object
  *   mergedSrcIdx = index of the second-half object to drop (or null)
  */
-const buildEntries = (bboxWords) => {
+export const buildEntries = (bboxWords) => {
   const entries = [];
   const skip = new Set();
   let idx = 0;

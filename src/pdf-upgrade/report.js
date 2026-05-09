@@ -52,14 +52,14 @@ const gatherSiteData = (domain) => {
   } finally { db.close(); }
 };
 /** Format seconds into human-readable duration. */
-const fmtDuration = (sec) => {
+export const fmtDuration = (sec) => {
   if (sec < 3600) return `~${Math.ceil(sec / 60)} min`;
   if (sec < 86400) return `~${Math.ceil(sec / 3600)} hr`;
   if (sec < 604800) return `~${Math.ceil(sec / 86400)} days`;
   return `~${Math.ceil(sec / 604800)} weeks`;
 };
 /** Score to Tailwind color class. */
-const scoreColor = (score) => {
+export const scoreColor = (score) => {
   if (score === null || score === undefined) return 'bg-gray-200 text-gray-500';
   if (score >= 0.8) return 'bg-green-100 text-green-800';
   if (score >= 0.6) return 'bg-yellow-100 text-yellow-800';

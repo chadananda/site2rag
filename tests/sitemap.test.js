@@ -14,7 +14,7 @@ vi.mock('undici', () => ({
 
 import { fetch } from 'undici';
 import { openDb } from '../src/db.js';
-import { runSitemap, parseSitemapXml, hasSitemapOrFallback } from '../src/sitemap.js';
+import { runSitemap, parseSitemapXml, hasSitemapOrFallback, filterEntries } from '../src/sitemap.js';
 
 const DOMAIN = 'sitemap.example.com';
 const SITE_URL = `https://${DOMAIN}`;
@@ -160,6 +160,20 @@ describe('runSitemap', () => {
     expect(result.added).not.toContain(`${SITE_URL}/admin/settings`);
   });
 
+  it('respects include paths from site config (only matching paths)', async () => {
+    mockFetch({
+      [`${SITE_URL}/robots.txt`]: robotsTxt(`${SITE_URL}/sitemap.xml`),
+      [`${SITE_URL}/sitemap.xml`]: sitemapXml([
+        { url: `${SITE_URL}/blog/post-1` },
+        { url: `${SITE_URL}/about` },
+      ]),
+      '*': ''
+    });
+    const result = await runSitemap(db, { url: SITE_URL, domain: DOMAIN, include: ['/blog/'] });
+    expect(result.added).toContain(`${SITE_URL}/blog/post-1`);
+    expect(result.added).not.toContain(`${SITE_URL}/about`);
+  });
+
   it('handles failed sitemap fetch gracefully (returns empty)', async () => {
     fetch.mockResolvedValue({ ok: false, status: 404, text: async () => '' });
     const result = await runSitemap(db, { url: SITE_URL, domain: DOMAIN });
@@ -223,6 +237,23 @@ describe('parseSitemapXml', () => {
     expect(result.urls).toHaveLength(2);
     expect(result.urls[0].url).toBe('https://example.com/sitemap1.xml');
   });
+
+  it('single-item urlset (non-array from xml parser) is treated as array', () => {
+    // fast-xml-parser returns a plain object (not array) when there is only one <url>
+    const xml = `<?xml version="1.0"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><url><loc>https://example.com/only-one</loc><lastmod>2024-06-01</lastmod></url></urlset>`;
+    const result = parseSitemapXml(xml);
+    expect(result.type).toBe('urlset');
+    expect(result.urls).toHaveLength(1);
+    expect(result.urls[0].url).toBe('https://example.com/only-one');
+  });
+
+  it('single-item sitemapindex (non-array) is treated as array', () => {
+    const xml = `<?xml version="1.0"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"><sitemap><loc>https://example.com/sitemap-only.xml</loc></sitemap></sitemapindex>`;
+    const result = parseSitemapXml(xml);
+    expect(result.type).toBe('index');
+    expect(result.urls).toHaveLength(1);
+    expect(result.urls[0].url).toBe('https://example.com/sitemap-only.xml');
+  });
 });
 
 describe('hasSitemapOrFallback', () => {
@@ -252,5 +283,49 @@ describe('hasSitemapOrFallback', () => {
     fetch.mockResolvedValue({ ok: false, status: 404, text: async () => '', headers: { get: () => null } });
     const result = await hasSitemapOrFallback({ url: SITE_URL, domain: DOMAIN, sitemap: { enabled: true, fallback_to_crawl: true } });
     expect(result).toBe(true);
+  });
+});
+
+describe('filterEntries', () => {
+  const makeEntries = (paths) => paths.map(p => ({ url: `https://example.com${p}`, lastmod: null }));
+
+  it('returns all entries when no include/exclude rules', () => {
+    const entries = makeEntries(['/a', '/b', '/c']);
+    expect(filterEntries(entries, {})).toHaveLength(3);
+  });
+
+  it('filters entries matching exclude prefix', () => {
+    const entries = makeEntries(['/docs/a', '/blog/b', '/docs/c']);
+    const result = filterEntries(entries, { exclude: ['/docs/'] });
+    expect(result.map(e => new URL(e.url).pathname)).toEqual(['/blog/b']);
+  });
+
+  it('keeps only entries matching include prefix', () => {
+    const entries = makeEntries(['/docs/a', '/blog/b', '/docs/c']);
+    const result = filterEntries(entries, { include: ['/docs/'] });
+    expect(result).toHaveLength(2);
+    expect(result.every(e => e.url.includes('/docs/'))).toBe(true);
+  });
+
+  it('exclude takes priority over include', () => {
+    const entries = makeEntries(['/docs/a', '/docs/secret']);
+    const result = filterEntries(entries, { include: ['/docs/'], exclude: ['/docs/secret'] });
+    expect(result.map(e => new URL(e.url).pathname)).toEqual(['/docs/a']);
+  });
+
+  it('filters out entries with invalid URLs', () => {
+    const entries = [
+      { url: 'not-a-valid-url', lastmod: null },
+      { url: 'https://example.com/valid', lastmod: null },
+    ];
+    const result = filterEntries(entries, {});
+    expect(result).toHaveLength(1);
+    expect(result[0].url).toBe('https://example.com/valid');
+  });
+
+  it('filters out entries with no url field', () => {
+    const entries = [{ url: null, lastmod: null }, { url: 'https://example.com/ok', lastmod: null }];
+    const result = filterEntries(entries, {});
+    expect(result).toHaveLength(1);
   });
 });

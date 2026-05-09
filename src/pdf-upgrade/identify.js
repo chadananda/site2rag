@@ -156,7 +156,7 @@ Summary: [one sentence describing what this document is about]`;
 };
 
 /** Normalize a free-form language name to our canonical key. */
-const normalizeLanguageKey = (lang) => {
+export const normalizeLanguageKey = (lang) => {
   if (!lang) return 'unknown';
   const l = lang.toLowerCase();
   if (l.includes('english')) return 'english';

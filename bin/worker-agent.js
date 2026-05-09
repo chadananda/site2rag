@@ -13,12 +13,15 @@
 import { createServer } from 'http';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { cpus, loadavg, totalmem, freemem, hostname, platform, uptime } from 'os';
+import { cpus, loadavg, totalmem, freemem, hostname, platform, uptime, tmpdir } from 'os';
+import { mkdtempSync, writeFileSync, readFileSync, readdirSync, rmSync, existsSync } from 'fs';
+import { join, dirname, basename } from 'path';
 
 const execFileAsync = promisify(execFile);
 
 const PORT          = parseInt(process.env.WORKER_PORT ?? '49910');
 const CAPACITY_LIMIT = parseFloat(process.env.CAPACITY_LIMIT ?? '0.80');  // 80% threshold
+const PYTHON3       = process.env.PYTHON3_PATH ?? 'python3'; // override to use a venv python
 const VERSION       = '1.0.0';
 const HOST          = hostname();
 const PLATFORM      = platform();
@@ -78,7 +81,7 @@ async function probeCmd(cmd) {
 
 async function probePythonPkg(pkg) {
   try {
-    await execFileAsync('python3', ['-c', `import ${pkg}`], { timeout: 8000 });
+    await execFileAsync(PYTHON3, ['-c', `import ${pkg}`], { timeout: 8000 });
     return true;
   } catch { return false; }
 }
@@ -192,7 +195,7 @@ async function handleToolRun(req, res) {
     try { payload = JSON.parse(body); }
     catch { return send(res, 400, { error: 'invalid JSON' }); }
 
-    const { tool, args = [], timeout = 120000 } = payload;
+    const { tool, args = [], timeout = 120000, inputFiles = {}, outputPaths = [] } = payload;
     if (!tool) return send(res, 400, { error: 'missing tool' });
 
     if (isOverCapacity()) {
@@ -200,11 +203,32 @@ async function handleToolRun(req, res) {
       return send(res, 503, { error: 'over capacity', ...cap });
     }
 
+    // Write inputFiles to a local tmp dir; remap placeholder keys in args to local paths.
+    // This lets the orchestrator send file bytes instead of relying on shared filesystem.
+    let tmpDir = null;
+    let finalArgs = args;
+    let outPathMap = {}; // key → local tmp path for output files to collect after run
+
+    const hasInputFiles = Object.keys(inputFiles).length > 0;
+    if (hasInputFiles || outputPaths.length > 0) {
+      tmpDir = mkdtempSync(join(tmpdir(), 'worker-tool-'));
+      const inPathMap = {};
+      for (const [key, b64] of Object.entries(inputFiles)) {
+        const localPath = join(tmpDir, key);
+        writeFileSync(localPath, Buffer.from(b64, 'base64'));
+        inPathMap[key] = localPath;
+      }
+      for (const key of outputPaths) {
+        outPathMap[key] = join(tmpDir, key);
+      }
+      finalArgs = args.map(a => inPathMap[a] ?? outPathMap[a] ?? a);
+    }
+
     // Resolve command: Python batch engines use python3 + script path; others use CMD_ENV_PATHS or tool name.
     const scriptPath = PYTHON_SCRIPTS[tool];
     const [cmd, execArgs] = scriptPath
-      ? ['python3', [scriptPath, ...args]]
-      : [CMD_ENV_PATHS[tool] ?? tool, args];
+      ? [PYTHON3, [scriptPath, ...finalArgs]]
+      : [CMD_ENV_PATHS[tool] ?? tool, finalArgs];
 
     activeJobs++;
     await acquireSlot(tool);
@@ -214,8 +238,19 @@ async function handleToolRun(req, res) {
         timeout,
         maxBuffer: 50 * 1024 * 1024,
       });
+
+      // Collect output files (e.g. pdftoppm output PNGs) and return as base64
+      const outputFiles = {};
+      for (const [key, localPath] of Object.entries(outPathMap)) {
+        const dir = dirname(localPath);
+        const base = basename(localPath);
+        for (const f of readdirSync(dir).filter(n => n.startsWith(base))) {
+          outputFiles[f] = readFileSync(join(dir, f)).toString('base64');
+        }
+      }
+
       totalJobsServed++;
-      send(res, 200, { stdout: result.stdout, stderr: result.stderr ?? '', duration_ms: Date.now() - started });
+      send(res, 200, { stdout: result.stdout, stderr: result.stderr ?? '', duration_ms: Date.now() - started, outputFiles });
     } catch (e) {
       const duration_ms = Date.now() - started;
       if (e.code === 'ENOENT') return send(res, 404, { error: `tool not found: ${tool}`, code: 'ENOENT' });
@@ -230,6 +265,7 @@ async function handleToolRun(req, res) {
     } finally {
       releaseSlot(tool);
       activeJobs--;
+      if (tmpDir) try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
     }
   });
 }

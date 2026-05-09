@@ -122,7 +122,34 @@ describe('parseRobots', () => {
   it('whitespace-only robots.txt returns empty set', () => {
     expect(parseRobots('   \n  \n  ', 'site2rag/1.0').size).toBe(0);
   });
+
+  it('multiple Disallow entries for same agent all added', () => {
+    const txt = 'User-agent: *\nDisallow: /a/\nDisallow: /b/\nDisallow: /c/\n';
+    const disallowed = parseRobots(txt, 'site2rag/1.0');
+    expect(disallowed.has('/a/')).toBe(true);
+    expect(disallowed.has('/b/')).toBe(true);
+    expect(disallowed.has('/c/')).toBe(true);
+  });
+
+  it('Allow: directives are ignored (only Disallow is parsed)', () => {
+    const txt = 'User-agent: *\nDisallow: /private/\nAllow: /public/\n';
+    const disallowed = parseRobots(txt, 'site2rag/1.0');
+    expect(disallowed.has('/public/')).toBe(false);
+    expect(disallowed.has('/private/')).toBe(true);
+  });
 });
+describe('urlToMirrorPath with port', () => {
+  it('includes port in domain directory name', () => {
+    const p = urlToMirrorPath('localhost:3000', 'http://localhost:3000/page');
+    expect(p).toContain('localhost:3000');
+  });
+  it('handles URL with query AND long name', () => {
+    const url = 'https://example.com/page.html?foo=bar';
+    const p = urlToMirrorPath('example.com', url);
+    expect(p).toMatch(/page__[0-9a-f]{4}\.html$/);
+  });
+});
+
 describe('extractLinks', () => {
   it('excludes javascript:void(0) hrefs', () => {
     const $ = cheerio.load('<a href="javascript:void(0)">click</a>');
@@ -153,5 +180,22 @@ describe('extractLinks', () => {
     const links = extractLinks($, 'https://example.com/');
     expect(links).toContain('https://example.com/page');
     expect(links.some(l => l.includes('#'))).toBe(false);
+  });
+
+  it('handles href with spaces by percent-encoding them', () => {
+    const $ = cheerio.load('<a href="/docs/my file.pdf">File</a>');
+    const links = extractLinks($, 'https://example.com/');
+    expect(links.some(l => l.includes('my%20file.pdf') || l.includes('my+file.pdf') || l.includes('my file.pdf'))).toBe(true);
+  });
+
+  it('returns multiple links from page', () => {
+    const $ = cheerio.load('<a href="/a">A</a><a href="/b">B</a><a href="/c">C</a>');
+    const links = extractLinks($, 'https://example.com/');
+    expect(links).toHaveLength(3);
+  });
+
+  it('returns empty array when no a[href] elements', () => {
+    const $ = cheerio.load('<p>No links here</p>');
+    expect(extractLinks($, 'https://example.com/')).toHaveLength(0);
   });
 });

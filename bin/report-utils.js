@@ -43,7 +43,7 @@ export const buildFreeSummary = (row) => {
 };
 
 /** Transform a DB doc row to API response shape with language normalization + effort estimate. */
-const titleFromUrl = (url) => {
+export const titleFromUrl = (url) => {
   try {
     const u = new URL(url);
     const dl = u.searchParams.get('dl');
@@ -54,7 +54,7 @@ const titleFromUrl = (url) => {
   } catch { return null; }
 };
 
-const isGenericTitle = (t) => !t || t.length <= 5 || /^pdf$/i.test(t.trim());
+export const isGenericTitle = (t) => !t || t.length <= 5 || /^pdf$/i.test(t.trim());
 
 export const mapDoc = (d, domain) => {
   const title = isGenericTitle(d.title) ? (titleFromUrl(d.url) || d.title || null) : d.title;
@@ -80,10 +80,45 @@ export const mapDoc = (d, domain) => {
   const pdf_type = !hasTextLayer ? 'image'
     : (readablePctRaw != null && readablePctRaw < 0.4) ? 'mixed'
     : 'text';
-  // Effective before/after scores: use composite_score as before if before_score is null
-  const effective_before = d.before_score ?? d.composite_score ?? null;
+  // Effective before/after scores: before_score (stored at submit) > history fallback
+  const historyBefore = history.find(h => h.score_before != null)?.score_before ?? null;
+  const effective_before = d.before_score ?? historyBefore ?? null;
   const effective_after = d.after_score != null ? Math.min(d.after_score, 1) : null;
   const effective_improvement = (effective_before != null && effective_after != null) ? effective_after - effective_before : null;
+
+  // Parse pipeline receipt for step-by-step method display with per-stage gains
+  const _receipt = (() => { try { return JSON.parse(d.receipt_json || 'null'); } catch { return null; } })();
+  const method_steps = (() => {
+    if (!_receipt) return null;
+    const { stages = [], quality = {} } = _receipt;
+    const perStage = quality.per_stage ?? {};
+    // Use real site-level gain if we have before_score, else fall back to pipeline's internal gain
+    const totalGainPct = effective_improvement != null
+      ? Math.round(effective_improvement * 100)
+      : (quality.gain != null ? Math.round(quality.gain * 100) : null);
+    const stageOrder = ['s3', 's4', 's5', 's6', 's7'];
+    const label = {
+      s3: s => { const l = s.notes?.match(/^[a-z+]+$/i)?.[0]; return l ? `OCR (${l})` : 'Tesseract OCR'; },
+      s4: () => 'Vision Escalate',
+      s5: s => { const a = s.approach ?? ''; return a.includes('claude') ? 'Claude Vision' : a.includes('boss') ? 'Boss Vision' : 'Vision'; },
+      s6: () => 'Spell Fix',
+      s7: () => 'PDF/A Archive',
+    };
+    // Build steps with per-stage gain deltas where available
+    let prevScore = perStage['s0'] ?? quality.baseline?.composite_score ?? null;
+    const steps = [];
+    for (const stageId of stageOrder) {
+      const s = stages.find(x => x.stage === stageId);
+      if (!s || s.pages_affected <= 0) continue;
+      const lbl = label[stageId]?.(s);
+      if (!lbl) continue;
+      const stageScore = perStage[stageId] ?? null;
+      const delta = (stageScore != null && prevScore != null) ? Math.round((stageScore - prevScore) * 100) : null;
+      if (stageScore != null) prevScore = stageScore;
+      steps.push({ label: lbl, delta });
+    }
+    return steps.length ? { totalGainPct, steps } : null;
+  })();
 
   // Cost estimates for upgrade options
   const avgChars = d.avg_chars_per_page || 1500;
@@ -104,6 +139,8 @@ export const mapDoc = (d, domain) => {
     effective_before,
     effective_after,
     effective_improvement,
+    method_steps,
+    receipt_json: undefined,
     spell_fix_cost_usd,
     vision_cost_usd,
     archive_url: d.status === 'done' && d.upgraded_pdf_path
