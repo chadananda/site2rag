@@ -527,13 +527,17 @@ if __name__ == '__main__':
 
     print(f'[worker-agent] {HOST} listening on :{PORT} ({CPU_CORES} cores, {RAM_GB}GB RAM, limit={round(CAPACITY_LIMIT*100)}%)')
 
-    # Probe tools eagerly
-    def startup_probe():
+    # Probe tools eagerly, then re-register on a 60s heartbeat so the registry
+    # survives pipeline-server restarts without requiring worker restarts.
+    def heartbeat_loop():
         tools = get_tools()
         available = [k for k, v in tools.items() if v]
         print(f'[worker-agent] tools: {", ".join(available) or "none"}')
-        if registry_url:
-            register_with_registry(registry_url, f'http://{HOST}:{PORT}')
+        worker_url = f'http://{HOST}:{PORT}'
+        while True:
+            if registry_url:
+                register_with_registry(registry_url, worker_url)
+            time.sleep(60)
 
-    threading.Thread(target=startup_probe, daemon=True).start()
+    threading.Thread(target=heartbeat_loop, daemon=True).start()
     server.serve_forever()
