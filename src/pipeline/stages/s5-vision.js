@@ -210,7 +210,7 @@ async function runSuryaChunk(pages, chunkDir, ctx) {
     // surya v0.17+: --output_dir replaces --results_dir; --langs removed (auto-detected)
     // results write to output_dir/basename(input_dir)/results.json
     await ctx.run('surya_ocr', [chunkDir, '--output_dir', outDir],
-      { timeout: 300000 }); // 5 min max per chunk
+      { timeout: 60000 });
 
     const resultsPath = join(outDir, basename(chunkDir), 'results.json');
     if (!existsSync(resultsPath)) return;

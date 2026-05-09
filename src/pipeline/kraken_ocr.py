@@ -10,8 +10,10 @@ if '--check' in sys.argv:
     try:
         from kraken import rpred
         from kraken.lib import models as kmodels
-        from bidi.algorithm import get_display
-        print('ok')
+        if not hasattr(kmodels, 'get_default_model'):
+            print('missing')  # API removed in kraken 4.x+; needs kraken <=3.x
+        else:
+            print('ok')
     except ImportError:
         print('missing')
     sys.exit(0)

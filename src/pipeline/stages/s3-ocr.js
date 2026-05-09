@@ -380,7 +380,7 @@ async function runSuryaChunked(cropRegistry, langs, tmpDir, ctx, pageScope = '')
       mkdirSync(chunkOutDir, { recursive: true });
       // surya v0.17+: --output_dir replaces --results_dir; --langs removed (auto-detected)
       // results write to output_dir/basename(input_dir)/results.json
-      await ctx.run('surya_ocr', [chunkInDir, '--output_dir', chunkOutDir], { timeout: 300000 });
+      await ctx.run('surya_ocr', [chunkInDir, '--output_dir', chunkOutDir], { timeout: 60000 });
       const resultsPath = join(chunkOutDir, basename(chunkInDir), 'results.json');
       if (existsSync(resultsPath)) {
         const results = JSON.parse(readFileSync(resultsPath, 'utf8'));

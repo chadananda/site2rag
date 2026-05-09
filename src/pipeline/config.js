@@ -97,7 +97,7 @@ export const DEFAULT_CONFIG = {
     // Slow CPU tools — distribute page-by-page across all NFS-accessible workers
     tesseract:    { type: 'workerPool' }, // OCR — main bottleneck; split every page call
     // GPU tools — route to machines with GPU acceleration
-    surya_ocr:    { type: 'workerPool' }, // GPU-accelerated layout+OCR
+    surya_ocr:    { type: 'local' },      // local: passes directory paths that workers can't access remotely
     easyocr_ocr:  { type: 'workerPool' }, // GPU batch engine
     paddle_ocr:   { type: 'workerPool' }, // GPU batch engine (boss CUDA preferred)
     doctr_ocr:    { type: 'workerPool' }, // GPU batch engine

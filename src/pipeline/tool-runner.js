@@ -130,16 +130,16 @@ export function createToolRunner(config = {}) {
         try {
           return await runToolHttp(tool, args, opts, worker.url);
         } catch (e) {
-          if (e.httpStatus >= 500) {
-            // 503 = over-capacity; other 5xx = worker-side tool failure (missing file, OOM, etc.)
+          if (e.httpStatus >= 500 || !e.httpStatus) {
+            // 5xx = worker-side failure; no httpStatus = network error (connection refused, timeout)
             // In both cases, excluding this worker and trying the next is the right move.
-            const reason = e.httpStatus === 503 ? 'over capacity' : `error ${e.httpStatus}`;
+            const reason = e.httpStatus === 503 ? 'over capacity' : e.httpStatus ? `error ${e.httpStatus}` : 'network error';
             log(`${worker.hostname} ${reason} for ${tool} — trying next worker`);
             excluded.add(worker.url);
             lastErr = e;
             continue;
           }
-          throw e; // 4xx or network errors are not retried
+          throw e; // 4xx errors are not retried
         }
       }
 
