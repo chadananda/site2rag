@@ -906,7 +906,7 @@ export async function s3Ocr(ctx) {
             words = first.label === 'surya'
               ? suryaLinesToWords(r.lines, crop.page.pageNo, crop.bx1, crop.by1)
               : engineWordsToPageWords(r.words, crop.page.pageNo, crop.bx1, crop.by1, first.label);
-          } else if (hasBatch && ctx.config.apiKey && crop.tessWords.length > 0) {
+          } else if (hasBatch && ctx.config.apiKey && !ctx.config.disableCloudVision && crop.tessWords.length > 0) {
             try {
               const prompt = buildCorrectionPrompt(crop.tessWords, batchResults, crop.cropStem, crop.lang, cleanT);
               const resp = await fetch('https://api.anthropic.com/v1/messages', {

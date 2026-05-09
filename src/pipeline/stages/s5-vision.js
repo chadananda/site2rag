@@ -384,6 +384,8 @@ async function synthesizeWithOcrContext(b64, apiKey, model, page, engineOutputs 
 }
 
 async function buildBackendChain(ctx) {
+  // disableCloudVision: true → no Phase 4 cloud backends. Use for testing to avoid spend.
+  if (ctx.config.disableCloudVision) return [];
   const order = ctx.config.implementations?.vision ?? ['boss', 'azure', 'google', 'claude-opus-4-7'];
   const difficulty = ctx.quality?.baseline?.processing_difficulty ?? 0;
   // Hard/handwritten docs escalate to cloud vision regardless of importance (difficulty >= 0.5).
@@ -531,7 +533,7 @@ export async function s5Vision(ctx) {
 
       // If no engine AND no Tesseract output → truly blank; only this goes to cloud
       if (!hasAnyOutput && !hasTesseract) { pagesNeedingCloud.push(page); return; }
-      if (!ctx.config.apiKey) {
+      if (!ctx.config.apiKey || ctx.config.disableCloudVision) {
         // No API key — use best engine output directly (surya preferred, then first available)
         const bestText = outputs.surya || Object.values(outputs).find(t => t?.trim()) || '';
         if (bestText) {
