@@ -177,13 +177,23 @@ async function getPagePng(page, ctx) {
 
 // ── Phase 1: Surya batch pre-pass ────────────────────────────────────────────
 
+let _suryaCliCache = null;
 async function checkSuryaCli(ctx) {
+  if (_suryaCliCache) return _suryaCliCache.available;
   try {
-    await ctx.run('surya_ocr', ['--help'], { timeout: 5000 });
+    const r = await ctx.run('surya_ocr', ['--help'], { timeout: 5000 });
+    const helpText = ((r.stdout ?? '') + (r.stderr ?? '')).replace(/\s+/g, ' ');
+    const newApi = helpText.includes('--output_dir');
+    const flag = newApi ? '--output_dir' : '--results_dir';
+    const getResultsPath = newApi
+      ? (outDir, inDir) => join(outDir, basename(inDir), 'results.json')
+      : (outDir) => join(outDir, 'results.json');
+    _suryaCliCache = { available: true, flag, getResultsPath };
     return true;
   } catch (e) {
-    // surya_ocr --help exits non-zero but that still means it's installed
-    return e.code !== 'ENOENT';
+    _suryaCliCache = { available: e.code !== 'ENOENT', flag: '--output_dir',
+      getResultsPath: (outDir, inDir) => join(outDir, basename(inDir), 'results.json') };
+    return _suryaCliCache.available;
   }
 }
 
@@ -207,12 +217,11 @@ async function runSuryaChunk(pages, chunkDir, ctx) {
   mkdirSync(outDir, { recursive: true });
 
   try {
-    // surya v0.17+: --output_dir replaces --results_dir; --langs removed (auto-detected)
-    // results write to output_dir/basename(input_dir)/results.json
-    await ctx.run('surya_ocr', [chunkDir, '--output_dir', outDir],
-      { timeout: 60000 });
+    const { flag, getResultsPath } = _suryaCliCache ?? { flag: '--output_dir',
+      getResultsPath: (o, i) => join(o, basename(i), 'results.json') };
+    await ctx.run('surya_ocr', [chunkDir, flag, outDir], { timeout: 60000 });
 
-    const resultsPath = join(outDir, basename(chunkDir), 'results.json');
+    const resultsPath = getResultsPath(outDir, chunkDir);
     if (!existsSync(resultsPath)) return;
 
     const results = JSON.parse(readFileSync(resultsPath, 'utf8'));

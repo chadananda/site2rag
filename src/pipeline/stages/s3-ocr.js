@@ -350,11 +350,26 @@ async function findBestLayoutForSegmentation(layoutPng, lang, tmpDir, pageNo, ct
 
 // ── Engine availability checks ────────────────────────────────────────────────────────────────
 
+// Returns {available, flag, getResultsPath} — flag differs between surya <0.17 and >=0.17
+let _suryaCliCache = null;
 async function checkSuryaCli(ctx) {
+  if (_suryaCliCache) return _suryaCliCache.available;
   try {
-    await ctx.run('surya_ocr', ['--help'], { timeout: 5000 });
+    const r = await ctx.run('surya_ocr', ['--help'], { timeout: 5000 });
+    const helpText = ((r.stdout ?? '') + (r.stderr ?? '')).replace(/\s+/g, ' ');
+    const newApi = helpText.includes('--output_dir');
+    const flag = newApi ? '--output_dir' : '--results_dir';
+    // new: results at outDir/basename(inDir)/results.json; old: outDir/results.json
+    const getResultsPath = newApi
+      ? (outDir, inDir) => join(outDir, basename(inDir), 'results.json')
+      : (outDir) => join(outDir, 'results.json');
+    _suryaCliCache = { available: true, flag, getResultsPath };
     return true;
-  } catch (e) { return e.code !== 'ENOENT'; }
+  } catch (e) {
+    _suryaCliCache = { available: e.code !== 'ENOENT', flag: '--output_dir',
+      getResultsPath: (outDir, inDir) => join(outDir, basename(inDir), 'results.json') };
+    return _suryaCliCache.available;
+  }
 }
 
 async function checkPythonEngine(toolName, ctx) {
@@ -378,10 +393,10 @@ async function runSuryaChunked(cropRegistry, langs, tmpDir, ctx, pageScope = '')
     for (const c of chunk) writeFileSync(join(chunkInDir, `${c.cropStem}.png`), readFileSync(c.cropPath));
     try {
       mkdirSync(chunkOutDir, { recursive: true });
-      // surya v0.17+: --output_dir replaces --results_dir; --langs removed (auto-detected)
-      // results write to output_dir/basename(input_dir)/results.json
-      await ctx.run('surya_ocr', [chunkInDir, '--output_dir', chunkOutDir], { timeout: 60000 });
-      const resultsPath = join(chunkOutDir, basename(chunkInDir), 'results.json');
+      const { flag, getResultsPath } = _suryaCliCache ?? { flag: '--output_dir',
+        getResultsPath: (o, i) => join(o, basename(i), 'results.json') };
+      await ctx.run('surya_ocr', [chunkInDir, flag, chunkOutDir], { timeout: 60000 });
+      const resultsPath = getResultsPath(chunkOutDir, chunkInDir);
       if (existsSync(resultsPath)) {
         const results = JSON.parse(readFileSync(resultsPath, 'utf8'));
         for (const [key, value] of Object.entries(results)) {
