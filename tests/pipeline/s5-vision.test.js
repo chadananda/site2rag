@@ -76,10 +76,14 @@ describe('s5Vision — surya batch pre-pass', () => {
     ctx.run = vi.fn(async (tool, args, opts) => {
       if (tool === 'surya_ocr') {
         if (args[0] === '--help') throw new Error('usage'); // installed but exits non-zero
-        const outDir = args[args.indexOf('--results_dir') + 1];
-        mds(outDir, { recursive: true });
+        // new API: surya_ocr <inDir> --output_dir <outDir>; results at outDir/basename(inDir)/results.json
+        const inDir = args[0];
+        const outDir = args[args.indexOf('--output_dir') + 1];
+        const { basename: pb } = await import('path');
+        const resultDir = pjoin(outDir, pb(inDir));
+        mds(resultDir, { recursive: true });
         const results = { 'page-0001': [{ text_lines: [{ text: 'Surya OCR transcription of the document page' }] }] };
-        wfs(pjoin(outDir, 'results.json'), JSON.stringify(results));
+        wfs(pjoin(resultDir, 'results.json'), JSON.stringify(results));
         return { stdout: '', stderr: '' };
       }
       return { stdout: '', stderr: '' };
@@ -100,12 +104,15 @@ describe('s5Vision — surya batch pre-pass', () => {
       if (tool === 'surya_ocr') {
         if (args[0] === '--help') throw new Error('usage'); // installed
         batchCalls.push(args);
-        const outDir = args[args.indexOf('--results_dir') + 1];
-        mds2(outDir, { recursive: true });
+        // new API: surya_ocr <inDir> --output_dir <outDir>; results at outDir/basename(inDir)/
         const chunkDir = args[0];
+        const outDir = args[args.indexOf('--output_dir') + 1];
+        const { basename: pb } = await import('path');
+        const resultDir = pjoin2(outDir, pb(chunkDir));
+        mds2(resultDir, { recursive: true });
         const files = rds2(chunkDir).filter(f => f.endsWith('.png'));
         const results = Object.fromEntries(files.map(f => [f, [{ text_lines: [{ text: `text-${f}-long-enough-result` }] }]]));
-        wfs2(pjoin2(outDir, 'results.json'), JSON.stringify(results));
+        wfs2(pjoin2(resultDir, 'results.json'), JSON.stringify(results));
         return { stdout: '', stderr: '' };
       }
       return { stdout: '', stderr: '' };

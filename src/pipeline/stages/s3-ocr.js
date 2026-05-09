@@ -359,7 +359,8 @@ async function checkSuryaCli(ctx) {
 
 async function checkPythonEngine(toolName, ctx) {
   try {
-    const { stdout } = await ctx.run(toolName, ['--check'], { timeout: 15000 });
+    // 45s timeout: cold Python import over Tailscale can take 20-30s on first call
+    const { stdout } = await ctx.run(toolName, ['--check'], { timeout: 45000 });
     return stdout.trim() === 'ok';
   } catch { return false; }
 }
@@ -377,8 +378,10 @@ async function runSuryaChunked(cropRegistry, langs, tmpDir, ctx, pageScope = '')
     for (const c of chunk) writeFileSync(join(chunkInDir, `${c.cropStem}.png`), readFileSync(c.cropPath));
     try {
       mkdirSync(chunkOutDir, { recursive: true });
-      await ctx.run('surya_ocr', [chunkInDir, '--langs', langs, '--results_dir', chunkOutDir], { timeout: 300000 });
-      const resultsPath = join(chunkOutDir, 'results.json');
+      // surya v0.17+: --output_dir replaces --results_dir; --langs removed (auto-detected)
+      // results write to output_dir/basename(input_dir)/results.json
+      await ctx.run('surya_ocr', [chunkInDir, '--output_dir', chunkOutDir], { timeout: 300000 });
+      const resultsPath = join(chunkOutDir, basename(chunkInDir), 'results.json');
       if (existsSync(resultsPath)) {
         const results = JSON.parse(readFileSync(resultsPath, 'utf8'));
         for (const [key, value] of Object.entries(results)) {
@@ -756,8 +759,9 @@ export async function s3Ocr(ctx) {
               mkdirSync(suryaLayoutDir, { recursive: true });
               mkdirSync(suryaLayoutOut, { recursive: true });
               writeFileSync(join(suryaLayoutDir, `p${page.pageNo}.png`), readFileSync(bestLayout.path ?? layoutPng));
-              await ctx.run('surya_layout', [suryaLayoutDir, '--results_dir', suryaLayoutOut], { timeout: 120000 });
-              const resultsPath = join(suryaLayoutOut, 'results.json');
+              // surya v0.17+: --output_dir replaces --results_dir; results at output_dir/basename(input_dir)/
+              await ctx.run('surya_layout', [suryaLayoutDir, '--output_dir', suryaLayoutOut], { timeout: 120000 });
+              const resultsPath = join(suryaLayoutOut, basename(suryaLayoutDir), 'results.json');
               if (existsSync(resultsPath)) {
                 const results = JSON.parse(readFileSync(resultsPath, 'utf8'));
                 const layoutEntry = Object.values(results)[0];

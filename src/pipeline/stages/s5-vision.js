@@ -20,7 +20,7 @@
 import { shouldRun, withinBudget, llmCost, pLimit } from '../config.js';
 import { queryWorkerCapacity } from '../tool-runner.js';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'fs';
-import { join, dirname } from 'path';
+import { join, dirname, basename } from 'path';
 import { fileURLToPath } from 'url';
 import { createHash } from 'crypto';
 import { getTmpDir } from '../../config.js';
@@ -203,12 +203,12 @@ async function runSuryaChunk(pages, chunkDir, ctx) {
   mkdirSync(outDir, { recursive: true });
 
   try {
-    // Directory input → results.json written directly in outDir
-    // Requires transformers==4.44.2 (4.45+ breaks surya 0.6.x model loading)
-    await ctx.run('surya_ocr', [chunkDir, '--langs', langs, '--results_dir', outDir],
+    // surya v0.17+: --output_dir replaces --results_dir; --langs removed (auto-detected)
+    // results write to output_dir/basename(input_dir)/results.json
+    await ctx.run('surya_ocr', [chunkDir, '--output_dir', outDir],
       { timeout: 300000 }); // 5 min max per chunk
 
-    const resultsPath = join(outDir, 'results.json');
+    const resultsPath = join(outDir, basename(chunkDir), 'results.json');
     if (!existsSync(resultsPath)) return;
 
     const results = JSON.parse(readFileSync(resultsPath, 'utf8'));

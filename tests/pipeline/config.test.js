@@ -9,7 +9,7 @@ describe('DEFAULT_CONFIG', () => {
   it('has all required stage names', () => {
     expect(DEFAULT_CONFIG.stages).toContain('s0');
     expect(DEFAULT_CONFIG.stages).toContain('s3');
-    expect(DEFAULT_CONFIG.stages).toContain('s6');
+    expect(DEFAULT_CONFIG.stages).not.toContain('s6'); // s6 disabled pending multi-doc analysis
     expect(DEFAULT_CONFIG.stages).toContain('s8');
   });
 
