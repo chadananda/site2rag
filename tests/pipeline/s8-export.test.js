@@ -56,8 +56,8 @@ describe('s8Export — with bbox words', () => {
     ];
     await s8Export(ctx);
     const md = readFileSync(ctx.outputs.mdPath, 'utf8');
-    expect(md).toContain('<!-- p.1 -->');
-    expect(md).toContain('<!-- p.2 -->');
+    expect(md).toContain('{#p-1}');
+    expect(md).toContain('{#p-2}');
     expect(md).toContain('Hello');
     expect(md).toContain('Second');
   });
@@ -84,8 +84,8 @@ describe('s8Export — no bbox words fallback', () => {
                  { pageNo: 2, words: [], regions: [], quality: {} }];
     await s8Export(ctx);
     const md = readFileSync(ctx.outputs.mdPath, 'utf8');
-    expect(md).toContain('<!-- p.1 -->');
-    expect(md).toContain('<!-- p.2 -->');
+    expect(md).toContain('{#p-1}');
+    expect(md).toContain('{#p-2}');
     const notes = ctx.metrics.stages.find(s => s.stage === 's8')?.notes;
     expect(notes).toContain('no_words_from_s3');
   });
@@ -129,8 +129,8 @@ describe('s8Export — visionMd path', () => {
     const md = readFileSync(ctx.outputs.mdPath, 'utf8');
     expect(md).toContain('Vision page one.');
     expect(md).toContain('BboxWord');
-    expect(md).toContain('<!-- p.1 -->');
-    expect(md).toContain('<!-- p.2 -->');
+    expect(md).toContain('{#p-1}');
+    expect(md).toContain('{#p-2}');
   });
 
   it('records quality.perStage.s8 when pages have content', async () => {

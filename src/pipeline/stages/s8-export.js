@@ -1,11 +1,11 @@
-// Stage 8: Export corrected text as Markdown with page anchors and paragraph reconstruction.
+// Stage 8: Export corrected text as Markdown with Hugo block-attribute page anchors.
 // Exports: s8Export, adaptWord
 //   s8Export(ctx) → ctx     — assembles Markdown from visionMd + bbox words; writes .md file
 //   adaptWord(w) → bboxWord — converts pipeline word {x1,y1,x2,y2} → ocr-reconstruct {bbox:{x0,y0,x1,y1}}
 // CONTRACT:
 //   Reads:  ctx.outputs.archivalPdfPath (fallback: ctx.sourcePath), ctx.pages[n].words, ctx.pages[n].visionMd
-//   Writes: ctx.outputs.mdPath — Markdown with <!-- p.N --> anchors per page
-//   Format: paragraphs joined across lines; headers/footers stripped; visionMd pages output verbatim
+//   Writes: ctx.outputs.mdPath — Markdown with {#p-N} Hugo block attributes per page
+//   Format: paragraphs joined across lines; page headers wrapped in HTML comments; visionMd verbatim
 // ERRORS: writeFileSync fail → recoverable; no content → writes anchor stubs only
 // NOTE:   Pipeline words use {x1,y1,x2,y2}; ocr-reconstruct expects {bbox:{x0,y0,x1,y1}} — adaptWord converts
 import { shouldRun } from '../config.js';                                           // shouldRun(stage,ctx)→bool
@@ -48,7 +48,7 @@ export async function s8Export(ctx) {
 
     if (hasAnyContent) {
       for (const page of ctx.pages) {
-        mdParts.push(`<!-- p.${page.pageNo} -->`);
+        mdParts.push(`{#p-${page.pageNo}}`);
         if (page.visionMd) {
           mdParts.push(page.visionMd.trim());
           pagesAffected++;
@@ -66,7 +66,7 @@ export async function s8Export(ctx) {
       notes = `bbox_words:${pagesAffected}p`;
     } else {
       // No content at all — write anchor stubs so the file is valid
-      for (const page of ctx.pages) mdParts.push(`<!-- p.${page.pageNo} -->`);
+      for (const page of ctx.pages) mdParts.push(`{#p-${page.pageNo}}`);
       ctx.addDecision('s8', 'fallback', 'no bbox words from s3 — anchor stubs only');
       notes = 'no_words_from_s3';
     }

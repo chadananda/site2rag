@@ -318,8 +318,11 @@ describe('s6SpellFix — contract', () => {
 
     await s6SpellFix(ctx);
 
+    // New semantic: s6 restores to the un-adjusted prior; s3 is adjusted down by correction rate.
+    // 1 word corrected out of 1 total → correctionRate=1.0 → s3 adjusted to 0.0, s6 restored to 0.6.
     expect(ctx.quality.perStage['s6']).toBeDefined();
-    expect(ctx.quality.perStage['s6']).toBeGreaterThan(0.6);
+    expect(ctx.quality.perStage['s6']).toBe(0.6);      // restored to un-adjusted prior
+    expect(ctx.quality.perStage['s3']).toBeLessThan(0.6); // retroactively adjusted down
   });
 
   it('does NOT record quality.perStage.s6 when no pages were fixed', async () => {

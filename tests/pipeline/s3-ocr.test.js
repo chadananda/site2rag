@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { writeFileSync } from 'fs';
 import { makeCtx } from './helpers.js';
 
 vi.mock('child_process', () => ({ execFile: vi.fn() }));
@@ -22,12 +23,37 @@ const SAMPLE_HOCR = `<html><body>
 </span>
 </div></body></html>`;
 
-/** Wrap execFile to call callback-style with (err, result) */
-function mockExecFile(stdout = SAMPLE_HOCR) {
+// hOCR with one full-page ocr_carea block — returned by Tesseract layout pass (--psm 1)
+const LAYOUT_HOCR = `<html><body>
+<div class='ocr_page' title='bbox 0 0 612 792'>
+<div class='ocr_carea' title='bbox 10 10 600 780'>
+<span class='ocr_line'><span class='ocrx_word' title='bbox 10 10 50 30; x_wconf 95'>block</span></span>
+</div></div></body></html>`;
+
+/** Wrap execFile to call callback-style with (err, result).
+ *  pdftoppm writes a 200-byte fake PNG so existsSync/statSync checks pass.
+ *  convert -crop writes a fake crop PNG so the block crop pipeline can proceed.
+ *  Tesseract --psm 1 (layout pass) returns LAYOUT_HOCR so block detection succeeds.
+ *  All other Tesseract calls return ocrStdout. python3 returns empty. */
+function mockExecFile(ocrStdout = SAMPLE_HOCR) {
   execFile.mockImplementation((_cmd, _args, _opts, cb) => {
-    // vitest promisify passes opts as 3rd arg and cb as 4th
     const callback = typeof _opts === 'function' ? _opts : cb;
-    callback(null, { stdout, stderr: '' });
+    if (_cmd === 'pdftoppm') {
+      const outBase = _args[_args.length - 1];
+      try { writeFileSync(`${outBase}.png`, Buffer.alloc(200, 0)); } catch {}
+      callback(null, { stdout: '', stderr: '' });
+    } else if (_cmd === 'convert' && _args.includes('-crop')) {
+      // Write the output crop file so existsSync check in s3 passes
+      const outPath = _args[_args.length - 1];
+      try { writeFileSync(outPath, Buffer.alloc(200, 0)); } catch {}
+      callback(null, { stdout: '', stderr: '' });
+    } else if (_cmd === 'tesseract' && Array.isArray(_args) && _args.includes('--psm')) {
+      callback(null, { stdout: LAYOUT_HOCR, stderr: '' });
+    } else if (_cmd === 'tesseract') {
+      callback(null, { stdout: ocrStdout, stderr: '' });
+    } else {
+      callback(null, { stdout: '', stderr: '' });
+    }
   });
 }
 
@@ -136,54 +162,53 @@ const HIGH_HOCR = `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wcon
 <span class='ocrx_word' id='w3' title='bbox 130 0 180 20; x_wconf 91'>word</span>`;
 
 // tests: uses enhanced when improves ratio, keeps original when no improvement, --force flag, --method flag, enhanced:false kept original, python3 throw kept original
-describe('s3Ocr stage — contrast enhancement', () => {
-  it('uses enhanced version when python3+tesseract improves clean ratio', async () => {
-    // Flow: pdftoppm(full) → pdftoppm(layout,no file created) → tesseract(original=low) → python3(enhance) → tesseract(enhanced=high)
-    // Track tesseract calls independently since layout pdftoppm shifts global callIdx
-    let tessCallIdx = 0;
+describe('s3Ocr stage — no blocks found escalation', () => {
+  // When all block detection methods fail (no usable blocks), s3 must NOT silently fall
+  // back to full-page single-block Tesseract. That hides missing deps and produces poor output.
+  // Instead: mark page for s4 escalation with a full-page _escalateBlocks entry.
+
+  it('escalates to s4 when block detection finds no blocks', async () => {
     execFile.mockImplementation((_cmd, _args, _opts, cb) => {
       const callback = typeof _opts === 'function' ? _opts : cb;
       if (_cmd === 'pdftoppm') {
         callback(null, { stdout: '', stderr: '' });
       } else if (_cmd === 'tesseract') {
-        tessCallIdx++;
-        if (tessCallIdx === 1) {
-          // Layout pass (--psm 1) or first full-page OCR: return low-conf
-          callback(null, { stdout: `<span class='ocrx_word' id='w1' title='bbox 0 0 50 20; x_wconf 30'>bad</span>`, stderr: '' });
-        } else {
-          // Enhanced OCR: high-conf
-          callback(null, { stdout: HIGH_HOCR, stderr: '' });
-        }
+        // Layout pass returns no ocr_carea blocks; OCR pass returns words
+        callback(null, { stdout: SAMPLE_HOCR, stderr: '' });
       } else if (_cmd === 'python3') {
-        callback(null, { stdout: JSON.stringify({ enhanced: true, applied: ['clahe'] }), stderr: '' });
+        // detect_columns returns empty — no geometric columns found
+        callback(null, { stdout: '[]', stderr: '' });
       } else {
         callback(null, { stdout: '', stderr: '' });
       }
     });
 
-    const ctx = makeCtx({ config: { preprocessing: { forceContrast: false } } });
+    const ctx = makeCtx();
     ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
     await s3Ocr(ctx);
 
-    // Enhanced words should have source 'tesseract+contrast'
-    expect(ctx.pages[0].words.some(w => w.source === 'tesseract+contrast')).toBe(true);
-    const dec = ctx.metrics.decisions.find(d => d.decision?.startsWith('contrast_p'));
-    expect(dec).toBeDefined();
-    expect(dec.reason).toContain('clahe');
+    // No words — block OCR never ran
+    expect(ctx.pages[0].words).toEqual([]);
+    // Full-page escalation block set for s4
+    expect(ctx.pages[0]._escalateBlocks).toHaveLength(1);
+    expect(ctx.pages[0]._escalateBlocks[0].fullPage).toBe(true);
+    // needs_vision flag set
+    expect(ctx.pages[0]._bucketed.needs_vision).toBe(1);
+    // Error logged (recoverable)
+    const err = ctx.metrics.errors.find(e => e.stage === 's3');
+    expect(err).toBeDefined();
+    expect(err.recoverable).toBe(true);
   });
 
-  it('keeps original when enhanced version does not improve clean ratio', async () => {
-    let callIdx = 0;
+  it('escalates to s4 when detect_columns.py throws (missing dep)', async () => {
     execFile.mockImplementation((_cmd, _args, _opts, cb) => {
       const callback = typeof _opts === 'function' ? _opts : cb;
-      callIdx++;
       if (_cmd === 'pdftoppm') {
         callback(null, { stdout: '', stderr: '' });
+      } else if (_cmd === 'tesseract') {
+        callback(null, { stdout: SAMPLE_HOCR, stderr: '' });
       } else if (_cmd === 'python3') {
-        callback(null, { stdout: JSON.stringify({ enhanced: true, applied: ['clahe'] }), stderr: '' });
-      } else if (_cmd === 'tesseract') {
-        // Both tesseract calls return same low-conf hOCR — enhanced doesn't help
-        callback(null, { stdout: SAMPLE_HOCR, stderr: '' });
+        callback(new Error('ModuleNotFoundError: No module named numpy'), null);
       } else {
         callback(null, { stdout: '', stderr: '' });
       }
@@ -193,100 +218,9 @@ describe('s3Ocr stage — contrast enhancement', () => {
     ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
     await s3Ocr(ctx);
 
-    // Should keep original source words (tesseract, not tesseract+contrast)
-    const words = ctx.pages[0].words;
-    expect(words.every(w => w.source === 'tesseract')).toBe(true);
-    const dec = ctx.metrics.decisions.find(d => d.decision?.startsWith('contrast_p'));
-    expect(dec).toBeDefined();
-    expect(dec.reason).toContain('kept original');
-  });
-
-  it('passes --force flag to python3 when forceContrast=true', async () => {
-    const capturedArgs = [];
-    execFile.mockImplementation((_cmd, _args, _opts, cb) => {
-      const callback = typeof _opts === 'function' ? _opts : cb;
-      if (_cmd === 'python3') {
-        capturedArgs.push([..._args]);
-        callback(null, { stdout: JSON.stringify({ enhanced: true, applied: ['clahe'] }), stderr: '' });
-      } else if (_cmd === 'tesseract') {
-        callback(null, { stdout: SAMPLE_HOCR, stderr: '' });
-      } else {
-        callback(null, { stdout: '', stderr: '' });
-      }
-    });
-
-    const ctx = makeCtx({ config: { preprocessing: { forceContrast: true } } });
-    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
-    await s3Ocr(ctx);
-
-    expect(capturedArgs.length).toBeGreaterThan(0);
-    expect(capturedArgs[0]).toContain('--force');
-  });
-
-  it('passes --method to python3 when preprocessing.method is set', async () => {
-    const capturedArgs = [];
-    execFile.mockImplementation((_cmd, _args, _opts, cb) => {
-      const callback = typeof _opts === 'function' ? _opts : cb;
-      if (_cmd === 'python3') {
-        capturedArgs.push([..._args]);
-        callback(null, { stdout: JSON.stringify({ enhanced: false }), stderr: '' });
-      } else if (_cmd === 'tesseract') {
-        callback(null, { stdout: SAMPLE_HOCR, stderr: '' });
-      } else {
-        callback(null, { stdout: '', stderr: '' });
-      }
-    });
-
-    const ctx = makeCtx({ config: { preprocessing: { forceContrast: true, method: 'otsu' } } });
-    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
-    await s3Ocr(ctx);
-
-    expect(capturedArgs[0]).toContain('--method');
-    expect(capturedArgs[0]).toContain('otsu');
-  });
-
-  it('keeps original when python3 enhancement fails (returns { enhanced: false })', async () => {
-    execFile.mockImplementation((_cmd, _args, _opts, cb) => {
-      const callback = typeof _opts === 'function' ? _opts : cb;
-      if (_cmd === 'python3') {
-        callback(null, { stdout: JSON.stringify({ enhanced: false }), stderr: '' });
-      } else if (_cmd === 'tesseract') {
-        callback(null, { stdout: SAMPLE_HOCR, stderr: '' });
-      } else {
-        callback(null, { stdout: '', stderr: '' });
-      }
-    });
-
-    const ctx = makeCtx();
-    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
-    await s3Ocr(ctx);
-
-    // No contrast decision should be logged — enhancement not attempted
-    const dec = ctx.metrics.decisions.find(d => d.decision?.startsWith('contrast_p'));
-    expect(dec).toBeUndefined();
-    // Words should be from original OCR
-    expect(ctx.pages[0].words).toHaveLength(3);
-  });
-
-  it('keeps original when python3 throws (subprocess error)', async () => {
-    execFile.mockImplementation((_cmd, _args, _opts, cb) => {
-      const callback = typeof _opts === 'function' ? _opts : cb;
-      if (_cmd === 'python3') {
-        callback(new Error('python3 not found'), null);
-      } else if (_cmd === 'tesseract') {
-        callback(null, { stdout: SAMPLE_HOCR, stderr: '' });
-      } else {
-        callback(null, { stdout: '', stderr: '' });
-      }
-    });
-
-    const ctx = makeCtx();
-    ctx.pages = [{ pageNo: 1, regions: [], quality: {} }];
-    await s3Ocr(ctx);
-
-    // No crash, original words kept
-    expect(ctx.pages[0].words).toHaveLength(3);
-    expect(ctx.metrics.errors.filter(e => e.stage === 's3')).toHaveLength(0);
+    expect(ctx.pages[0].words).toEqual([]);
+    expect(ctx.pages[0]._escalateBlocks).toHaveLength(1);
+    expect(ctx.pages[0]._escalateBlocks[0].fullPage).toBe(true);
   });
 });
 

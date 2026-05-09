@@ -18,18 +18,19 @@ const PROMPT = `Examine this scanned document sample and the metadata below. Ret
 %METADATA%
 
 Identify:
-1. The document language — use ISO 639-2 Tesseract codes (fra, eng, ara, fas, deu, spa, ita, por, etc.)
+1. The ACTUAL document language — look at the characters on the page (Arabic script? Latin? CJK?).
+   Use ISO 639-2 Tesseract codes: eng, fra, deu, spa, ara, fas, heb, rus, chi_sim, jpn, kor, etc.
+   IMPORTANT: Base language on what you SEE in the image, not on any default assumption.
 2. Visible scan quality issues
 
 Return exactly:
 {
-  "language": "fra",
-  "language_confidence": 0.9,
-  "scan_issues": []
+  "language": "<code>",
+  "language_confidence": <0.0-1.0>,
+  "scan_issues": [<zero or more of: bleed_through, low_contrast, noise, skew, faded, stained>]
 }
 
-scan_issues: array of zero or more of: bleed_through, low_contrast, noise, skew, faded, stained
-language_confidence: how certain you are, based on visible characters, filename, and URL clues.`;
+JSON only, no explanation. If you cannot read the characters, set language_confidence below 0.4.`;
 
 export async function inferScanProfile(ctx) {
   const apiKey = ctx.config.apiKey;
@@ -40,20 +41,24 @@ export async function inferScanProfile(ctx) {
   mkdirSync(tmpDir, { recursive: true });
 
   try {
-    // Rasterize first page at 72dpi — ~612×792px for a letter page, fast
+    // Sample a body page, not the cover. Page 1 is often a title/cover image that
+    // looks nothing like the document content. Use page 3 for longer docs, page 2
+    // for short ones, falling back to page 1 only for single-page documents.
+    const pageCount = ctx.pageCount ?? 1;
+    const samplePage = pageCount >= 3 ? 3 : pageCount >= 2 ? 2 : 1;
     const thumbBase = join(tmpDir, 'thumb');
     await ctx.run('pdftoppm', [
-      '-r', '72', '-jpeg', '-f', '1', '-l', '1', '-singlefile',
+      '-r', '72', '-jpeg', '-f', String(samplePage), '-l', String(samplePage), '-singlefile',
       ctx.sourcePath, thumbBase,
     ], { timeout: 15000 });
     const thumbPath = `${thumbBase}.jpg`;
     if (!existsSync(thumbPath)) return {};
 
-    // Crop a 150×150px sample from the upper-center (where headers + body text live)
-    // At 72dpi this is roughly 2"×2" — enough to identify language and scan quality
+    // Crop a 300×200px sample from the center-left body area (not just the header).
+    // At 72dpi this covers most of the text area — enough to see script type clearly.
     const samplePath = join(tmpDir, 'sample.jpg');
     await ctx.run('convert', [
-      thumbPath, '-crop', '150x150+100+80', '+repage', samplePath,
+      thumbPath, '-crop', '300x200+50+120', '+repage', '-resize', '300x200>', samplePath,
     ], { timeout: 10000 });
     if (!existsSync(samplePath)) return {};
 

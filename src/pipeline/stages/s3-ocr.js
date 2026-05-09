@@ -1,9 +1,19 @@
-// Stage 3: Block segmentation → all CPU OCR engines in parallel → Haiku synthesis of all outputs.
+// Stage 3: Block-level multi-engine OCR + Haiku synthesis. Core product: synthesis always runs.
+// Script detection cascade per block (no API cost until Haiku synthesis):
+//   1. Page-level OSD (Tesseract --psm 0) sets initial lang candidates
+//   2. Block-level OSD on each crop (≥150×80px) — catches multilingual pages
+//   3. Unicode post-check on Tesseract output — re-runs if chars indicate wrong script
+//   4. Batch engine consensus — if 2+ engines agree on different script, re-runs Tesseract
+//   5. Haiku synthesis uses the corrected Tesseract output + all engine outputs as context
+// Engine logic: tesseract always; easyocr+paddle+doctr+kraken if available (amortized per page);
+//   surya only on dirty blocks (cleanRatio < D_SYNTH_THRESH). Haiku synthesis always unless all failed.
 // Exports: s3Ocr, parseHocr, repairHyphens, resolveLang, cleanRatio
-// Deps: config.js (shouldRun, pLimit, llmCost), preprocess_image.py, detect_columns.py,
+// Deps: config.js (shouldRun, pLimit, llmCost), tool-runner.js (queryWorkerCapacity),
+//       preprocess_image.py, detect_blocks_cv.py, detect_blocks_paddle.py,
 //       tesseract, surya_ocr (opt), easyocr_ocr.py (opt), paddle_ocr.py (opt),
 //       doctr_ocr.py (opt), kraken_ocr.py (opt)
 import { shouldRun, pLimit, llmCost } from '../config.js';
+import { queryWorkerCapacity } from '../tool-runner.js';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { mkdirSync, existsSync, statSync, readFileSync, writeFileSync, rmSync, copyFileSync } from 'fs';
@@ -31,8 +41,9 @@ const LAYOUT_DPI_CANDIDATES = [150, 100, 200];
 
 const execFileAsync = promisify(execFile);
 const __pyDir       = join(dirname(fileURLToPath(import.meta.url)), '..');
-const PREPROCESS_PY  = join(__pyDir, 'preprocess_image.py');
-const DETECT_COLS_PY = join(__pyDir, 'detect_columns.py');
+const PREPROCESS_PY       = join(__pyDir, 'preprocess_image.py');
+const DETECT_BLOCKS_CV_PY = join(__pyDir, 'detect_blocks_cv.py');
+const DETECT_BLOCKS_PAD_PY = join(__pyDir, 'detect_blocks_paddle.py');
 const EASYOCR_PY     = join(__pyDir, 'easyocr_ocr.py');
 const PADDLE_PY      = join(__pyDir, 'paddle_ocr.py');
 const DOCTR_PY       = join(__pyDir, 'doctr_ocr.py');
@@ -112,6 +123,29 @@ export function cleanRatio(words, cleanT) {
   return words.filter(w => w.conf >= cleanT).length / words.length;
 }
 
+// Detect dominant non-Latin script from OCR output text via Unicode range analysis.
+// Returns Tesseract lang code when ≥30% of non-whitespace chars belong to a recognizable script.
+// Zero cost — no API, no model load. Used to catch script mismatches after Tesseract and batch engines.
+function detectScriptFromText(text) {
+  if (!text) return null;
+  const chars = [...text].filter(ch => ch.trim() !== '');
+  if (chars.length < 4) return null;
+  const counts = { ara: 0, heb: 0, chi_sim: 0, jpn: 0, kor: 0, rus: 0 };
+  for (const ch of chars) {
+    const cp = ch.codePointAt(0);
+    if ((cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0x0750 && cp <= 0x077F) ||
+        (cp >= 0xFB50 && cp <= 0xFDFF) || (cp >= 0xFE70 && cp <= 0xFEFF)) counts.ara++;
+    else if (cp >= 0x0590 && cp <= 0x05FF) counts.heb++;
+    else if (cp >= 0x4E00 && cp <= 0x9FFF) counts.chi_sim++;
+    else if ((cp >= 0x3040 && cp <= 0x309F) || (cp >= 0x30A0 && cp <= 0x30FF)) counts.jpn++;
+    else if (cp >= 0xAC00 && cp <= 0xD7A3) counts.kor++;
+    else if (cp >= 0x0400 && cp <= 0x04FF) counts.rus++;
+  }
+  const total = chars.length;
+  const [best] = Object.entries(counts).sort(([, a], [, b]) => b - a);
+  return (best && best[1] / total >= 0.3) ? best[0] : null;
+}
+
 async function tryEnhance(pngPath, enhancedPath, extraArgs = []) {
   try {
     const { stdout } = await execFileAsync('python3', [PREPROCESS_PY, ...extraArgs, pngPath, enhancedPath], { timeout: 30000 });
@@ -151,6 +185,43 @@ async function runTesseractBestLang(pngPath, langCandidates, pageNo, ctx, cleanT
 async function runTesseractLayout(pngPath, lang, ctx) {
   const { stdout } = await ctx.run('tesseract', [pngPath, 'stdout', 'hocr', '--psm', '1', '-l', lang], { timeout: 60000, maxBuffer: 5 * 1024 * 1024 });
   return stdout;
+}
+
+// Tesseract OSD: free CPU-based script/orientation detection. Returns Tesseract lang code or null.
+// Maps detected script to lang: Arabic→ara, Han→chi_sim, Latin→eng, etc.
+// Run this before OCR when language is unknown — no API cost, ~1s per page.
+const OSD_SCRIPT_TO_LANG = { Arabic: 'ara', Persian: 'fas', Hebrew: 'heb', Devanagari: 'hin',
+  Han: 'chi_sim', Hangul: 'kor', Japanese: 'jpn', Cyrillic: 'rus', Latin: 'eng',
+  Bengali: 'ben', Tamil: 'tam', Telugu: 'tel', Kannada: 'kan', Malayalam: 'mal',
+  Thai: 'tha', Georgian: 'kat', Greek: 'ell', Tibetan: 'bod' };
+
+async function detectScriptOSD(pngPath, ctx) {
+  try {
+    const { stdout } = await ctx.run('tesseract', [pngPath, 'stdout', '--psm', '0'], { timeout: 30000 });
+    const scriptM = stdout.match(/Script:\s*(\w+)/);
+    const confM   = stdout.match(/Script confidence:\s*([\d.]+)/);
+    if (!scriptM) return null;
+    const script = scriptM[1], conf = parseFloat(confM?.[1] ?? '0');
+    const lang = OSD_SCRIPT_TO_LANG[script] ?? null;
+    return lang ? { lang, script, conf } : null;
+  } catch { return null; }
+}
+
+// Merge page-level and block-level OSD candidates. Block OSD runs on the crop itself and
+// detects mixed-script content (e.g., Arabic footnotes on an otherwise English page).
+// If OSD has conf ≥0.5 and detects a non-generic non-Latin script, it leads the list.
+function buildBlockLangCandidates(pageCandidates, blockOsd) {
+  if (!blockOsd) return pageCandidates;
+  if (pageCandidates.some(c => c.lang === blockOsd.lang)) return pageCandidates;
+  const pageBase = pageCandidates[0]?.lang;
+  const metaIsGeneric = ['eng', 'fra', 'deu', 'spa', 'ita', 'por'].includes(pageBase);
+  if (blockOsd.conf >= 0.5 && metaIsGeneric && blockOsd.lang !== 'eng') {
+    return [{ lang: blockOsd.lang, source: 'block_osd' }, ...pageCandidates];
+  }
+  if (blockOsd.conf >= 0.3) {
+    return [...pageCandidates, { lang: blockOsd.lang, source: 'block_osd' }];
+  }
+  return pageCandidates;
 }
 
 // Returns {blocks, rawCount, filteredSizes} — rawCount and filteredSizes are for diagnostics.
@@ -286,12 +357,13 @@ async function checkPythonEngine(toolName, ctx) {
 
 // ── Surya (GPU-friendly batch via CLI, chunked) ───────────────────────────────────────────────
 
-async function runSuryaChunked(cropRegistry, langs, tmpDir, ctx) {
+async function runSuryaChunked(cropRegistry, langs, tmpDir, ctx, pageScope = '') {
   const suryaMap = new Map();
+  const pfx = pageScope ? `surya-${pageScope}` : 'surya';
   for (let i = 0; i < cropRegistry.length; i += D_SURYA_CHUNK) {
     const chunk = cropRegistry.slice(i, i + D_SURYA_CHUNK);
-    const chunkInDir  = join(tmpDir, `surya-in-${i}`);
-    const chunkOutDir = join(tmpDir, `surya-out-${i}`);
+    const chunkInDir  = join(tmpDir, `${pfx}-in-${i}`);
+    const chunkOutDir = join(tmpDir, `${pfx}-out-${i}`);
     mkdirSync(chunkInDir, { recursive: true });
     for (const c of chunk) writeFileSync(join(chunkInDir, `${c.cropStem}.png`), readFileSync(c.cropPath));
     try {
@@ -347,23 +419,30 @@ function suryaLinesToWords(lines, pageNo, ox, oy) {
 
 // ── Python batch engines (EasyOCR, PaddleOCR, docTR, Kraken) ─────────────────────────────────
 
-// Run a batch engine over all crops via workerPool (falls back to local). Returns Map<cropStem, {text, words}>.
-async function runEngineBatch(toolName, label, cropRegistry, langs, tmpDir, ctx) {
-  const inputDir  = join(tmpDir, `${label}-in`);
-  const outputJson = join(tmpDir, `${label}-out.json`);
+// Run a batch engine over one page's crops via workerPool (falls back to local).
+// pageScope is added to dir names so concurrent pages don't collide.
+// Returns Map<cropStem, {text, words}>.
+async function runEngineBatch(toolName, label, cropRegistry, langs, tmpDir, ctx, pageScope = '') {
+  const tag = pageScope ? `${label}-${pageScope}` : label;
+  const inputDir  = join(tmpDir, `${tag}-in`);
+  const outputJson = join(tmpDir, `${tag}-out.json`);
   mkdirSync(inputDir, { recursive: true });
   for (const c of cropRegistry) {
     if (existsSync(c.cropPath))
       writeFileSync(join(inputDir, `${c.cropStem}.png`), readFileSync(c.cropPath));
   }
-  await ctx.run(toolName, [inputDir, outputJson, langs], { timeout: 600000 });
-  if (!existsSync(outputJson)) return new Map();
-  const results = JSON.parse(readFileSync(outputJson, 'utf8'));
-  const map = new Map();
-  for (const [stem, val] of Object.entries(results)) {
-    if (val.text?.trim()) map.set(stem, val);
+  try {
+    await ctx.run(toolName, [inputDir, outputJson, langs], { timeout: 600000 });
+    if (!existsSync(outputJson)) return new Map();
+    const results = JSON.parse(readFileSync(outputJson, 'utf8'));
+    const map = new Map();
+    for (const [stem, val] of Object.entries(results)) {
+      if (val.text?.trim()) map.set(stem, val);
+    }
+    return map;
+  } finally {
+    try { rmSync(inputDir, { recursive: true, force: true }); } catch {}
   }
-  return map;
 }
 
 // Convert batch engine word list (with crop-relative coords) to full-page word objects.
@@ -468,19 +547,24 @@ export async function s3Ocr(ctx) {
   const cropDir = join(tmpDir, 'block-crops');
   mkdirSync(cropDir, { recursive: true });
 
-  // cropRegistry: blocks that will be passed to Surya + Haiku after the page loop
-  // { page, blockIdx, bx1, by1, bx2, by2, cropPath, cropStem, tessWords, lang }
-  const cropRegistry = [];
-  const pageLimit = pLimit(8);
+  // Check engine availability once — avoids redundant --check calls inside the page loop.
+  const [suryaOk, ...engineOks] = await Promise.all([
+    checkSuryaCli(ctx),
+    ...BATCH_ENGINES.map(e => checkPythonEngine(e.tool, ctx)),
+  ]);
+  const availableEngines = BATCH_ENGINES.filter((_, i) => engineOks[i]);
+  ctx.addDecision('s3', 'engines_available',
+    [suryaOk ? 'surya' : null, ...availableEngines.map(e => e.label)].filter(Boolean).join(', ') || 'tesseract-only');
 
   // Calibration page: page 2 (first real text page after cover).
-  // Cover (page 1) is often color-scanned differently; page 2 represents document body style.
-  // Winning {method, dpi} is reused as a fast path for all subsequent pages.
+  // Winning {method, dpi} is shared via ctx._layoutCalibration before pages 3+ start.
   const calibPageNo = ctx.pages.length >= 2 ? 2 : 1;
 
+  // Haiku synthesis concurrency limit — shared across all pages.
+  const synthLimit = pLimit(D_SYNTH_CONC);
+
   try {
-    // ── Pre-calibration: find best layout settings from page 2 before the parallel loop ────────
-    // This ensures ctx._layoutCalibration is set before pages 3+ start (parallel loop).
+    // ── Pre-calibration: find best layout settings from page 2 ──────────────────────────────
     if (ctx._scanIssues?.length > 0) {
       const calibSrcPage = ctx.pages.find(p => p.pageNo === calibPageNo);
       if (calibSrcPage) {
@@ -505,8 +589,11 @@ export async function s3Ocr(ctx) {
       }
     }
 
-    // ── Phase 1: Rasterize + layout + Tesseract per block (parallel across pages) ─────────────
-    await Promise.all(ctx.pages.map(page => pageLimit(async () => {
+    // ── Per-page pipeline: all pages run concurrently, each self-contained ──────────────────
+    // Each page: rasterize → OSD → layout → Tesseract per block → all engines in parallel
+    //            → wait for all engine results → Haiku synthesis → assemble words.
+    // Engine calls use pageScope in dir names so concurrent pages don't collide in tmpDir.
+    await Promise.all(ctx.pages.map(async (page) => {
       try {
         if (page.regions?.length && page.regions.every(r => r.type === 'figure')) {
           page.words = [];
@@ -517,11 +604,7 @@ export async function s3Ocr(ctx) {
         const regionType = page.regions?.[0]?.type ?? null;
         const lang = ctx.config.s3Lang ?? resolveLang(regionType, ctx.meta?.language);
         page._lang = lang;
-        // Language candidates accumulate across pipeline stages; never overridden.
-        // Tesseract runs once per candidate; best cleanRatio wins that block.
-        // Handles multi-language documents (English title, Arabic body, Persian endnotes).
         page._langCandidates = [{ lang, source: 'metadata' }];
-        routingSummary[lang] = (routingSummary[lang] ?? 0) + 1;
 
         const outBase = join(tmpDir, `p${page.pageNo}`);
         const pngPath = `${outBase}.png`;
@@ -537,20 +620,34 @@ export async function s3Ocr(ctx) {
           throw new Error(`pdftoppm produced corrupt PNG for page ${page.pageNo}`);
         page._pngPath = pngPath;
 
-        // Layout pass → block bounding boxes.
-        // Strategy: Tesseract --psm 1 on UNENHANCED layout image first.
-        // Enhancement is intentionally skipped here — visual analysis showed it destroys
-        // column gutters (posterization fills whitespace with noise), giving Tesseract zero blocks.
-        // Geometric fallback: projection-profile column detection works even on degraded scans.
+        // OSD script detection — free, ~1s, no API cost.
+        const osd = existsSync(pngPath) ? await detectScriptOSD(pngPath, ctx) : null;
+        if (osd) {
+          const metaLangBase = lang.split('+')[0];
+          if (osd.lang !== metaLangBase && !page._langCandidates.some(c => c.lang === osd.lang)) {
+            page._langCandidates.push({ lang: osd.lang, source: 'osd' });
+            ctx.addDecision('s3', `script_p${page.pageNo}`,
+              `OSD: ${osd.script} (${osd.lang}) conf=${osd.conf.toFixed(2)} — differs from metadata lang=${lang}`);
+            const metaIsGeneric = ['eng', 'fra', 'deu', 'spa', 'ita', 'por'].includes(lang);
+            if (osd.lang !== 'eng' && metaIsGeneric) {
+              page._langCandidates = [{ lang: osd.lang, source: 'osd' }, ...page._langCandidates];
+              ctx.addDecision('s3', `script_p${page.pageNo}`, `OSD non-Latin override: using ${osd.lang} (was ${lang})`);
+            }
+          } else if (osd.lang === metaLangBase) {
+            ctx.addDecision('s3', `script_p${page.pageNo}`, `OSD confirms: ${osd.script} (${osd.lang}) conf=${osd.conf.toFixed(2)}`);
+          }
+        }
+
+        const effectiveLang = page._langCandidates[0].lang;
+        routingSummary[effectiveLang] = (routingSummary[effectiveLang] ?? 0) + 1;
+
+        // ── Layout detection ────────────────────────────────────────────────────────────────
         let blocks = [];
         const layoutExists = existsSync(layoutPng) && statSync(layoutPng).size > 100;
 
         if (layoutExists) {
           let bestLayout = { label: 'raw', path: layoutPng, blocks: [], rawCount: 0, filteredSizes: [] };
 
-          // Fast path: apply page-2-calibrated {method, dpi} before running the full search.
-          // Saves 3–5 Tesseract + enhancement calls per page on typical multi-column documents.
-          // Falls through (blocks stays 0) if calibration produces < D_MIN_BLOCKS.
           if (ctx._layoutCalibration && page.pageNo > calibPageNo) {
             const { method: calMethod, dpi: calDpi } = ctx._layoutCalibration;
             const calBase = join(tmpDir, `p${page.pageNo}_layout_${calDpi}dpi`);
@@ -561,211 +658,303 @@ export async function s3Ocr(ctx) {
               if (existsSync(calPng)) {
                 const calResult = await findBestLayoutForSegmentation(calPng, lang, tmpDir, page.pageNo, ctx, calMethod === 'raw' ? [] : [calMethod]);
                 if (calResult.blocks.length >= D_MIN_BLOCKS) {
-                  bestLayout = calResult;
-                  blocks = calResult.blocks;
+                  bestLayout = calResult; blocks = calResult.blocks;
                   if (calDpi !== D_LAYOUT_DPI) page._layoutDpiScale = dpi / calDpi;
-                  ctx.addDecision('s3', `layout_p${page.pageNo}`,
-                    `calibrated ${calMethod}@${calDpi}dpi: ${calResult.rawCount} raw → ${blocks.length} usable`);
+                  ctx.addDecision('s3', `layout_p${page.pageNo}`, `calibrated ${calMethod}@${calDpi}dpi: ${calResult.rawCount} raw → ${blocks.length} usable`);
                 }
               }
-            } catch { /* fall through to full search */ }
+            } catch { /* fall through */ }
           }
 
-          // 1. Full enhancement search — skipped if calibration fast path already found blocks.
-          // bleed_suppression excluded: fills column gutters with noise, destroying RLSA signal.
           if (blocks.length < D_MIN_BLOCKS) {
             try {
               bestLayout = await findBestLayoutForSegmentation(layoutPng, lang, tmpDir, page.pageNo, ctx);
               blocks = bestLayout.blocks;
-              const filterNote = bestLayout.filteredSizes.length
-                ? `, filtered ${bestLayout.filteredSizes.length} noise (${bestLayout.filteredSizes.slice(0,3).join(', ')})`
-                : '';
-              ctx.addDecision('s3', `layout_p${page.pageNo}`,
-                `${bestLayout.label}: ${bestLayout.rawCount} raw → ${blocks.length} usable${filterNote}`);
-            } catch (e) {
-              ctx.addDecision('s3', `layout_p${page.pageNo}`, `layout detection failed: ${e.message}`);
-            }
+              const filterNote = bestLayout.filteredSizes.length ? `, filtered ${bestLayout.filteredSizes.length} noise` : '';
+              ctx.addDecision('s3', `layout_p${page.pageNo}`, `${bestLayout.label}: ${bestLayout.rawCount} raw → ${blocks.length} usable${filterNote}`);
+            } catch (e) { ctx.addDecision('s3', `layout_p${page.pageNo}`, `layout detection failed: ${e.message}`); }
           }
 
-          // 2. Multi-DPI search — different resolutions reveal different column detail.
-          // Only for scanned image PDFs (ctx._scanIssues set by s1); text PDFs skip this.
           if (blocks.length < D_MIN_BLOCKS && ctx._scanIssues?.length > 0) {
             try {
               const dpiSearch = await findBestLayoutDpi(ctx.sourcePath, page.pageNo, lang, tmpDir, ctx);
               if (dpiSearch && dpiSearch.result.blocks.length > blocks.length) {
-                bestLayout = dpiSearch.result;
-                blocks = dpiSearch.result.blocks;
+                bestLayout = dpiSearch.result; blocks = dpiSearch.result.blocks;
                 page._layoutDpiScale = dpiSearch.dpiScale;
-                ctx.addDecision('s3', `layout_p${page.pageNo}`,
-                  `dpi_search ${dpiSearch.dpi}: ${dpiSearch.result.rawCount} raw → ${blocks.length} usable via ${dpiSearch.result.label}`);
+                ctx.addDecision('s3', `layout_p${page.pageNo}`, `dpi_search ${dpiSearch.dpi}: ${dpiSearch.result.rawCount} raw → ${blocks.length} usable via ${dpiSearch.result.label}`);
               }
-            } catch (e) {
-              ctx.addDecision('s3', `layout_p${page.pageNo}`, `dpi_search failed: ${e.message}`);
-            }
+            } catch (e) { ctx.addDecision('s3', `layout_p${page.pageNo}`, `dpi_search failed: ${e.message}`); }
           }
 
-          // 4. Vision-guided enhancement — when all standard methods fail, ask Haiku what to try.
-          // Also asks for language identification — a clearer image may reveal a different script.
-          // Sends a small thumbnail; costs ~$0.0002 per page. Only for scanned image PDFs.
           if (blocks.length < D_MIN_BLOCKS && ctx._scanIssues?.length > 0 && ctx.config.apiKey) {
             try {
               const { methods: visionMethods, lang: visionLang } = await consultVisionForPreprocessing(layoutPng, ctx.config.apiKey, ctx);
               if (visionLang && !page._langCandidates.some(c => c.lang === visionLang)) {
                 page._langCandidates.push({ lang: visionLang, source: 's3_vision' });
                 routingSummary[visionLang] = (routingSummary[visionLang] ?? 0) + 1;
-                ctx.addDecision('s3', `layout_p${page.pageNo}`, `vision lang candidate: ${visionLang} (have: ${page._langCandidates.map(c=>c.lang).join(',')})`);
+                ctx.addDecision('s3', `layout_p${page.pageNo}`, `vision lang candidate: ${visionLang}`);
               }
-              const effectiveLang = visionLang ?? lang;
               if (visionMethods.length > 0) {
                 ctx.addDecision('s3', `layout_p${page.pageNo}`, `vision suggested: [${visionMethods.join(', ')}]`);
-                const visionBest = await findBestLayoutForSegmentation(layoutPng, effectiveLang, tmpDir, page.pageNo, ctx, visionMethods);
+                const visionBest = await findBestLayoutForSegmentation(layoutPng, visionLang ?? lang, tmpDir, page.pageNo, ctx, visionMethods);
                 if (visionBest.blocks.length > blocks.length) {
-                  bestLayout = visionBest;
-                  blocks = visionBest.blocks;
-                  ctx.addDecision('s3', `layout_p${page.pageNo}`,
-                    `vision-guided ${visionBest.label}: ${visionBest.rawCount} raw → ${blocks.length} usable`);
+                  bestLayout = visionBest; blocks = visionBest.blocks;
+                  ctx.addDecision('s3', `layout_p${page.pageNo}`, `vision-guided ${visionBest.label}: ${visionBest.rawCount} raw → ${blocks.length} usable`);
                 }
               }
-            } catch (e) {
-              ctx.addDecision('s3', `layout_p${page.pageNo}`, `vision consult failed: ${e.message}`);
-            }
+            } catch (e) { ctx.addDecision('s3', `layout_p${page.pageNo}`, `vision consult failed: ${e.message}`); }
           }
 
-          // 5. Geometric fallback: horizontal projection profile column detection
+          const cvImg = bestLayout.path ?? layoutPng;
           if (blocks.length < D_MIN_BLOCKS) {
             try {
-              const geoOut = await execFileAsync('python3', [DETECT_COLS_PY, layoutPng], { timeout: 15000 });
-              const geoCols = JSON.parse(geoOut.stdout.trim() || '[]');
-              // Scale from layout DPI → raster DPI coords for the block crop step
-              const geoBlocks = geoCols.map(b => ({
+              const cvOut = await execFileAsync('python3', [DETECT_BLOCKS_CV_PY, cvImg], { timeout: 15000 });
+              const cvBlocks = JSON.parse(cvOut.stdout.trim() || '[]').map(b => ({
                 x1: Math.round(b.x1 * dpiScale), y1: Math.round(b.y1 * dpiScale),
                 x2: Math.round(b.x2 * dpiScale), y2: Math.round(b.y2 * dpiScale),
-                _geoDetected: true,
               }));
-              if (geoBlocks.length > 0) {
-                blocks = geoBlocks;
-                ctx.addDecision('s3', `layout_p${page.pageNo}`,
-                  `geometric: ${geoBlocks.length} columns detected via projection profile`);
-              } else {
-                ctx.addDecision('s3', `layout_p${page.pageNo}`, 'geometric: no columns found — full-page fallback');
+              if (cvBlocks.length > 0) { blocks = cvBlocks; ctx.addDecision('s3', `layout_p${page.pageNo}`, `opencv: ${cvBlocks.length} blocks`); }
+            } catch (e) { ctx.addDecision('s3', `layout_p${page.pageNo}`, `opencv failed: ${e.message}`); }
+          }
+
+          if (blocks.length < D_MIN_BLOCKS) {
+            try {
+              const padOut = await execFileAsync('python3', [DETECT_BLOCKS_PAD_PY, cvImg], { timeout: 60000 });
+              const padBlocks = JSON.parse(padOut.stdout.trim() || '[]').map(b => ({
+                x1: Math.round(b.x1 * dpiScale), y1: Math.round(b.y1 * dpiScale),
+                x2: Math.round(b.x2 * dpiScale), y2: Math.round(b.y2 * dpiScale),
+              }));
+              if (padBlocks.length > 0) { blocks = padBlocks; ctx.addDecision('s3', `layout_p${page.pageNo}`, `paddle_detect: ${padBlocks.length} blocks`); }
+            } catch (e) { ctx.addDecision('s3', `layout_p${page.pageNo}`, `paddle_detect failed: ${e.message}`); }
+          }
+
+          if (blocks.length < D_MIN_BLOCKS) {
+            const suryaLayoutDir = join(tmpDir, `surya-layout-p${page.pageNo}-in`);
+            const suryaLayoutOut = join(tmpDir, `surya-layout-p${page.pageNo}-out`);
+            try {
+              mkdirSync(suryaLayoutDir, { recursive: true });
+              mkdirSync(suryaLayoutOut, { recursive: true });
+              writeFileSync(join(suryaLayoutDir, `p${page.pageNo}.png`), readFileSync(bestLayout.path ?? layoutPng));
+              await ctx.run('surya_layout', [suryaLayoutDir, '--results_dir', suryaLayoutOut], { timeout: 120000 });
+              const resultsPath = join(suryaLayoutOut, 'results.json');
+              if (existsSync(resultsPath)) {
+                const results = JSON.parse(readFileSync(resultsPath, 'utf8'));
+                const layoutEntry = Object.values(results)[0];
+                const pageLayout = Array.isArray(layoutEntry) ? layoutEntry[0] : layoutEntry;
+                const suryaBlocks = (pageLayout?.bboxes ?? []).filter(b => b.label !== 'Figure').map(b => ({
+                  x1: Math.round(b.bbox[0] * dpiScale), y1: Math.round(b.bbox[1] * dpiScale),
+                  x2: Math.round(b.bbox[2] * dpiScale), y2: Math.round(b.bbox[3] * dpiScale),
+                }));
+                if (suryaBlocks.length > 0) { blocks = suryaBlocks; ctx.addDecision('s3', `layout_p${page.pageNo}`, `surya_layout: ${suryaBlocks.length} blocks`); }
               }
-            } catch (e) {
-              ctx.addDecision('s3', `layout_p${page.pageNo}`, `geometric failed: ${e.message}`);
+            } catch (e) { ctx.addDecision('s3', `layout_p${page.pageNo}`, `surya_layout failed: ${e.message}`); }
+            finally {
+              try { rmSync(suryaLayoutDir, { recursive: true, force: true }); } catch {}
+              try { rmSync(suryaLayoutOut, { recursive: true, force: true }); } catch {}
             }
           }
 
-          // 6. Debug: save raw layout, winning enhanced layout, fullres, and annotated blocks
           if (ctx.config.debug) {
             try {
-              const srcDir = dirname(ctx.sourcePath);
-              const srcStem = basename(ctx.sourcePath, '.pdf');
-              const dbgDir = join(srcDir, 'debug', srcStem);
+              const dbgDir = join(dirname(ctx.sourcePath), 'debug', basename(ctx.sourcePath, '.pdf'));
               mkdirSync(dbgDir, { recursive: true });
               copyFileSync(layoutPng, join(dbgDir, `p${page.pageNo}_layout_raw.png`));
               if (bestLayout.label !== 'raw' && existsSync(bestLayout.path))
                 copyFileSync(bestLayout.path, join(dbgDir, `p${page.pageNo}_layout_${bestLayout.label}.png`));
               if (existsSync(pngPath)) copyFileSync(pngPath, join(dbgDir, `p${page.pageNo}_fullres.png`));
               if (blocks.length > 0) {
-                const dbgDpiScale = page._layoutDpiScale ?? dpiScale;
-                const drawArgs = blocks.flatMap(b => {
-                  const bx1 = b._geoDetected ? Math.round(b.x1 / dbgDpiScale) : b.x1;
-                  const by1 = b._geoDetected ? Math.round(b.y1 / dbgDpiScale) : b.y1;
-                  const bx2 = b._geoDetected ? Math.round(b.x2 / dbgDpiScale) : b.x2;
-                  const by2 = b._geoDetected ? Math.round(b.y2 / dbgDpiScale) : b.y2;
-                  const color = b._geoDetected ? 'blue' : 'red';
-                  return ['-fill', 'none', '-stroke', color, '-strokewidth', '3',
-                    '-draw', `rectangle ${bx1},${by1} ${bx2},${by2}`];
-                });
+                const dbgScale = page._layoutDpiScale ?? dpiScale;
+                const drawArgs = blocks.flatMap(b => ['-fill', 'none', '-stroke', b._geoDetected ? 'blue' : 'red', '-strokewidth', '3',
+                  '-draw', `rectangle ${b._geoDetected ? Math.round(b.x1/dbgScale) : b.x1},${b._geoDetected ? Math.round(b.y1/dbgScale) : b.y1} ${b._geoDetected ? Math.round(b.x2/dbgScale) : b.x2},${b._geoDetected ? Math.round(b.y2/dbgScale) : b.y2}`]);
                 await ctx.run('convert', [bestLayout.path, ...drawArgs, join(dbgDir, `p${page.pageNo}_blocks.png`)], { timeout: 10000 });
               }
-            } catch { /* debug output is never fatal */ }
+            } catch { /* debug never fatal */ }
           }
         }
 
-        if (blocks.length >= D_MIN_BLOCKS) {
-          // Block mode: crop each block, run Tesseract on each in parallel.
-          // _geoDetected blocks are in raster-DPI coords; Tesseract blocks need scaling.
-          // page._layoutDpiScale overrides when a non-default DPI was used for layout detection.
-          const effectiveDpiScale = page._layoutDpiScale ?? dpiScale;
-          await Promise.all(blocks.map(async (blk, bi) => {
-            const bx1 = blk._geoDetected ? blk.x1 : Math.floor(blk.x1 * effectiveDpiScale);
-            const by1 = blk._geoDetected ? blk.y1 : Math.floor(blk.y1 * effectiveDpiScale);
-            const bx2 = blk._geoDetected ? blk.x2 : Math.ceil(blk.x2  * effectiveDpiScale);
-            const by2 = blk._geoDetected ? blk.y2 : Math.ceil(blk.y2  * effectiveDpiScale);
-            const bw = bx2 - bx1, bh = by2 - by1;
-            const cropStem = `p${page.pageNo}_b${bi}`;
-            const cropPath = join(cropDir, `${cropStem}.png`);
-            try {
-              await ctx.run('convert', [pngPath, '-crop', `${bw}x${bh}+${bx1}+${by1}`, '+repage', cropPath], { timeout: 15000 });
-              if (!existsSync(cropPath)) return;
+        if (blocks.length < D_MIN_BLOCKS) {
+          ctx.addError('s3', new Error(`p${page.pageNo}: block detection found no blocks — escalating to s4`), true);
+          page.words = [];
+          page._bucketed = { clean: 0, fuzzy: 0, dirty: 0, needs_vision: 1 };
+          page._escalateBlocks = [{ x1: 0, y1: 0, x2: 9999, y2: 9999, cropPath: pngPath,
+            tessWords: [], batchContext: [], lang: page._langCandidates?.[0]?.lang ?? 'eng', fullPage: true }];
+          return;
+        }
 
-              const cropEnh = join(tmpDir, `${cropStem}_enh.png`);
-              const enh = forceContrast
-                ? await tryEnhanceForced(cropPath, cropEnh, extraArgs)
-                : await tryEnhance(cropPath, cropEnh, extraArgs);
+        // ── Tesseract per block (parallel within this page) ─────────────────────────────────
+        const effectiveDpiScale = page._layoutDpiScale ?? dpiScale;
+        const pageCrops = [];
+        await Promise.all(blocks.map(async (blk, bi) => {
+          const bx1 = blk._geoDetected ? blk.x1 : Math.floor(blk.x1 * effectiveDpiScale);
+          const by1 = blk._geoDetected ? blk.y1 : Math.floor(blk.y1 * effectiveDpiScale);
+          const bx2 = blk._geoDetected ? blk.x2 : Math.ceil(blk.x2  * effectiveDpiScale);
+          const by2 = blk._geoDetected ? blk.y2 : Math.ceil(blk.y2  * effectiveDpiScale);
+          const cropStem = `p${page.pageNo}_b${bi}`;
+          const cropPath = join(cropDir, `${cropStem}.png`);
+          try {
+            await ctx.run('convert', [pngPath, '-crop', `${bx2-bx1}x${by2-by1}+${bx1}+${by1}`, '+repage', cropPath], { timeout: 15000 });
+            if (!existsSync(cropPath)) return;
+            const cropEnh = join(tmpDir, `${cropStem}_enh.png`);
+            const enh = forceContrast ? await tryEnhanceForced(cropPath, cropEnh, extraArgs) : await tryEnhance(cropPath, cropEnh, extraArgs);
+            // INVARIANT: store ocrPath (enhanced), not raw cropPath — all engines must see the enhanced image.
+            const ocrPath = enh?.path ?? cropPath;
 
-              // INVARIANT: ocrPath (not cropPath) must be stored in cropRegistry.
-              // All batch engines (EasyOCR, Paddle, docTR, Kraken, Surya) read cropPath from the registry.
-              // Using raw cropPath here means enhancement is wasted — only Tesseract sees the clean image.
-              // This has silently regressed multiple times. Do not change cropPath: ocrPath below.
-              const ocrPath = enh?.path ?? cropPath;
-              const { words: tessWords, lang: winLang } = await runTesseractBestLang(
-                ocrPath, page._langCandidates, page.pageNo, ctx, cleanT);
-              // Map crop-relative coords to full-page coords
-              const mapped = tessWords.map(w => ({ ...w, x1: w.x1 + bx1, y1: w.y1 + by1, x2: w.x2 + bx1, y2: w.y2 + by1 }));
-              cropRegistry.push({ page, blockIdx: bi, bx1, by1, bx2, by2, cropPath: ocrPath, cropStem, tessWords: mapped, lang: winLang });
-            } catch { /* skip failed block — Surya/Haiku may recover */ }
-          }));
+            // Block-level OSD: detects scripts in mixed-language pages (Arabic footnotes, etc.).
+            // Only run on blocks ≥150×80px — smaller blocks have too few characters for OSD.
+            const blockW = bx2 - bx1, blockH = by2 - by1;
+            const blockOsd = (blockW >= 150 && blockH >= 80) ? await detectScriptOSD(ocrPath, ctx) : null;
+            const blockLangCandidates = buildBlockLangCandidates(page._langCandidates, blockOsd);
 
-          const blockCount = cropRegistry.filter(c => c.page === page).length;
-          ctx.addDecision('s3', `blocks_p${page.pageNo}`, `${blocks.length} blocks detected, ${blockCount} OCR'd`);
-          page.words = null; // assembled in Phase 3
+            let { words: tessWords, lang: winLang } = await runTesseractBestLang(ocrPath, blockLangCandidates, page.pageNo, ctx, cleanT);
 
-        } else {
-          // Full-page fallback — try all lang candidates; run enhancement in parallel with first pass
-          const [origResult, enhancement] = await Promise.all([
-            runTesseractBestLang(pngPath, page._langCandidates, page.pageNo, ctx, cleanT),
-            forceContrast
-              ? tryEnhanceForced(pngPath, `${outBase}_enhanced.png`, extraArgs)
-              : tryEnhance(pngPath, `${outBase}_enhanced.png`, extraArgs),
-          ]);
-          const origScore = origResult.score;
-          let words = origResult.words;
-
-          if (enhancement) {
-            try {
-              const { words: enhWords, score: enhScore } = await runTesseractBestLang(
-                `${outBase}_enhanced.png`, page._langCandidates, page.pageNo, ctx, cleanT);
-              if (enhScore > origScore) {
-                words = enhWords.map(w => ({ ...w, source: 'tesseract+contrast' }));
-                page._pngPath = `${outBase}_enhanced.png`;
-                ctx.addDecision('s3', `contrast_p${page.pageNo}`,
-                  `${enhancement.applied?.[0] ?? 'enhanced'}: ${(origScore*100).toFixed(0)}%→${(enhScore*100).toFixed(0)}% clean`,
-                  enhScore - origScore);
-              } else {
-                ctx.addDecision('s3', `contrast_p${page.pageNo}`,
-                  `${enhancement.applied?.[0] ?? 'bleed_suppression'} tried, kept original (${(origScore*100).toFixed(0)}% vs ${(enhScore*100).toFixed(0)}%)`,
-                  0);
+            // Unicode post-check: if Tesseract output contains characters from a different script
+            // (OSD missed it or block was too small), re-run with the detected lang.
+            const tessText = tessWords.map(w => w.text).join(' ');
+            const unicodeLang = detectScriptFromText(tessText);
+            if (unicodeLang && unicodeLang !== winLang && !blockLangCandidates.some(c => c.lang === unicodeLang)) {
+              const augmented = [{ lang: unicodeLang, source: 'unicode' }, ...blockLangCandidates];
+              const retry = await runTesseractBestLang(ocrPath, augmented, page.pageNo, ctx, cleanT);
+              if (retry.words.length > 0 && cleanRatio(retry.words, cleanT) >= cleanRatio(tessWords, cleanT)) {
+                tessWords = retry.words; winLang = retry.lang;
               }
-            } catch { /* keep original */ }
+            }
+
+            // Page-lang safety net: if the result is still garbage and a block-level detector
+            // (OSD or unicode) chose a different lang from the page, re-run with the page's
+            // original candidates. Block OSD on small crops has a higher false-positive rate
+            // than page-level OSD — this prevents a misfire from locking the block into the
+            // wrong script before escalation.
+            const pageLang = page._langCandidates[0]?.lang;
+            if (pageLang && pageLang !== winLang && cleanRatio(tessWords, cleanT) < 0.3) {
+              const pageFallback = await runTesseractBestLang(ocrPath, page._langCandidates, page.pageNo, ctx, cleanT);
+              if (pageFallback.words.length > 0 && cleanRatio(pageFallback.words, cleanT) > cleanRatio(tessWords, cleanT)) {
+                tessWords = pageFallback.words; winLang = pageFallback.lang;
+              }
+            }
+
+            const mapped = tessWords.map(w => ({ ...w, x1: w.x1 + bx1, y1: w.y1 + by1, x2: w.x2 + bx1, y2: w.y2 + by1 }));
+            pageCrops.push({ page, blockIdx: bi, bx1, by1, bx2, by2, cropPath: ocrPath, cropStem, tessWords: mapped, lang: winLang });
+          } catch { /* skip failed block */ }
+        }));
+        ctx.addDecision('s3', `blocks_p${page.pageNo}`, `${blocks.length} blocks detected, ${pageCrops.length} OCR'd`);
+
+        // ── All batch engines in parallel for this page's crops ─────────────────────────────
+        // Engine calls use page.pageNo as scope so concurrent pages don't collide in tmpDir.
+        const batchResults = [];
+        if (pageCrops.length > 0 && (availableEngines.length > 0 || suryaOk)) {
+          const tessLangs = [...new Set(pageCrops.map(c => c.lang))].join(',');
+          const suryaCrops = suryaOk ? pageCrops.filter(c => cleanRatio(c.tessWords, cleanT) < D_SYNTH_THRESH) : [];
+          const scope = `p${page.pageNo}`;
+
+          await Promise.all([
+            ...availableEngines.map(engine => (async () => {
+              try {
+                const map = await runEngineBatch(engine.tool, engine.label, pageCrops, tessLangs, tmpDir, ctx, scope);
+                batchResults.push({ label: engine.label, map });
+                ctx.addDecision('s3', `${engine.label}_p${page.pageNo}`, `${map.size}/${pageCrops.length} crops`);
+              } catch (e) { ctx.addError('s3', new Error(`${engine.label} p${page.pageNo}: ${e.message}`), true); }
+            })()),
+            suryaCrops.length > 0 ? (async () => {
+              try {
+                const suryaLangs = [...new Set(suryaCrops.map(c => TESS_TO_SURYA[c.lang] ?? 'en'))].join(',');
+                const map = await runSuryaChunked(suryaCrops, suryaLangs, tmpDir, ctx, scope);
+                batchResults.push({ label: 'surya', map });
+              } catch (e) { ctx.addError('s3', new Error(`surya p${page.pageNo}: ${e.message}`), true); }
+            })() : Promise.resolve(),
+          ]);
+        }
+
+        // ── Haiku synthesis — all engines done, full context available ──────────────────────
+        await Promise.all(pageCrops.map(crop => synthLimit(async () => {
+          // Batch engine script consensus: if 2+ engines agree on a script different from
+          // crop.lang, re-run Tesseract with the consensus lang before Haiku synthesis.
+          // This catches blocks where page-level and block-level OSD both missed the script
+          // (e.g., a small Arabic block on an English page where OSD had insufficient text).
+          const batchTexts = batchResults
+            .map(b => b.map.get(crop.cropStem)?.text?.trim()).filter(Boolean);
+          if (batchTexts.length >= 2) {
+            const scriptVotes = batchTexts.map(detectScriptFromText).filter(Boolean);
+            const voteCounts = {};
+            for (const l of scriptVotes) voteCounts[l] = (voteCounts[l] ?? 0) + 1;
+            const topEntry = Object.entries(voteCounts).sort(([, a], [, b]) => b - a)[0];
+            if (topEntry) {
+              const [topLang, topCount] = topEntry;
+              if (topCount >= 2 && topLang !== crop.lang) {
+                try {
+                  const retry = await runTesseractBestLang(crop.cropPath,
+                    [{ lang: topLang, source: 'batch_consensus' }], crop.page.pageNo, ctx, cleanT);
+                  if (retry.words.length > 0) {
+                    crop.tessWords = retry.words.map(w => ({
+                      ...w, x1: w.x1 + crop.bx1, y1: w.y1 + crop.by1,
+                      x2: w.x2 + crop.bx1, y2: w.y2 + crop.by1,
+                    }));
+                    crop.lang = topLang;
+                    ctx.addDecision('s3', `consensus_p${crop.page.pageNo}_b${crop.blockIdx}`,
+                      `batch engines agree on ${topLang} (${topCount}/${batchTexts.length}) — re-ran tesseract`);
+                  }
+                } catch { /* keep existing */ }
+              }
+            }
           }
 
-          page.words = words;
-          let clean = 0, fuzzy = 0, dirty = 0;
-          for (const w of words) { if (w.conf >= cleanT) clean++; else if (w.conf >= fuzzyT) fuzzy++; else dirty++; }
-          page._bucketed = { clean, fuzzy, dirty, needs_vision: 0 };
-          if (words.length > 0) pagesAffected++;
-        }
+          const hasBatch = batchResults.some(b => b.map.get(crop.cropStem)?.text?.trim());
+          let words = crop.tessWords;
+
+          if (!crop.tessWords.length && hasBatch) {
+            const first = batchResults.find(b => b.map.get(crop.cropStem)?.text?.trim());
+            const r = first.map.get(crop.cropStem);
+            words = first.label === 'surya'
+              ? suryaLinesToWords(r.lines, crop.page.pageNo, crop.bx1, crop.by1)
+              : engineWordsToPageWords(r.words, crop.page.pageNo, crop.bx1, crop.by1, first.label);
+          } else if (hasBatch && ctx.config.apiKey && crop.tessWords.length > 0) {
+            try {
+              const prompt = buildCorrectionPrompt(crop.tessWords, batchResults, crop.cropStem, crop.lang, cleanT);
+              const resp = await fetch('https://api.anthropic.com/v1/messages', {
+                method: 'POST',
+                headers: { 'x-api-key': ctx.config.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+                body: JSON.stringify({ model: 'claude-haiku-4-5-20251001', max_tokens: 200,
+                  messages: [{ role: 'user', content: prompt }] }),
+              });
+              const data = await resp.json();
+              const responseText = data.content?.[0]?.text?.trim() ?? '{}';
+              const inTok = Math.ceil(prompt.length / 4), outTok = Math.ceil(responseText.length / 4);
+              tokensIn += inTok; tokensOut += outTok;
+              costUsd  += llmCost('claude-haiku-4-5-20251001', inTok, outTok);
+              const corrections = parseCorrectionResponse(responseText);
+              if (Object.keys(corrections).length > 0) words = applyCorrections(crop.tessWords, corrections);
+            } catch { /* keep tessWords */ }
+          }
+
+          if (cleanRatio(words, cleanT) < 0.4) {
+            page._escalateBlocks = page._escalateBlocks ?? [];
+            const batchContext = batchResults
+              .map(({ label, map }) => { const r = map.get(crop.cropStem); return r?.text?.trim() ? `${label.toUpperCase()}: ${r.text.slice(0, 300)}` : null; })
+              .filter(Boolean);
+            page._escalateBlocks.push({ x1: crop.bx1, y1: crop.by1, x2: crop.bx2, y2: crop.by2,
+              cropPath: crop.cropPath, tessWords: crop.tessWords, batchContext, lang: crop.lang });
+          }
+          crop.finalWords = words;
+        })));
+
+        // ── Assemble page words ─────────────────────────────────────────────────────────────
+        pageCrops.sort((a, b) => a.blockIdx - b.blockIdx);
+        page.words = pageCrops.flatMap(c => c.finalWords ?? c.tessWords);
+        const escalated = page._escalateBlocks?.length ?? 0;
+        const synthCount = pageCrops.filter(c => c.finalWords?.some(w => w.source === 'synthesis')).length;
+        if (synthCount > 0) ctx.addDecision('s3', `synth_p${page.pageNo}`, `${synthCount}/${pageCrops.length} blocks synthesized`);
+        let clean = 0, fuzzy = 0, dirty = 0;
+        for (const w of page.words) { if (w.conf >= cleanT) clean++; else if (w.conf >= fuzzyT) fuzzy++; else dirty++; }
+        page._bucketed = { clean, fuzzy, dirty, needs_vision: escalated };
+        if (page.words.length > 0) pagesAffected++;
 
       } catch (pageErr) {
         ctx.addError('s3', pageErr, true);
         page.words = [];
         page._bucketed = { clean: 0, fuzzy: 0, dirty: 0, needs_vision: 0 };
       }
-    })));
+    }));
 
-    // Mirror all per-page lang candidates up to ctx.meta for downstream stages and analytics.
-    // Preserves discovery order; deduplicates by lang code.
+    // Mirror per-page lang candidates to ctx.meta for downstream stages.
     const seenLangs = new Set();
     ctx.meta = ctx.meta ?? {};
     ctx.meta.langCandidates = [];
@@ -775,132 +964,11 @@ export async function s3Ocr(ctx) {
       }
     }
 
-    // ── Phase 2: All batch OCR engines in parallel ────────────────────────────────────────────
-    // Each engine processes ALL crops in one Python process (amortizes model load).
-    // Surya is chunked separately (CLI tool with GPU memory limit).
-    // batchResults: [{label, map: Map<cropStem, {text, words|lines}>}]
-    const batchResults = [];
-    if (cropRegistry.length > 0) {
-      const suryaLangs = [...new Set(cropRegistry.map(c => TESS_TO_SURYA[c.lang] ?? 'en'))].join(',');
-      const tessLangs  = [...new Set(cropRegistry.map(c => c.lang))].join(',');
-
-      // Detect available engines once, in parallel
-      const [suryaOk, ...engineOks] = await Promise.all([
-        checkSuryaCli(ctx),
-        ...BATCH_ENGINES.map(e => checkPythonEngine(e.tool, ctx)),
-      ]);
-      const availableEngines = BATCH_ENGINES.filter((_, i) => engineOks[i]);
-      ctx.addDecision('s3', 'engines', [
-        suryaOk ? 'surya' : null,
-        ...availableEngines.map(e => e.label),
-      ].filter(Boolean).join(', ') || 'tesseract-only');
-
-      // Run all engines concurrently
-      await Promise.all([
-        suryaOk ? (async () => {
-          try {
-            const map = await runSuryaChunked(cropRegistry, suryaLangs, tmpDir, ctx);
-            batchResults.push({ label: 'surya', map });
-          } catch (e) { ctx.addError('s3', new Error(`surya: ${e.message}`), true); }
-        })() : Promise.resolve(),
-
-        ...availableEngines.map(engine => (async () => {
-          try {
-            const map = await runEngineBatch(engine.tool, engine.label, cropRegistry, tessLangs, tmpDir, ctx);
-            batchResults.push({ label: engine.label, map });
-            ctx.addDecision('s3', `${engine.label}_batch`, `${map.size}/${cropRegistry.length} crops`);
-          } catch (e) { ctx.addError('s3', new Error(`${engine.label}: ${e.message}`), true); }
-        })()),
-      ]);
-    }
-
-    // ── Phase 3: Keyed correction synthesis, then page assembly ──────────────────────────────
-    // Tesseract words are the spatial anchor. All engine outputs are context for Haiku.
-    // Haiku returns only corrections {idx: text|null} — merged back into tessWords to keep bboxes.
-    const synthLimit = pLimit(D_SYNTH_CONC);
-    await Promise.all(cropRegistry.map(crop => synthLimit(async () => {
-      const hasBatch = batchResults.some(b => b.map.get(crop.cropStem)?.text?.trim());
-      let words = crop.tessWords;
-
-      if (!crop.tessWords.length && hasBatch) {
-        // Tesseract found nothing — fall back to first batch engine with position data
-        const first = batchResults.find(b => b.map.get(crop.cropStem)?.text?.trim());
-        const r = first.map.get(crop.cropStem);
-        words = first.label === 'surya'
-          ? suryaLinesToWords(r.lines, crop.page.pageNo, crop.bx1, crop.by1)
-          : engineWordsToPageWords(r.words, crop.page.pageNo, crop.bx1, crop.by1, first.label);
-      } else if (hasBatch && ctx.config.apiKey && crop.tessWords.length > 0) {
-        try {
-          const prompt = buildCorrectionPrompt(crop.tessWords, batchResults, crop.cropStem, crop.lang, cleanT);
-          const resp = await fetch('https://api.anthropic.com/v1/messages', {
-            method: 'POST',
-            headers: { 'x-api-key': ctx.config.apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-            body: JSON.stringify({
-              model: 'claude-haiku-4-5-20251001',
-              max_tokens: 200,  // corrections only — much cheaper than full text
-              messages: [{ role: 'user', content: prompt }],
-            }),
-          });
-          const data = await resp.json();
-          const responseText = data.content?.[0]?.text?.trim() ?? '{}';
-          const inTok = Math.ceil(prompt.length / 4), outTok = Math.ceil(responseText.length / 4);
-          tokensIn += inTok; tokensOut += outTok;
-          costUsd  += llmCost('claude-haiku-4-5-20251001', inTok, outTok);
-          const corrections = parseCorrectionResponse(responseText);
-          if (Object.keys(corrections).length > 0)
-            words = applyCorrections(crop.tessWords, corrections);
-        } catch { /* keep tessWords on any error */ }
-      }
-
-      // Flag block for Mistral escalation if still dirty after synthesis.
-      // Carries tessWords (spatial anchor), batchContext (engine texts already collected),
-      // and lang so s4 can run a second Haiku keyed-correction with Mistral as richer context.
-      // cropPath is the enhanced 300dpi crop (ocrPath from Phase 1) — s4 re-crops at 600dpi for Mistral.
-      if (cleanRatio(words, cleanT) < 0.4) {
-        crop.page._escalateBlocks = crop.page._escalateBlocks ?? [];
-        const batchContext = batchResults
-          .map(({ label, map }) => {
-            const r = map.get(crop.cropStem);
-            return r?.text?.trim() ? `${label.toUpperCase()}: ${r.text.slice(0, 300)}` : null;
-          })
-          .filter(Boolean);
-        crop.page._escalateBlocks.push({
-          x1: crop.bx1, y1: crop.by1, x2: crop.bx2, y2: crop.by2,
-          cropPath: crop.cropPath,
-          tessWords: crop.tessWords,  // spatial anchor — bboxes preserved through synthesis
-          batchContext,               // engine outputs already collected; Mistral adds to these
-          lang: crop.lang,
-        });
-      }
-      crop.finalWords = words;
-    })));
-
-    // Assemble per-page words from block results (preserves block order)
-    const cropsByPage = new Map();
-    for (const c of cropRegistry) {
-      if (!cropsByPage.has(c.page)) cropsByPage.set(c.page, []);
-      cropsByPage.get(c.page).push(c);
-    }
-    for (const [page, crops] of cropsByPage.entries()) {
-      crops.sort((a, b) => a.blockIdx - b.blockIdx);
-      page.words = crops.flatMap(c => c.finalWords ?? c.tessWords);
-      const escalated = page._escalateBlocks?.length ?? 0;
-      const synthCount = crops.filter(c => c.finalWords?.some(w => w.source === 'synthesis')).length;
-      if (synthCount > 0) ctx.addDecision('s3', `synth_p${page.pageNo}`, `${synthCount}/${crops.length} blocks synthesized`);
-
-      let clean = 0, fuzzy = 0, dirty = 0;
-      for (const w of page.words) { if (w.conf >= cleanT) clean++; else if (w.conf >= fuzzyT) fuzzy++; else dirty++; }
-      page._bucketed = { clean, fuzzy, dirty, needs_vision: escalated };
-      if (page.words.length > 0) pagesAffected++;
-    }
-
     ctx.addDecision('s3', 'routing_summary', JSON.stringify(routingSummary));
-
     const pagesWithWords = ctx.pages.filter(p => p.words?.length > 0);
     if (pagesWithWords.length > 0) {
-      const avgClean = pagesWithWords.reduce((sum, p) => {
-        return sum + (p.words.filter(w => w.conf >= cleanT).length / p.words.length);
-      }, 0) / pagesWithWords.length;
+      const avgClean = pagesWithWords.reduce((sum, p) =>
+        sum + p.words.filter(w => w.conf >= cleanT).length / p.words.length, 0) / pagesWithWords.length;
       ctx.recordStageQuality('s3', Math.round(avgClean * (pagesWithWords.length / ctx.pages.length) * 1000) / 1000);
     }
 
