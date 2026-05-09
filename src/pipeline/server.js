@@ -48,8 +48,8 @@ async function fetchWorkerHealth(url) {
 async function refreshWorkerHealth(entry) {
   if (Date.now() - (entry.healthAt ?? 0) < WORKER_HEALTH_TTL_MS) return;
   const fresh = await fetchWorkerHealth(entry.url);
-  // Keep last-known health if fetch failed — don't null it out and lose routing info
-  if (fresh !== null) entry.health = fresh;
+  if (fresh !== null) { entry.health = fresh; entry.healthOk = true; }
+  else entry.healthOk = false; // keep last-known health for routing, but flag as unreachable
   entry.healthAt = Date.now();
 }
 
@@ -275,6 +275,14 @@ export async function startPipelineServer({
       // GET /workers — list all registered worker agents with fresh health snapshots
       if (req.method === 'GET' && path === '/workers') {
         await Promise.all([...workerRegistry.values()].map(refreshWorkerHealth));
+        // Prune workers that have been unreachable for >5 min (stale entries after worker restart)
+        const STALE_MS = 5 * 60_000;
+        for (const [url, entry] of workerRegistry.entries()) {
+          if (entry.healthOk === false && Date.now() - (entry.lastSeen ?? 0) > STALE_MS) {
+            workerRegistry.delete(url);
+            log(`pruned stale worker: ${entry.hostname ?? url}`);
+          }
+        }
         return reply(res, 200, {
           workers: [...workerRegistry.values()].map(({ url, hostname, platform, lastSeen, health }) => ({
             url, hostname, platform, lastSeen, health,
