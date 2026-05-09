@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""docTR batch wrapper. Usage: python3 doctr_ocr.py [--check] <input_dir> <output_json> <langs>
+"""docTR batch wrapper. Usage: python3 doctr_ocr.py [--check|--serve] <input_dir> <output_json> <langs>
 Output JSON: {stem: {text, words: [{text,conf,x1,y1,x2,y2}]}}
 Supports Latin scripts well; no Arabic/CJK.
 """
@@ -30,16 +30,12 @@ def is_supported(langs_str):
             return True
     return False
 
-if __name__ == '__main__':
-    args = [a for a in sys.argv[1:] if not a.startswith('--')]
-    if len(args) < 3:
-        print(json.dumps({'error': 'usage: doctr_ocr.py <input_dir> <output_json> <langs>'}))
-        sys.exit(1)
-    input_dir, output_json, langs_str = args[0], args[1], args[2]
+def run_batch(input_dir, output_json, langs_str, model=None):
     pngs = sorted(glob.glob(os.path.join(input_dir, '*.png')))
     results = {}
     if pngs and is_supported(langs_str):
-        model = ocr_predictor(pretrained=True)
+        if model is None:
+            model = ocr_predictor(pretrained=True)
         for png in pngs:
             stem = os.path.splitext(os.path.basename(png))[0]
             try:
@@ -51,7 +47,7 @@ if __name__ == '__main__':
                     for block in page.blocks:
                         for line in block.lines:
                             for word in line.words:
-                                geo = word.geometry  # [[x1_norm,y1_norm],[x2_norm,y2_norm]]
+                                geo = word.geometry
                                 words.append({
                                     'text': word.value,
                                     'conf': round(word.confidence * 100),
@@ -63,3 +59,27 @@ if __name__ == '__main__':
                 results[stem] = {'text': '', 'words': [], 'error': str(e)}
     with open(output_json, 'w') as f:
         json.dump(results, f)
+
+if '--serve' in sys.argv:
+    # Persistent server mode: load model once, serve jobs from stdin.
+    # Eliminates 30-60s cold-start on every invocation.
+    model = ocr_predictor(pretrained=True)
+    print('ready', flush=True)
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            req = json.loads(line)
+            run_batch(req['input_dir'], req['output_json'], req.get('langs', 'eng'), model)
+            print(json.dumps({'ok': True}), flush=True)
+        except Exception as e:
+            print(json.dumps({'error': str(e)}), flush=True)
+    sys.exit(0)
+
+if __name__ == '__main__':
+    args = [a for a in sys.argv[1:] if not a.startswith('--')]
+    if len(args) < 3:
+        print(json.dumps({'error': 'usage: doctr_ocr.py <input_dir> <output_json> <langs>'}))
+        sys.exit(1)
+    run_batch(args[0], args[1], args[2])

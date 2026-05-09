@@ -63,10 +63,10 @@ const REQUIRED_TOOLS = ['pdftoppm', 'tesseract', 'gs', 'surya_ocr', 'unpaper', '
 // Python OCR engines — required for cost-effective image PDF processing.
 // Missing engines force expensive cloud vision fallback ($0.10-$0.20/page vs $0.01/page with local engines).
 const PYTHON_OCR_SCRIPTS = [
-  { name: 'easyocr', script: join(__pyDir, 'easyocr_ocr.py') },
-  { name: 'paddle',  script: join(__pyDir, 'paddle_ocr.py')  },
-  { name: 'doctr',   script: join(__pyDir, 'doctr_ocr.py')   },
-  { name: 'kraken',  script: join(__pyDir, 'kraken_ocr.py')  },
+  { name: 'easyocr', script: join(__pyDir, 'easyocr_ocr.py'), required: true  },
+  { name: 'paddle',  script: join(__pyDir, 'paddle_ocr.py'),  required: true  },
+  { name: 'doctr',   script: join(__pyDir, 'doctr_ocr.py'),   required: true  },
+  { name: 'kraken',  script: join(__pyDir, 'kraken_ocr.py'),  required: false },
 ];
 const OPTIONAL_TOOLS = [];
 
@@ -141,19 +141,19 @@ async function checkDeps(config = {}) {
   const [required, optional, pythonEngines, disk] = await Promise.all([
     Promise.all(REQUIRED_TOOLS.map(async t => [t, await probeTool(t, config)])),
     Promise.all(OPTIONAL_TOOLS.map(async t => [t, await probeTool(t, config)])),
-    Promise.all(PYTHON_OCR_SCRIPTS.map(async e => [e.name, await checkPythonOcrEngine(e)])),
+    Promise.all(PYTHON_OCR_SCRIPTS.map(async e => [e.name, await checkPythonOcrEngine(e), e.required !== false])),
     checkDiskSpace(),
   ]);
   const deps = {};
   for (const [t, r] of required) deps[t] = { ...r, required: true };
   for (const [t, r] of optional) deps[t] = { ...r, required: false };
-  for (const [t, r] of pythonEngines) {
-    deps[`python_ocr_${t}`] = { ...r, required: true };
+  for (const [t, r, isRequired] of pythonEngines) {
+    deps[`python_ocr_${t}`] = { ...r, required: isRequired };
     if (!r.ok) log(`WARN: python OCR engine '${t}' unavailable — image PDFs will use expensive cloud fallback: ${r.error}`);
   }
   const missing_required = [
     ...required.filter(([, r]) => !r.ok).map(([t]) => t),
-    ...pythonEngines.filter(([, r]) => !r.ok).map(([t]) => `python_ocr_${t}`),
+    ...pythonEngines.filter(([, r, isRequired]) => isRequired && !r.ok).map(([t]) => `python_ocr_${t}`),
     ...(!disk.ok ? [`disk: ${disk.error}`] : []),
   ];
   return { deps, missing_required, disk, healthy: missing_required.length === 0 };

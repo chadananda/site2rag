@@ -105,8 +105,9 @@ export async function s1Preprocess(ctx) {
     if (ctx.config.s1Preprocess !== false && ctx.pages.length > 0) {
       let preprocessed = 0;
       let toolMissing = null;
-      for (const page of ctx.pages) {
-        if (toolMissing) break; // stop retrying once a tool is confirmed absent
+      // All pages run concurrently — pdftoppm/unpaper/convert are CPU-bound per page
+      await Promise.all(ctx.pages.map(async (page) => {
+        if (toolMissing) return;
         try {
           const hash = createHash('sha1').update(ctx.sourcePath + page.pageNo).digest('hex');
           const outBase = join(getTmpDir(), 'site2rag-s1-' + hash.slice(0, 12) + '-p' + page.pageNo);
@@ -137,7 +138,7 @@ export async function s1Preprocess(ctx) {
             ctx.addError('s1', new Error(`page ${page.pageNo} preprocessing failed: ${err.message}`), true);
           }
         }
-      }
+      }));
       ctx.addDecision('s1', 'preprocess', toolMissing
         ? `preprocessing halted: ${toolMissing} not installed`
         : `unpaper: ${preprocessed}/${ctx.pages.length} pages`);

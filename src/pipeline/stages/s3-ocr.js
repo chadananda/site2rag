@@ -578,10 +578,11 @@ export async function s3Ocr(ctx) {
   mkdirSync(cropDir, { recursive: true });
 
   // Check engine availability once — avoids redundant --check calls inside the page loop.
-  const [suryaOk, ...engineOks] = await Promise.all([
-    checkSuryaCli(ctx),
+  const [suryaOkRaw, ...engineOks] = await Promise.all([
+    ctx.config.s3Surya === false ? Promise.resolve(false) : checkSuryaCli(ctx),
     ...BATCH_ENGINES.map(e => checkPythonEngine(e.tool, ctx)),
   ]);
+  const suryaOk = suryaOkRaw;
   const availableEngines = BATCH_ENGINES.filter((_, i) => engineOks[i]);
   ctx.addDecision('s3', 'engines_available',
     [suryaOk ? 'surya' : null, ...availableEngines.map(e => e.label)].filter(Boolean).join(', ') || 'tesseract-only');
