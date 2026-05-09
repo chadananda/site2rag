@@ -1,21 +1,22 @@
 // PDF quality scoring -- heuristics only, no AI. Exports: scorePdf, saveQualityScore, maybeQueue, extractBadSample. Re-exports: detectLanguage, LANG_COST, LANG_PRIORITY. Deps: pdf-parse, language
 import pdfParse from 'pdf-parse';
 import { readFileSync } from 'fs';
-import { detectLanguage, detectLanguageFromUrl, LANG_COST, LANG_PRIORITY } from '../language.js';
+import { detectLanguage, detectLanguageFromUrl, LANG_COST, LANG_PRIORITY, LANG_WORDS } from '../language.js';
 export { detectLanguage, LANG_COST, LANG_PRIORITY };
-// Common English function words for word quality estimation
+// Common English function words for word quality estimation (baseline when lang unknown)
 const COMMON_WORDS = new Set(['the','of','and','to','a','in','is','it','you','that','he','was','for','on','are','as','with','his','they','at','be','this','from','or','had','by','not','but','have','an','were','we','their','one','all','would','there','what','so','up','out','if','about','who','get','which','go','me','when','make','can','like','time','no','just','him','know','take','into','year','your','good','some','could','them','see','other','than','then','now','look','only','come','its','over','think','also','back','after','use','two','how','our','first','well','way','even','new','want','because','any','these','give','day','most','us']);
-/** Estimate word quality from a text sample. Returns 0-1. */
-const wordQuality = (text) => {
+/** Estimate word quality from a text sample. Returns 0-1. lang param selects word set. */
+export const wordQuality = (text, lang = 'english') => {
   if (!text || !text.trim()) return 0;
-  const tokens = text.replace(/[^a-zA-Z\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && w.length <= 20);
+  const tokens = text.replace(/[^a-zA-ZÀ-ÿ\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && w.length <= 20);
   if (tokens.length < 10) return 0;
   const sample = tokens.slice(0, 200);
+  const wordSet = LANG_WORDS[lang] || COMMON_WORDS;
   const realWords = sample.filter(w => {
     const lower = w.toLowerCase();
-    if (COMMON_WORDS.has(lower)) return true;
-    // Heuristic: real words have reasonable consonant/vowel patterns
-    const vowels = (lower.match(/[aeiou]/g) || []).length;
+    if (wordSet.has(lower)) return true;
+    // Language-neutral vowel ratio heuristic (works for all European languages)
+    const vowels = (lower.match(/[aeiouàáâãäåæçèéêëìíîïðñòóôõöùúûüý]/g) || []).length;
     const ratio = vowels / lower.length;
     // Garbled OCR tends to have extreme ratios (all consonants or gibberish)
     return ratio >= 0.2 && ratio <= 0.75 && !/(.)\1{3,}/.test(lower);
@@ -30,10 +31,10 @@ const wordQuality = (text) => {
 const SAMPLE_PAGES = 5; // parse only first N pages for speed
 
 /** Extract first meaningful sentence(s) of text for display. */
-const extractExcerpt = (text, maxChars = 280) => {
+export const extractExcerpt = (text, maxChars = 280) => {
   if (!text) return '';
   const clean = text.replace(/\f/g, ' ').replace(/\s+/g, ' ').trim();
-  const match = clean.match(/[A-Z][a-zA-Z,;:\s]{40,}/);
+  const match = clean.match(/[A-ZÀ-Ö][a-zA-ZÀ-ÿ,;:\s]{40,}/);
   return (match ? match[0] : clean).slice(0, maxChars).trim();
 };
 
@@ -42,8 +43,10 @@ export const scorePdf = async (pdfPath) => {
   try {
     const buf = readFileSync(pdfPath);
     // First pass: get page count + PDF metadata title
+    // pdf-parse uses a singleton PDFJS module that fails on the very first parse call
+    // (disableWorker not yet applied), so retry once on any error.
     let meta;
-    try { meta = await pdfParse(buf, { max: 1 }); } catch { return empty; }
+    try { meta = await pdfParse(buf, { max: 1 }); } catch { try { meta = await pdfParse(buf, { max: 1 }); } catch { return empty; } }
     const pages = meta.numpages || 1;
     const pdf_title = (meta.info?.Title || '').trim().slice(0, 200);
     // Second pass: sample up to SAMPLE_PAGES pages for quality heuristics
@@ -56,17 +59,22 @@ export const scorePdf = async (pdfPath) => {
     const readablePct = sampleMax > 0 ? readableInSample / sampleMax : 0;
     const avgChars = sampleText.length / sampleMax;
     const hasText = avgChars > 5 ? 1 : 0;
-    const wq = wordQuality(sampleText.slice(0, 5000));
+    // Detect language first so wordQuality uses the correct word set
+    const langSample = [pdf_title, sampleText.slice(0, 2000)].join(' ');
+    const language = detectLanguage(langSample);
+    const wq = wordQuality(sampleText.slice(0, 5000), language);
     const charsScore = Math.min(avgChars / 500, 1);
     // pdf-parse cannot decode Persian/Arabic/CJK scripts → pages with non-Latin text appear empty,
     // making readablePct artificially low for text-layer PDFs. Use charsScore as a floor when
     // has_text_layer=1: high avg_chars proves content exists even if the script is undecodable.
     const adjustedReadable = hasText === 1 ? Math.max(readablePct, charsScore * 0.85) : readablePct;
-    const composite = 0.4 * wq + 0.3 * adjustedReadable + 0.2 * charsScore + 0.1 * hasText;
+    // wordQuality() strips non-Latin chars before checking word lists, so Persian/Arabic/CJK
+    // text-layer PDFs always return wq=0 even when the text is perfect. Substitute 0.8 when
+    // the script is non-Latin, the text layer exists, and there are substantial chars/page.
+    const NON_LATIN = new Set(['persian','arabic','hebrew','hindi','chinese','japanese','korean']);
+    const effectiveWq = (NON_LATIN.has(language) && wq === 0 && hasText === 1 && avgChars >= 100) ? 0.8 : wq;
+    const composite = 0.4 * effectiveWq + 0.3 * adjustedReadable + 0.2 * charsScore + 0.1 * hasText;
     const excerpt = extractExcerpt(sampleText);
-    // Detect language from extracted text + PDF title
-    const langSample = [pdf_title, sampleText.slice(0, 2000)].join(' ');
-    const language = detectLanguage(langSample);
     // Processing difficulty: 0=trivial (text PDF, skip OCR), 1=hardest (dense image scan).
     // Primary driver: no text layer = needs OCR. Secondary: page count. Tertiary: script complexity.
     // Handwritten non-Latin scripts (Persian/Arabic image PDFs) are hardest → OCR nearly always fails.
@@ -75,7 +83,7 @@ export const scorePdf = async (pdfPath) => {
       ? 0.05                                                                   // text layer: skip OCR, trivially easy
       : pages === 0 ? 1.0                                                      // unreadable/failed: assume worst
       : Math.max(0.3, Math.min(1.0, (pages / 400) * (scriptHard ? 2.0 : 1.0))); // image PDF: min 0.3 (needs OCR)
-    return { avg_chars_per_page: Math.round(avgChars), readable_pages_pct: Math.round(readablePct * 100) / 100, has_text_layer: hasText, word_quality_estimate: Math.round(wq * 100) / 100, composite_score: Math.round(composite * 100) / 100, pages, pdf_title, excerpt, language, processing_difficulty: Math.round(processing_difficulty * 100) / 100 };
+    return { avg_chars_per_page: Math.round(avgChars), readable_pages_pct: Math.round(readablePct * 100) / 100, has_text_layer: hasText, word_quality_estimate: Math.round(effectiveWq * 100) / 100, composite_score: Math.round(composite * 100) / 100, pages, pdf_title, excerpt, language, processing_difficulty: Math.round(processing_difficulty * 100) / 100 };
   } catch { return empty; }
 };
 /** Extract a short sample of OCR text for display (shows quality problems). */
