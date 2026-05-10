@@ -76,6 +76,16 @@ def is_on_ac_power():
     except Exception:
         return True  # assume AC if check fails
 
+MIN_FREE_DISK_GB = float(os.environ.get('MIN_FREE_DISK_GB', '2.0'))  # refuse jobs if tmp dir has < 2GB free
+
+def disk_free_gb():
+    """Return free disk space in GB for the temp directory."""
+    try:
+        s = os.statvfs(tempfile.gettempdir())
+        return s.f_bavail * s.f_frsize / 1024**3
+    except Exception:
+        return 99.0  # assume plenty if check fails
+
 def cpu_load_pct():
     try:
         avg1 = os.getloadavg()[0]
@@ -149,18 +159,30 @@ _serve_pool = {}       # tool → list of instance dicts
 _serve_pool_lock = threading.Lock()
 
 def _start_serve_instance(tool):
-    """Start one --serve subprocess and wait for 'ready'. Returns instance dict or raises."""
+    """Start one --serve subprocess and wait for 'ready'. Returns instance dict or raises.
+    Reads lines until 'ready' to skip model download progress output."""
     script = PYTHON_SCRIPTS[tool]
+    # Pass MPS fallback env so unsupported ops fall back to CPU instead of crashing on Apple Silicon
+    serve_env = {**os.environ, 'PYTORCH_ENABLE_MPS_FALLBACK': '1'}
     proc = subprocess.Popen(
         [sys.executable, script, '--serve'],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE,
         stderr=subprocess.DEVNULL, text=True, bufsize=1,
+        env=serve_env,
     )
     try:
-        ready_line = proc.stdout.readline().strip()
-        if ready_line != 'ready':
+        # Models may print download progress to stdout before 'ready'; skip those lines.
+        # Timeout: 300s to allow first-time model download on slow connections.
+        deadline = time.time() + 300
+        while time.time() < deadline:
+            ready_line = proc.stdout.readline()
+            if not ready_line:
+                raise RuntimeError(f'{tool} serve proc closed stdout before ready')
+            if ready_line.strip() == 'ready':
+                break
+        else:
             proc.kill()
-            raise RuntimeError(f'{tool} serve proc did not send "ready": {ready_line!r}')
+            raise RuntimeError(f'{tool} serve proc did not send "ready" within 300s')
     except Exception:
         proc.kill()
         raise
@@ -260,13 +282,12 @@ def get_tools():
         tools['gpu:cuda'] = probe_python_pkg('torch') and _has_cuda()
         tools['gpu:rocm'] = probe_python_pkg('torch') and _has_rocm()
         tools['gpu:metal'] = PLATFORM == 'darwin' and probe_python_pkg('torch')
-        # Batch OCR engines need shared filesystem (NFS) for input directories.
-        # Report them only when /tank/site2rag is accessible.
-        nfs_ok = os.path.isdir('/tank/site2rag')
-        tools['nfs_ok'] = nfs_ok
+        # NFS check for informational purposes only — no longer gates OCR engines.
+        # Files are sent via HTTP base64 inputFiles, so NFS is not required.
+        tools['nfs_ok'] = os.path.isdir('/tank/site2rag')
         for pkg, tool_name in [('easyocr', 'easyocr_ocr'), ('paddleocr', 'paddle_ocr'),
                                 ('doctr', 'doctr_ocr'), ('kraken', 'kraken_ocr')]:
-            tools[tool_name] = tools.get(f'py:{pkg}', False) and nfs_ok
+            tools[tool_name] = tools.get(f'py:{pkg}', False)
         _cached_tools = tools
         _tools_probe_time = time.time()
     return _cached_tools
@@ -331,18 +352,23 @@ def get_semaphore(tool):
 def capacity_payload():
     cpu = cpu_load_pct()
     mem = mem_used_pct()
+    disk_gb = disk_free_gb()
     on_ac = is_on_ac_power() if AC_ONLY else True
-    available = on_ac and cpu < CAPACITY_LIMIT and mem < CAPACITY_LIMIT
+    disk_ok = disk_gb >= MIN_FREE_DISK_GB
+    available = on_ac and cpu < CAPACITY_LIMIT and mem < CAPACITY_LIMIT and disk_ok
     payload = {
         'available': available,
         'cpu_pct': round(cpu * 1000) / 10,
         'mem_pct': round(mem * 1000) / 10,
+        'disk_free_gb': round(disk_gb * 10) / 10,
         'active_jobs': active_jobs,
         'queue_depth': queue_depth,
         'capacity_limit_pct': round(CAPACITY_LIMIT * 100),
     }
     if AC_ONLY:
         payload['on_ac'] = on_ac
+    if not disk_ok:
+        payload['disk_low'] = True
     return payload
 
 # ── HTTP handler ───────────────────────────────────────────────────────────────
@@ -406,7 +432,10 @@ class WorkerHandler(BaseHTTPRequestHandler):
                 return self.send_json(400, {'error': 'missing tool'})
 
             cap = capacity_payload()
-            if not cap['available']:
+            # Serve-capable tools use persistent warm processes — bypass capacity check
+            # so load spikes don't block OCR (serve instances don't spawn per request).
+            use_serve_capable = tool in SERVE_CAPABLE and tool in PYTHON_SCRIPTS
+            if not cap['available'] and not use_serve_capable:
                 return self.send_json(503, {'error': 'over capacity', **cap})
 
             # Write inputFiles to local tmp dir; remap placeholder keys in args.
@@ -416,20 +445,32 @@ class WorkerHandler(BaseHTTPRequestHandler):
             if input_files or output_paths:
                 tmp_dir = tempfile.mkdtemp(prefix='worker-tool-')
                 in_path_map = {}
+                dir_key_map = {}  # dirKey → local tmp subdir path
                 for key, b64 in input_files.items():
-                    local = os.path.join(tmp_dir, key)
+                    if '/' in key:
+                        slash = key.index('/')
+                        dir_key = key[:slash]
+                        filename = key[slash + 1:]
+                        if dir_key not in dir_key_map:
+                            dir_path = tempfile.mkdtemp(prefix='wa-dir-')
+                            dir_key_map[dir_key] = dir_path
+                        local = os.path.join(dir_key_map[dir_key], filename)
+                    else:
+                        local = os.path.join(tmp_dir, key)
+                        in_path_map[key] = local
                     with open(local, 'wb') as f:
                         f.write(base64.b64decode(b64))
-                    in_path_map[key] = local
                 for key in output_paths:
                     out_path_map[key] = os.path.join(tmp_dir, key)
-                remapped = [in_path_map.get(a) or out_path_map.get(a) or a for a in args]
+                # Remap __dir_N placeholder args to local directory paths, then flat files/output paths
+                remapped = [dir_key_map.get(a) or in_path_map.get(a) or out_path_map.get(a) or a for a in args]
             else:
                 remapped = list(args)
+                dir_key_map = {}
 
             # Resolve command
             is_check = '--check' in args
-            use_serve = tool in SERVE_CAPABLE and tool in PYTHON_SCRIPTS and not is_check
+            use_serve = SERVE_POOL_SIZE > 0 and tool in SERVE_CAPABLE and tool in PYTHON_SCRIPTS and not is_check
             if tool in PYTHON_SCRIPTS:
                 cmd = sys.executable
                 final_args = [PYTHON_SCRIPTS[tool]] + remapped
@@ -459,18 +500,29 @@ class WorkerHandler(BaseHTTPRequestHandler):
                     result_stdout, result_stderr = '', ''
                     result_code = 0
                 else:
+                    run_env = {**os.environ, 'PYTORCH_ENABLE_MPS_FALLBACK': '1'}
                     r = subprocess.run(
                         [cmd] + final_args,
                         capture_output=True,
                         timeout=timeout,
                         text=True,
+                        env=run_env,
                     )
                     result_stdout, result_stderr = r.stdout, r.stderr
                     result_code = r.returncode
                 duration_ms = round((time.time() - started) * 1000)
 
                 if result_code != 0 and not use_serve:
-                    raise subprocess.CalledProcessError(result_code, cmd, result_stdout, result_stderr)
+                    # Non-zero exit: return 200 with exit_code rather than raising — avoids
+                    # tool-runner retrying tesseract --psm 0 which legitimately exits 1.
+                    self.send_json(200, {
+                        'stdout': result_stdout,
+                        'stderr': result_stderr,
+                        'exit_code': result_code,
+                        'duration_ms': duration_ms,
+                        'outputFiles': {},
+                    })
+                    return
 
                 # Collect output files and return as base64
                 output_files = {}
@@ -505,6 +557,8 @@ class WorkerHandler(BaseHTTPRequestHandler):
                     active_jobs -= 1
                 if tmp_dir:
                     shutil.rmtree(tmp_dir, ignore_errors=True)
+                for dir_path in dir_key_map.values():
+                    shutil.rmtree(dir_path, ignore_errors=True)
 
         else:
             self.send_json(404, {'error': 'not found'})
@@ -574,6 +628,8 @@ if __name__ == '__main__':
     # Pre-warm serve pools in background — models load once at startup so the
     # first real job doesn't pay the 30-60s cold-start cost.
     def prewarm_serve_pools():
+        if SERVE_POOL_SIZE <= 0:
+            return  # serve pools disabled
         for tool in SERVE_CAPABLE:
             if tool not in PYTHON_SCRIPTS:
                 continue

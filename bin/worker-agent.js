@@ -267,7 +267,9 @@ async function handleToolRun(req, res) {
     const { tool, args = [], timeout = 120000, inputFiles = {}, outputPaths = [] } = payload;
     if (!tool) return send(res, 400, { error: 'missing tool' });
 
-    if (isOverCapacity()) {
+    // Serve-capable tools use persistent warm subprocesses — they don't spawn new processes
+    // per request, so capacity check is bypassed to prevent load spikes from blocking OCR.
+    if (isOverCapacity() && !SERVE_CAPABLE.has(tool)) {
       const cap = capacityPayload();
       return send(res, 503, { error: 'over capacity', ...cap });
     }
@@ -277,20 +279,34 @@ async function handleToolRun(req, res) {
     let tmpDir = null;
     let finalArgs = args;
     let outPathMap = {}; // key → local tmp path for output files to collect after run
+    const dirKeyMap = new Map(); // dirKey → local tmp subdir path (hoisted for finally cleanup)
 
     const hasInputFiles = Object.keys(inputFiles).length > 0;
     if (hasInputFiles || outputPaths.length > 0) {
       tmpDir = mkdtempSync(join(tmpdir(), 'worker-tool-'));
       const inPathMap = {};
+      // Reconstruct directories from __dir_N/filename keys; write flat files to tmpDir.
       for (const [key, b64] of Object.entries(inputFiles)) {
-        const localPath = join(tmpDir, key);
-        writeFileSync(localPath, Buffer.from(b64, 'base64'));
-        inPathMap[key] = localPath;
+        if (key.includes('/')) {
+          const slash = key.indexOf('/');
+          const dirKey = key.slice(0, slash);
+          const filename = key.slice(slash + 1);
+          if (!dirKeyMap.has(dirKey)) {
+            const dirPath = mkdtempSync(join(tmpdir(), 'wa-dir-'));
+            dirKeyMap.set(dirKey, dirPath);
+          }
+          writeFileSync(join(dirKeyMap.get(dirKey), filename), Buffer.from(b64, 'base64'));
+        } else {
+          const localPath = join(tmpDir, key);
+          writeFileSync(localPath, Buffer.from(b64, 'base64'));
+          inPathMap[key] = localPath;
+        }
       }
       for (const key of outputPaths) {
         outPathMap[key] = join(tmpDir, key);
       }
-      finalArgs = args.map(a => inPathMap[a] ?? outPathMap[a] ?? a);
+      // Remap __dir_N placeholder args to local directory paths; then flat files and output paths.
+      finalArgs = args.map(a => dirKeyMap.has(a) ? dirKeyMap.get(a) : inPathMap[a] ?? outPathMap[a] ?? a);
     }
 
     activeJobs++;
@@ -320,7 +336,19 @@ async function handleToolRun(req, res) {
     } catch (e) {
       const duration_ms = Date.now() - started;
       if (e.code === 'ENOENT') return send(res, 404, { error: `tool not found: ${tool}`, code: 'ENOENT' });
-      // execFile rejects with stdout/stderr on non-zero exit — surface them so caller can diagnose
+      // Non-zero exit: return 200 with exit_code so tool-runner doesn't retry uselessly.
+      // Only return 500 for actual errors (spawn failure, timeout, OOM).
+      if (e.stdout !== undefined || e.stderr !== undefined) {
+        // execFile rejects with stdout/stderr on non-zero exit — treat as completed-with-error
+        totalJobsServed++;
+        return send(res, 200, {
+          stdout: e.stdout ?? '',
+          stderr: e.stderr ?? '',
+          exit_code: e.code ?? 1,
+          duration_ms,
+          outputFiles: {},
+        });
+      }
       send(res, 500, {
         error: e.message.slice(0, 200),
         code:  e.code,
@@ -332,6 +360,7 @@ async function handleToolRun(req, res) {
       releaseSlot(tool);
       activeJobs--;
       if (tmpDir) try { rmSync(tmpDir, { recursive: true, force: true }); } catch {}
+      for (const dirPath of dirKeyMap?.values() ?? []) try { rmSync(dirPath, { recursive: true, force: true }); } catch {}
     }
   });
 }
