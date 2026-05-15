@@ -377,7 +377,17 @@ async function checkSuryaCli(ctx) {
 
 async function checkPythonEngine(toolName, ctx) {
   try {
-    // 45s timeout: cold Python import over Tailscale can take 20-30s on first call
+    // For workerPool tools, trust the worker health report — workers don't support --check CLI flag
+    const backend = ctx.config.toolBackends?.[toolName];
+    if (backend?.type === 'workerPool') {
+      const registryUrl = backend.registryUrl ?? ctx.config.registryUrl;
+      if (registryUrl) {
+        const res = await fetch(`${registryUrl}/workers`, { signal: AbortSignal.timeout(10000) });
+        const { workers } = await res.json();
+        return workers.some(w => w.health?.tools?.[toolName] === true);
+      }
+    }
+    // Local: run --check (45s timeout for cold Python import over Tailscale)
     const { stdout } = await ctx.run(toolName, ['--check'], { timeout: 45000 });
     return stdout.trim() === 'ok';
   } catch { return false; }
