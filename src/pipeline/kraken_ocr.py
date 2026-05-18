@@ -8,14 +8,15 @@ import sys, json, os, glob
 
 if '--check' in sys.argv:
     try:
-        from kraken import rpred
+        from kraken import rpred, blla
         from kraken.lib import models as kmodels
-        if not hasattr(kmodels, 'get_default_model'):
-            print('missing')  # API removed in kraken 4.x+; needs kraken <=3.x
+        # kraken 4+ removed get_default_model; check for load_any instead
+        if not hasattr(kmodels, 'load_any'):
+            print('missing')
         else:
             print('ok')
-    except ImportError:
-        print('missing')
+    except ImportError as e:
+        print(f'missing: {e}')
     sys.exit(0)
 
 try:
