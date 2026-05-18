@@ -84,6 +84,12 @@ export async function s0Baseline(ctx) {
     // Note: this does NOT skip s6 (spellfix) or s8 (export) — those still run on extracted text.
     if (score.has_text_layer === 1 && score.avg_chars_per_page >= 300) {
       ctx.config.skip = [...new Set([...(ctx.config.skip ?? []), 's1', 's2', 's3', 's4', 's5'])];
+      // Initialize page stubs so s7/s8 have the page structure without OCR pipeline running
+      if (!ctx.pages.length && ctx.pageCount > 0) {
+        ctx.pages = Array.from({ length: ctx.pageCount }, (_, i) => ({
+          pageNo: i + 1, words: [], regions: [], quality: {},
+        }));
+      }
       ctx.addDecision('s0', 'skip_all_ocr',
         `has_text_layer=1 avg_chars=${score.avg_chars_per_page} — text PDF, skip OCR`,
         score.composite_score);

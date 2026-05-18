@@ -7,6 +7,7 @@
 //   GET  /jobs/:id            → { status, progress, receipt, error, ... }
 //   GET  /jobs/:id/md         → text/markdown
 //   GET  /jobs/:id/pdf        → application/pdf
+//   GET  /jobs/:id/receipt    → JSON receipt from ctx.toReceipt()
 //   DELETE /jobs/:id          → { ok: true }
 //   GET  /workers             → list of registered worker agents with health snapshots
 //   POST /workers/register    → register a worker agent { url, hostname, platform }
@@ -16,11 +17,12 @@
 // extend with POST /jobs/upload (multipart) when needed.
 
 import { createServer } from 'http';
-import { readFileSync, existsSync } from 'fs';
+import { readFileSync, existsSync, mkdirSync } from 'fs';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import Database from 'better-sqlite3';
 import { PIPELINE_VERSION } from './context.js';
 import { runPipeline } from './index.js';
 import { openJobStore } from './job-store.js';
@@ -35,8 +37,61 @@ const log = (msg) => console.log(`[pipeline-server] ${new Date().toISOString().s
 // In-memory registry of worker agents on the network.
 // Workers self-register via POST /workers/register on startup.
 // Health snapshots are refreshed on GET /workers.
+// Registry is persisted to SQLite so it survives pm2 restarts without a 60s blind window.
 const workerRegistry = new Map(); // url → { url, hostname, platform, lastSeen, health }
 const WORKER_HEALTH_TTL_MS = 30_000; // re-poll health every 30s
+
+// ── Worker persistence (SQLite) ──────────────────────────────────────────────
+let _workerDb = null;
+function openWorkerDb(dbPath) {
+  mkdirSync(dirname(dbPath), { recursive: true });
+  const db = new Database(dbPath);
+  db.pragma('journal_mode=WAL');
+  db.exec(`CREATE TABLE IF NOT EXISTS workers (
+    url        TEXT PRIMARY KEY,
+    last_seen  INTEGER NOT NULL,
+    health_json TEXT
+  )`);
+  return db;
+}
+function upsertWorkerDb(url, lastSeen, health) {
+  if (!_workerDb) return;
+  _workerDb.prepare('INSERT OR REPLACE INTO workers (url, last_seen, health_json) VALUES (?, ?, ?)')
+    .run(url, lastSeen, health ? JSON.stringify(health) : null);
+}
+function deleteWorkerDb(url) {
+  if (!_workerDb) return;
+  _workerDb.prepare('DELETE FROM workers WHERE url = ?').run(url);
+}
+async function loadPersistedWorkers() {
+  if (!_workerDb) return;
+  const rows = _workerDb.prepare('SELECT url, last_seen, health_json FROM workers').all();
+  if (!rows.length) return;
+  log(`startup: pinging ${rows.length} persisted worker(s)…`);
+  await Promise.all(rows.map(async (row) => {
+    try {
+      const health = await fetchWorkerHealth(row.url);
+      if (health) {
+        workerRegistry.set(row.url, {
+          url: row.url,
+          hostname: health.hostname ?? row.url,
+          platform: health.platform ?? 'unknown',
+          lastSeen: Date.now(),
+          health,
+          healthOk: true,
+          healthAt: Date.now(),
+        });
+        upsertWorkerDb(row.url, Date.now(), health);
+        log(`startup: restored worker ${health.hostname ?? row.url}`);
+      } else {
+        log(`startup: persisted worker unreachable, dropping: ${row.url}`);
+        deleteWorkerDb(row.url);
+      }
+    } catch {
+      deleteWorkerDb(row.url);
+    }
+  }));
+}
 
 async function fetchWorkerHealth(url) {
   try {
@@ -48,8 +103,10 @@ async function fetchWorkerHealth(url) {
 async function refreshWorkerHealth(entry) {
   if (Date.now() - (entry.healthAt ?? 0) < WORKER_HEALTH_TTL_MS) return;
   const fresh = await fetchWorkerHealth(entry.url);
-  if (fresh !== null) { entry.health = fresh; entry.healthOk = true; }
-  else entry.healthOk = false; // keep last-known health for routing, but flag as unreachable
+  if (fresh !== null) {
+    entry.health = fresh; entry.healthOk = true;
+    upsertWorkerDb(entry.url, entry.lastSeen ?? Date.now(), fresh);
+  } else entry.healthOk = false; // keep last-known health for routing, but flag as unreachable
   entry.healthAt = Date.now();
 }
 
@@ -168,6 +225,10 @@ export async function startPipelineServer({
 } = {}) {
   const resolvedDbPath = dbPath ?? `${getTmpDir()}/pipeline-jobs.db`;
   const jobs = await openJobStore(resolvedDbPath);
+  // Open worker persistence DB (sibling to jobs DB) and reload saved workers
+  const workerDbPath = resolvedDbPath.replace(/pipeline-jobs\.db$/, 'pipeline-workers.db');
+  _workerDb = openWorkerDb(workerDbPath);
+  await loadPersistedWorkers();
   let running = 0;
 
   // Reset jobs stuck in 'processing' from a previous instance. Use server start time as the
@@ -275,12 +336,15 @@ export async function startPipelineServer({
       // GET /workers — list all registered worker agents with fresh health snapshots
       if (req.method === 'GET' && path === '/workers') {
         await Promise.all([...workerRegistry.values()].map(refreshWorkerHealth));
-        // Prune workers that have been unreachable for >5 min (stale entries after worker restart)
+        // Persist fresh health snapshots; prune workers unreachable for >5 min
         const STALE_MS = 5 * 60_000;
         for (const [url, entry] of workerRegistry.entries()) {
           if (entry.healthOk === false && Date.now() - (entry.lastSeen ?? 0) > STALE_MS) {
             workerRegistry.delete(url);
+            deleteWorkerDb(url);
             log(`pruned stale worker: ${entry.hostname ?? url}`);
+          } else if (entry.health) {
+            upsertWorkerDb(url, entry.lastSeen ?? Date.now(), entry.health);
           }
         }
         return reply(res, 200, {
@@ -295,7 +359,9 @@ export async function startPipelineServer({
         const { url, hostname, platform: plat } = await readBody(req);
         if (!url) return reply(res, 400, { error: 'url required' });
         const existing = workerRegistry.get(url) ?? {};
-        workerRegistry.set(url, { ...existing, url, hostname: hostname ?? url, platform: plat ?? 'unknown', lastSeen: Date.now(), healthAt: 0 });
+        const entry = { ...existing, url, hostname: hostname ?? url, platform: plat ?? 'unknown', lastSeen: Date.now(), healthAt: 0 };
+        workerRegistry.set(url, entry);
+        upsertWorkerDb(url, Date.now(), existing.health ?? null);
         log(`worker registered: ${hostname ?? url} → ${url}`);
         return reply(res, 200, { ok: true });
       }
@@ -329,9 +395,10 @@ export async function startPipelineServer({
       }
 
       // Routes that need a job id
-      const idMatch  = path.match(/^\/jobs\/([^/]+)$/);
-      const mdMatch  = path.match(/^\/jobs\/([^/]+)\/md$/);
-      const pdfMatch = path.match(/^\/jobs\/([^/]+)\/pdf$/);
+      const idMatch      = path.match(/^\/jobs\/([^/]+)$/);
+      const mdMatch      = path.match(/^\/jobs\/([^/]+)\/md$/);
+      const pdfMatch     = path.match(/^\/jobs\/([^/]+)\/pdf$/);
+      const receiptMatch = path.match(/^\/jobs\/([^/]+)\/receipt$/);
 
       // GET /jobs/:id
       if (req.method === 'GET' && idMatch) {
@@ -365,6 +432,14 @@ export async function startPipelineServer({
         return res.end(buf);
       }
 
+      // GET /jobs/:id/receipt
+      if (req.method === 'GET' && receiptMatch) {
+        const job = jobs.get(receiptMatch[1]);
+        if (!job) return reply(res, 404, { error: 'not found' });
+        if (job.status !== 'done' || !job.receipt) return reply(res, 404, { error: 'receipt not available' });
+        return reply(res, 200, job.receipt);
+      }
+
       // DELETE /jobs/:id
       if (req.method === 'DELETE' && idMatch) {
         const job = jobs.get(idMatch[1]);
@@ -395,7 +470,7 @@ export async function startPipelineServer({
       // closeIdleConnections releases keep-alive sockets without killing active requests;
       // closeAllConnections would abort in-flight responses causing 'other side closed' errors.
       if (typeof server.closeIdleConnections === 'function') server.closeIdleConnections();
-      return new Promise(r => server.close(() => { try { jobs.db.close(); } catch {} r(); }));
+      return new Promise(r => server.close(() => { try { jobs.db.close(); } catch {} try { _workerDb?.close(); } catch {} r(); }));
     },
   };
 }
