@@ -12,7 +12,7 @@
 import * as childProcess from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, readdirSync } from 'fs';
 import { dirname, join, basename, extname } from 'path';
 
 const __pyDir = dirname(fileURLToPath(import.meta.url));
@@ -32,6 +32,14 @@ const PYTHON_SCRIPTS = {
 // No aliases needed — workers only expose these tool names when they can handle directory-based input.
 const TOOL_KEY_ALIASES = {};
 
+// Batch OCR engines use persistent serve pools on workers — they accept requests even when the
+// worker is "over capacity" (capacity check bypassed for SERVE_CAPABLE tools in worker-agent.js).
+// pickWorker must route these to workers regardless of available flag to prevent local fallback.
+const SERVE_CAPABLE_TOOLS = new Set(['easyocr_ocr', 'paddle_ocr', 'doctr_ocr', 'kraken_ocr']);
+
+// Tools that run significantly faster on GPU — prefer GPU workers when routing these.
+const GPU_PREFERRED_TOOLS = new Set(['easyocr_ocr', 'paddle_ocr', 'doctr_ocr', 'surya_ocr']);
+
 // Worker health cache — shared across all tool runners in this process
 const _workerCache = new Map(); // registryUrl → { workers, fetchedAt }
 const WORKER_CACHE_TTL = 15_000; // 15s — enough to batch a page, fresh enough to react to load
@@ -49,30 +57,58 @@ async function fetchWorkers(registryUrl) {
   }
 }
 
+function workerHasGpu(w) {
+  const h = w.health;
+  if (!h) return false;
+  if (h.tools && (h.tools['gpu:cuda'] || h.tools['gpu:rocm'] || h.tools['gpu:metal'])) return true;
+  if (Array.isArray(h.available_tools)) return h.available_tools.some(t => t.startsWith('gpu:'));
+  return false;
+}
+
 // Score a worker — lower is better.
 // cpu_pct drives primary selection; queue_depth penalizes workers with backlogged jobs.
-function scoreWorker(w) {
+// GPU workers get a 30-point advantage for GPU-preferred tools (big but not absolute —
+// a CPU-only worker at 0% still beats a GPU worker at >30% load).
+function scoreWorker(w, tool) {
   const cpu = w.health.cpu_pct ?? 100;
   const q   = w.health.queue_depth ?? 0;
-  return cpu + q * 10; // each queued job ≈ +10 CPU-percentage-points penalty
+  let score = cpu + q * 10;
+  if (GPU_PREFERRED_TOOLS.has(tool) && !workerHasGpu(w)) score += 10;
+  return score;
 }
 
 function workerHasTool(w, tool) {
-  const tools = w.health?.tools;
-  if (!tools) return false;
-  if (tools[tool] === true) return true;
+  const h = w.health;
+  if (!h) return false;
+  // Object format: { tesseract: true, ... } (tower-nas worker-agent)
+  if (h.tools && h.tools[tool] === true) return true;
+  // Array format: available_tools: ["tesseract", ...] (boss worker-agent)
+  if (Array.isArray(h.available_tools) && h.available_tools.includes(tool)) return true;
+  // Alias fallback
   const alias = TOOL_KEY_ALIASES[tool];
-  return alias ? tools[alias] === true : false;
+  if (alias) {
+    if (h.tools?.[alias] === true) return true;
+    if (Array.isArray(h.available_tools) && h.available_tools.includes(alias)) return true;
+  }
+  return false;
 }
 
 function pickWorker(workers, tool, excludeUrls = new Set()) {
+  // Serve-capable tools bypass capacity check on the worker side — route to them even when
+  // the worker reports available=false to prevent the local-fallback CPU death spiral.
+  if (SERVE_CAPABLE_TOOLS.has(tool)) {
+    const capable = workers.filter(w => !excludeUrls.has(w.url) && workerHasTool(w, tool));
+    return capable.length ? capable.sort((a, b) => scoreWorker(a, tool) - scoreWorker(b, tool))[0] : null;
+  }
   // Prefer workers with confirmed availability; fall back to workers with stale/null health
   // if they have the tool — we'd rather try and get a 503 than skip a healthy worker
-  const confirmed = workers.filter(w => !excludeUrls.has(w.url) && w.health?.available === true && workerHasTool(w, tool));
-  if (confirmed.length) return confirmed.sort((a, b) => scoreWorker(a) - scoreWorker(b))[0];
+  // available: explicit true (tower worker-agent) OR status=ok (boss worker-agent) OR unset (assume ok)
+  const isAvailable = (w) => w.health?.available === true || (w.health?.status === 'ok' && w.health?.available == null);
+  const confirmed = workers.filter(w => !excludeUrls.has(w.url) && isAvailable(w) && workerHasTool(w, tool));
+  if (confirmed.length) return confirmed.sort((a, b) => scoreWorker(a, tool) - scoreWorker(b, tool))[0];
   const optimistic = workers.filter(w => !excludeUrls.has(w.url) && w.health?.available !== false && workerHasTool(w, tool));
   if (!optimistic.length) return null;
-  return optimistic.sort((a, b) => scoreWorker(a) - scoreWorker(b))[0];
+  return optimistic.sort((a, b) => scoreWorker(a, tool) - scoreWorker(b, tool))[0];
 }
 
 /**
@@ -120,7 +156,8 @@ export function createToolRunner(config = {}) {
         const worker = pickWorker(workers, tool, excluded);
         if (!worker) break; // no eligible workers remain
 
-        log(`routing ${tool} → ${worker.hostname} cpu=${worker.health.cpu_pct}% q=${worker.health.queue_depth ?? 0}${attempt > 0 ? ` [retry ${attempt}]` : ''}`);
+        const gpuTag = workerHasGpu(worker) ? ' gpu' : '';
+        log(`routing ${tool} → ${worker.hostname} cpu=${worker.health.cpu_pct}%${gpuTag} q=${worker.health.queue_depth ?? 0}${attempt > 0 ? ` [retry ${attempt}]` : ''}`);
         try {
           return await runToolHttp(tool, args, opts, worker.url);
         } catch (e) {
@@ -169,9 +206,18 @@ async function runToolHttp(tool, args, opts, baseUrl) {
   const remappedArgs = args.map(arg => {
     if (typeof arg !== 'string' || !arg.startsWith('/')) return arg;
     if (existsSync(arg)) {
-      // Directories (e.g. batch OCR input dirs) pass through — worker accesses via NFS or local path.
-      // Only route to workers that report nfs_ok=true for paths outside their local filesystem.
-      try { if (statSync(arg).isDirectory()) return arg; } catch {}
+      // Directories: pack all files as inputFiles so workers need no shared filesystem.
+      try {
+        if (statSync(arg).isDirectory()) {
+          const dirKey = `__dir_${keyIdx++}`;
+          for (const f of readdirSync(arg)) {
+            const fp = join(arg, f);
+            if (statSync(fp).isFile())
+              inputFiles[`${dirKey}/${f}`] = readFileSync(fp).toString('base64');
+          }
+          return dirKey;
+        }
+      } catch {}
 
       const key = `__in_${keyIdx++}${extname(arg)}`;
       inputFiles[key] = readFileSync(arg).toString('base64');

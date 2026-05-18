@@ -116,6 +116,17 @@ for (const url of SEED_WORKERS) {
   workerRegistry.set(url, { url, hostname: new URL(url).hostname, platform: 'unknown', lastSeen: Date.now() });
 }
 
+// Cache dep check results — each check spawns heavy Python processes (PyTorch import = 10-30s, high CPU)
+const DEP_CACHE_TTL_MS = 30_000;
+let _depCache = null;
+let _depCacheAt = 0;
+async function checkDepsCached(config = {}) {
+  if (_depCache && Date.now() - _depCacheAt < DEP_CACHE_TTL_MS) return _depCache;
+  _depCache = await checkDeps(config);
+  _depCacheAt = Date.now();
+  return _depCache;
+}
+
 const REQUIRED_TOOLS = ['pdftoppm', 'tesseract', 'gs', 'surya_ocr', 'unpaper', 'convert'];
 // Python OCR engines — required for cost-effective image PDF processing.
 // Missing engines force expensive cloud vision fallback ($0.10-$0.20/page vs $0.01/page with local engines).
@@ -322,7 +333,7 @@ export async function startPipelineServer({
     try {
       // GET /health — returns 503 (not 200) when required tools are broken or disk is low
       if (req.method === 'GET' && path === '/health') {
-        const { deps, missing_required, disk, healthy } = await checkDeps(baseConfig);
+        const { deps, missing_required, disk, healthy } = await checkDepsCached(baseConfig);
         return reply(res, healthy ? 200 : 503, {
           status: healthy ? 'ok' : 'UNHEALTHY',
           version: PIPELINE_VERSION,
