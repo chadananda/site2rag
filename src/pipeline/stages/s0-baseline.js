@@ -47,6 +47,26 @@ export async function s0Baseline(ctx) {
 
     if (score.language && score.language !== 'unknown' && !ctx.meta.language) ctx.meta.language = score.language;
 
+    // Copy PDF-embedded title into meta if the caller didn't provide one (free — no LLM)
+    if (score.pdf_title && !ctx.meta?.title) ctx.meta = { ...(ctx.meta ?? {}), title: score.pdf_title };
+
+    // Infer missing metadata (title, authors, description, keywords) via Haiku
+    if (ctx.config.apiKey) {
+      try {
+        const { inferMissingMeta } = await import('../meta-infer.js');
+        const usage = await inferMissingMeta(ctx, { excerpt: score.excerpt, apiKey: ctx.config.apiKey });
+        tokensIn  += usage.tokensIn;
+        tokensOut += usage.tokensOut;
+        costUsd   += usage.costUsd;
+        if (ctx.meta?.title || ctx.meta?.description) {
+          ctx.addDecision('s0', 'meta_enriched',
+            `title=${ctx.meta.title ? 'ok' : 'none'} desc=${ctx.meta.description ? 'ok' : 'none'} authors=${ctx.meta.authors?.length ?? 0} keywords=${ctx.meta.keywords?.length ?? 0}`);
+        }
+      } catch (e) {
+        ctx.addError('s0', new Error(`meta_infer: ${e.message}`), true);
+      }
+    }
+
     // For image PDFs: infer language + scan issues from a small page thumbnail.
     // Runs before domain detection so language is available for all downstream stages.
     const needsOcr = score.has_text_layer !== 1 || score.avg_chars_per_page < 300;

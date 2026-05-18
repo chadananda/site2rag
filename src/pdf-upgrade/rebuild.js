@@ -93,9 +93,10 @@ const injectTextLayer = async (inputPdfPath, outputPdfPath, ocrResults, meta = {
 
   // Embed metadata
   const now = new Date();
-  if (meta.title)  pdfDoc.setTitle(meta.title);
-  if (meta.author) pdfDoc.setAuthor(meta.author);
+  if (meta.title)   pdfDoc.setTitle(meta.title);
+  if (meta.author)  pdfDoc.setAuthor(meta.author);
   if (meta.subject) pdfDoc.setSubject(meta.subject);
+  if (meta.language) pdfDoc.setLanguage(meta.language);
   pdfDoc.setProducer('site2rag OCR upgrade');
   pdfDoc.setCreator('site2rag');
   pdfDoc.setModificationDate(now);

@@ -28,11 +28,21 @@ export async function s7Archive(ctx) {
       })
       .filter(Boolean);
 
+    const authors = Array.isArray(ctx.meta?.authors)
+      ? ctx.meta.authors.join(', ')
+      : (ctx.meta?.authors ?? ctx.meta?.author ?? '');
+    const keywords = [
+      ...(Array.isArray(ctx.meta?.keywords) ? ctx.meta.keywords : []),
+      ...(ctx.meta?.language ? [ctx.meta.language] : []),
+      ...(ctx.meta?.year ? [String(ctx.meta.year)] : []),
+    ].filter(Boolean);
+
     const result = await rebuildPdf(ctx.sourcePath, outPath, ocrResults.length ? ocrResults : null, {
-      title: ctx.meta?.title ?? '',
-      author: Array.isArray(ctx.meta?.authors) ? ctx.meta.authors.join(', ') : (ctx.meta?.authors ?? ''),
-      subject: ctx.meta?.description ?? '',
-      keywords: ctx.meta?.language ?? '',
+      title:    ctx.meta?.title       ?? '',
+      author:   authors,
+      subject:  ctx.meta?.description ?? '',
+      keywords,
+      language: ctx.meta?.language    ?? '',
     });
 
     if (result.success) {
