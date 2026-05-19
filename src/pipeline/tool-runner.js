@@ -22,10 +22,11 @@ const ENV_PATH_VARS = { surya_ocr: 'SURYA_PATH' };
 // Local fallback: Python batch engines map to scripts in this same directory.
 // Workers handle these via their own PYTHON_SCRIPTS map in worker-agent.js.
 const PYTHON_SCRIPTS = {
-  easyocr_ocr: join(__pyDir, 'easyocr_ocr.py'),
-  paddle_ocr:  join(__pyDir, 'paddle_ocr.py'),
-  doctr_ocr:   join(__pyDir, 'doctr_ocr.py'),
-  kraken_ocr:  join(__pyDir, 'kraken_ocr.py'),
+  easyocr_ocr:      join(__pyDir, 'easyocr_ocr.py'),
+  paddle_ocr:       join(__pyDir, 'paddle_ocr.py'),
+  doctr_ocr:        join(__pyDir, 'doctr_ocr.py'),
+  kraken_ocr:       join(__pyDir, 'kraken_ocr.py'),
+  preprocess_image: join(__pyDir, 'preprocess_image.py'),
 };
 
 // Python worker-agent.py reports batch engine tools as 'easyocr_ocr' etc. when NFS is available.
@@ -37,9 +38,10 @@ const TOOL_KEY_ALIASES = {};
 // pickWorker must route these to workers regardless of available flag to prevent local fallback.
 const SERVE_CAPABLE_TOOLS = new Set(['easyocr_ocr', 'paddle_ocr', 'doctr_ocr', 'kraken_ocr']);
 
-// Tools routed to boss/GPU workers — all OCR including CPU tools (tesseract, kraken) should run
-// on dedicated worker machines, not the orchestrator. GPU workers get a 30-point score advantage.
-const GPU_PREFERRED_TOOLS = new Set(['easyocr_ocr', 'paddle_ocr', 'doctr_ocr', 'surya_ocr', 'kraken_ocr', 'tesseract']);
+// Tools routed to boss/GPU workers — all compute-heavy work runs on dedicated workers, not the
+// orchestrator. GPU workers get a 30-point score advantage. preprocess_image uses CPU OpenCV
+// now but will use GPU-accelerated variants (ResShift etc.) in future.
+const GPU_PREFERRED_TOOLS = new Set(['easyocr_ocr', 'paddle_ocr', 'doctr_ocr', 'surya_ocr', 'kraken_ocr', 'tesseract', 'preprocess_image']);
 
 // Worker health cache — shared across all tool runners in this process
 const _workerCache = new Map(); // registryUrl → { workers, fetchedAt }

@@ -60,6 +60,34 @@ def _get_ram_gb():
     except Exception:
         return 0
 
+def _free_ram_gb():
+    """Available (not just free) RAM in GB — accounts for reclaimable cache."""
+    try:
+        if PLATFORM == 'linux':
+            with open('/proc/meminfo') as f:
+                for line in f:
+                    if line.startswith('MemAvailable:'):
+                        return int(line.split()[1]) / 1024**2
+        elif PLATFORM == 'darwin':
+            vm = subprocess.check_output(['vm_stat'], text=True)
+            page_size = 16384  # 16K pages on Apple Silicon, 4K on Intel
+            for line in vm.splitlines():
+                if 'page size of' in line:
+                    page_size = int(line.split()[-2])
+                    break
+            stats = {}
+            for line in vm.splitlines():
+                if ':' in line:
+                    k, v = line.split(':', 1)
+                    stats[k.strip()] = int(v.strip().rstrip('.'))
+            free = stats.get('Pages free', 0)
+            inactive = stats.get('Pages inactive', 0)
+            speculative = stats.get('Pages speculative', 0)
+            return round((free + inactive + speculative) * page_size / 1024**3, 1)
+    except Exception:
+        pass
+    return RAM_GB  # if check fails, assume plenty of RAM
+
 RAM_GB = _get_ram_gb()
 STARTED_AT = datetime.now(timezone.utc).isoformat()
 
@@ -153,6 +181,9 @@ if _SCRIPTS_DIR:
 # SERVE_POOL_SIZE: parallel instances per engine for throughput (each handles one page at a time).
 SERVE_CAPABLE = {'easyocr_ocr', 'paddle_ocr', 'doctr_ocr'}
 SERVE_POOL_SIZE = int(os.environ.get('SERVE_POOL_SIZE', '4'))
+# Minimum free RAM to keep available — serve pool stops adding instances if this would be violated.
+# Prevents OOM on machines where large models exceed available RAM.
+MIN_POOL_FREE_RAM_GB = float(os.environ.get('MIN_POOL_FREE_RAM_GB', '4.0'))
 
 # Warm process pool: tool_name → [{'proc': Popen, 'lock': Lock}, ...]
 _serve_pool = {}       # tool → list of instance dicts
@@ -194,8 +225,15 @@ def _get_serve_instance(tool):
         pool = _serve_pool.get(tool, [])
         # Remove dead instances
         pool = [e for e in pool if e['proc'].poll() is None]
-        # Start new instances if pool is below target size
+        # Start new instances if pool is below target size, stopping if RAM is low.
+        # _start_serve_instance blocks until the model is fully loaded, so the RAM
+        # check after each instance reflects actual consumption — not a race.
         while len(pool) < SERVE_POOL_SIZE:
+            free_gb = _free_ram_gb()
+            if free_gb < MIN_POOL_FREE_RAM_GB:
+                print(f'[worker-agent] {tool} pool capped at {len(pool)} instance(s) '
+                      f'— only {free_gb:.1f}GB free (need {MIN_POOL_FREE_RAM_GB}GB)', flush=True)
+                break
             try:
                 pool.append(_start_serve_instance(tool))
                 print(f'[worker-agent] {tool}[{len(pool)-1}] serve ready', flush=True)
@@ -267,6 +305,79 @@ _cached_tools = None
 _tools_probe_time = 0
 TOOLS_TTL = 300  # re-probe every 5 minutes
 
+OLLAMA_PORT = int(os.environ.get('OLLAMA_PORT', 11434))
+MARKER_PORT  = int(os.environ.get('MARKER_PORT', 49801))
+
+def _http_get_json(url, timeout=3):
+    """Fetch JSON from a local HTTP service. Returns parsed dict or None."""
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as r:
+            return json.loads(r.read())
+    except Exception:
+        return None
+
+def _probe_ollama():
+    """Return dict of {llm, llm:thinking, vision} based on Ollama model list."""
+    data = _http_get_json(f'http://localhost:{OLLAMA_PORT}/api/tags')
+    if not data:
+        return {'llm': False, 'llm:thinking': False, 'vision': False}
+    models = [m.get('name', '') for m in data.get('models', [])]
+    # Detect capability from model names/families
+    has_vision   = any(any(t in m.lower() for t in ('llava', 'vision', 'minicpm-v', 'bakllava', 'moondream')) for m in models)
+    has_thinking = any(any(t in m.lower() for t in ('think', 'r1', 'qwq', 'deepseek-r')) for m in models)
+    has_llm      = len(models) > 0  # any model = can do LLM
+    # VRAM gate: for non-unified-memory machines check GPU VRAM; for unified (Metal/Strix Halo)
+    # treat RAM as VRAM since the same pool is shared.
+    vram_gb = _get_vram_gb()
+    return {
+        'llm':          has_llm      and vram_gb >= 8,   # even 8B models need ~8GB
+        'llm:thinking': has_thinking and vram_gb >= 20,
+        'vision':       has_vision   and vram_gb >= 8,
+    }
+
+def _get_vram_gb():
+    """Return estimated VRAM in GB. Uses unified RAM for Apple/AMD APU."""
+    # Apple Silicon — unified memory; full RAM is VRAM
+    if PLATFORM == 'darwin':
+        return RAM_GB
+    # AMD ROCm APU (Strix Halo etc.) — unified memory
+    try:
+        r = subprocess.run(['rocm-smi', '--showmeminfo', 'vram', '--json'],
+                           capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            info = json.loads(r.stdout)
+            # rocm-smi --json format: {"card0": {"VRAM Total Memory (B)": "..."}}
+            total = 0
+            for card in info.values():
+                for k, v in card.items():
+                    if 'total' in k.lower() and 'vram' in k.lower():
+                        try:
+                            total += int(v) / 1024**3
+                        except Exception:
+                            pass
+            if total > 0:
+                return total
+            # Strix Halo uses unified memory — fall back to system RAM
+            return RAM_GB
+    except Exception:
+        pass
+    # NVIDIA: try nvidia-smi
+    try:
+        r = subprocess.run(
+            ['nvidia-smi', '--query-gpu=memory.total', '--format=csv,noheader,nounits'],
+            capture_output=True, text=True, timeout=5)
+        if r.returncode == 0:
+            total_mb = sum(int(x.strip()) for x in r.stdout.strip().splitlines() if x.strip().isdigit())
+            return total_mb / 1024
+    except Exception:
+        pass
+    return 0
+
+def _probe_marker():
+    """Return True if the marker HTTP service is reachable on MARKER_PORT."""
+    data = _http_get_json(f'http://localhost:{MARKER_PORT}/health')
+    return data is not None
+
 def get_tools():
     global _cached_tools, _tools_probe_time
     if _cached_tools is None or time.time() - _tools_probe_time > TOOLS_TTL:
@@ -288,6 +399,15 @@ def get_tools():
         for pkg, tool_name in [('easyocr', 'easyocr_ocr'), ('paddleocr', 'paddle_ocr'),
                                 ('doctr', 'doctr_ocr'), ('kraken', 'kraken_ocr')]:
             tools[tool_name] = tools.get(f'py:{pkg}', False)
+        # Document intelligence — Ollama (LLM/vision) and marker HTTP services
+        ollama_caps = _probe_ollama()
+        tools.update(ollama_caps)
+        tools['marker']  = _probe_marker()
+        # html2md: pandoc is the primary converter; LLM fallback is handled by the pipeline
+        tools['html2md'] = bool(shutil.which('pandoc'))
+        # surya_ocr: GPU-only; only advertise if GPU is present
+        if not (tools.get('gpu:cuda') or tools.get('gpu:rocm') or tools.get('gpu:metal')):
+            tools['surya_ocr'] = False
         _cached_tools = tools
         _tools_probe_time = time.time()
     return _cached_tools
@@ -371,6 +491,178 @@ def capacity_payload():
         payload['disk_low'] = True
     return payload
 
+# ── Dynamic OpenAPI spec ───────────────────────────────────────────────────────
+
+# Human-readable description for each tool key, used in the generated spec.
+TOOL_DESCRIPTIONS = {
+    'gpu:cuda':     'NVIDIA CUDA GPU or AMD ROCm (ROCm reports true here)',
+    'gpu:rocm':     'AMD ROCm GPU',
+    'gpu:metal':    'Apple Silicon GPU',
+    'gs':           'Ghostscript — PDF normalization and rasterization',
+    'pdftoppm':     'Poppler — PDF page to image',
+    'convert':      'ImageMagick — image manipulation',
+    'unpaper':      'Scan deskew and despeckle',
+    'ffmpeg':       'Media processing',
+    'tesseract':    'Tesseract — script detection (OSD) and OCR with all language packs',
+    'easyocr_ocr':  'EasyOCR — multi-script all-language OCR, serve pool, GPU-preferred',
+    'paddle_ocr':   'PaddleOCR — CJK-optimized, Arabic, Latin, serve pool, GPU-preferred',
+    'doctr_ocr':    'DocTR — printed document OCR, serve pool, GPU-preferred',
+    'kraken_ocr':   'Kraken — historical and Latin OCR, serve pool',
+    'surya_ocr':    'Surya — layout segmentation and OCR for complex documents, GPU-preferred',
+    'marker':       'Marker — PDF to Markdown with layout understanding, GPU recommended',
+    'llm':          'Local LLM via Ollama — orchestration, re-ranking, analysis (requires VRAM ≥16GB)',
+    'llm:thinking': 'Thinking/reasoning model via Ollama (requires VRAM ≥20GB)',
+    'vision':       'Vision model via Ollama — image to text, not used for RTL scripts (requires VRAM ≥8GB)',
+    'html2md':      'HTML/DOCX/EPUB to Markdown conversion',
+}
+
+def build_openapi_spec():
+    """Build OpenAPI spec dynamically from current tool availability."""
+    tools = get_tools()
+    available_tools = [k for k, v in tools.items() if v and not k.startswith('gpu:') and not k.startswith('py:') and not k.startswith('nfs')]
+
+    tool_props = {}
+    for key, desc in TOOL_DESCRIPTIONS.items():
+        tool_props[key] = {'type': 'boolean', 'description': desc}
+
+    return {
+        'openapi': '3.0.0',
+        'info': {
+            'title': f'site2rag Worker Agent — {HOST}',
+            'version': VERSION,
+            'description': (
+                f'Worker on **{HOST}** ({PLATFORM}, {CPU_CORES} cores, {RAM_GB}GB RAM). '
+                f'GPU: {"ROCm" if tools.get("gpu:rocm") else "Metal" if tools.get("gpu:metal") else "CUDA" if tools.get("gpu:cuda") else "none"}. '
+                f'Available tools: {", ".join(available_tools)}. '
+                f'Spec regenerates on each request — reflects current hardware and running services.'
+            ),
+        },
+        'servers': [{'url': f'http://{HOST}:{PORT}'}],
+        'paths': {
+            '/health': {
+                'get': {
+                    'summary': 'Full capabilities and current load',
+                    'responses': {'200': {'description': 'Worker health snapshot', 'content': {'application/json': {'schema': {'$ref': '#/components/schemas/HealthResponse'}}}}},
+                }
+            },
+            '/capacity': {
+                'get': {
+                    'summary': 'Lightweight availability check — no tool list',
+                    'responses': {'200': {'content': {'application/json': {'schema': {'$ref': '#/components/schemas/CapacityResponse'}}}}},
+                }
+            },
+            '/openapi.json': {
+                'get': {
+                    'summary': 'This spec — regenerated on each request from live hardware probe',
+                    'responses': {'200': {'description': 'OpenAPI spec'}},
+                }
+            },
+            '/tools/run': {
+                'post': {
+                    'summary': 'Execute an available tool',
+                    'description': (
+                        'Accepts any tool key currently true in /health tools. '
+                        'Files passed as base64 in inputFiles — no shared filesystem required. '
+                        'Directories: use __dir_N/filename keys. '
+                        'Output files returned as base64 in outputFiles.'
+                    ),
+                    'requestBody': {
+                        'required': True,
+                        'content': {'application/json': {'schema': {'$ref': '#/components/schemas/RunRequest'}}},
+                    },
+                    'responses': {
+                        '200': {'description': 'Tool completed', 'content': {'application/json': {'schema': {'$ref': '#/components/schemas/RunResponse'}}}},
+                        '400': {'description': 'Missing tool or args'},
+                        '500': {'description': 'Tool execution failed'},
+                        '503': {'description': 'Worker over capacity — retry with another worker'},
+                    },
+                }
+            },
+        },
+        'components': {
+            'schemas': {
+                'Tools': {
+                    'type': 'object',
+                    'description': 'Live capability map. Regenerated every 5 minutes from hardware probe. Only true values are active.',
+                    'properties': tool_props,
+                    'example': tools,
+                },
+                'HealthResponse': {
+                    'type': 'object',
+                    'properties': {
+                        'status':             {'type': 'string', 'enum': ['ok', 'busy']},
+                        'hostname':           {'type': 'string'},
+                        'platform':           {'type': 'string'},
+                        'cpu_cores':          {'type': 'integer'},
+                        'ram_gb':             {'type': 'number'},
+                        'cpu_pct':            {'type': 'number', 'description': '0–100'},
+                        'mem_pct':            {'type': 'number', 'description': '0–100'},
+                        'disk_free_gb':       {'type': 'number'},
+                        'queue_depth':        {'type': 'integer'},
+                        'active_jobs':        {'type': 'integer'},
+                        'total_jobs':         {'type': 'integer'},
+                        'uptime_seconds':     {'type': 'integer'},
+                        'available':          {'type': 'boolean', 'description': 'False when cpu_pct or mem_pct exceeds capacity_limit_pct. Serve-capable OCR tools are exempt.'},
+                        'capacity_limit_pct': {'type': 'integer', 'default': 80},
+                        'tools':              {'$ref': '#/components/schemas/Tools'},
+                    },
+                },
+                'CapacityResponse': {
+                    'type': 'object',
+                    'properties': {
+                        'available':   {'type': 'boolean'},
+                        'cpu_pct':     {'type': 'number'},
+                        'mem_pct':     {'type': 'number'},
+                        'queue_depth': {'type': 'integer'},
+                        'active_jobs': {'type': 'integer'},
+                    },
+                },
+                'RunRequest': {
+                    'type': 'object',
+                    'required': ['tool', 'args'],
+                    'properties': {
+                        'tool':        {'type': 'string', 'enum': available_tools, 'description': 'Currently available tools on this worker'},
+                        'args':        {'type': 'array', 'items': {'type': 'string'}},
+                        'timeout':     {'type': 'integer', 'default': 120000, 'description': 'Milliseconds'},
+                        'inputFiles':  {'type': 'object', 'description': 'filename → base64. Directories: __dir_N/filename keys.', 'additionalProperties': {'type': 'string', 'format': 'byte'}},
+                        'outputPaths': {'type': 'array', 'items': {'type': 'string'}, 'description': 'Keys to collect after run and return as base64'},
+                    },
+                },
+                'RunResponse': {
+                    'type': 'object',
+                    'properties': {
+                        'stdout':      {'type': 'string'},
+                        'stderr':      {'type': 'string'},
+                        'duration_ms': {'type': 'integer'},
+                        'outputFiles': {'type': 'object', 'additionalProperties': {'type': 'string', 'format': 'byte'}},
+                    },
+                },
+            }
+        },
+    }
+
+SWAGGER_UI_HTML = '''<!DOCTYPE html>
+<html>
+<head>
+  <title>Worker Agent — {host}</title>
+  <meta charset="utf-8"/>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css">
+</head>
+<body>
+<div id="swagger-ui"></div>
+<script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+<script>
+  SwaggerUIBundle({{
+    url: '/openapi.json',
+    dom_id: '#swagger-ui',
+    presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+    layout: 'BaseLayout',
+    deepLinking: true,
+  }});
+</script>
+</body>
+</html>'''.format(host=HOST)
+
 # ── HTTP handler ───────────────────────────────────────────────────────────────
 
 class WorkerHandler(BaseHTTPRequestHandler):
@@ -381,6 +673,14 @@ class WorkerHandler(BaseHTTPRequestHandler):
         data = json.dumps(body).encode()
         self.send_response(status)
         self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', len(data))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_html(self, status, html):
+        data = html.encode()
+        self.send_response(status)
+        self.send_header('Content-Type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', len(data))
         self.end_headers()
         self.wfile.write(data)
@@ -406,6 +706,10 @@ class WorkerHandler(BaseHTTPRequestHandler):
             })
         elif path == '/capacity':
             self.send_json(200, capacity_payload())
+        elif path == '/openapi.json':
+            self.send_json(200, build_openapi_spec())
+        elif path in ('/docs', '/docs/'):
+            self.send_html(200, SWAGGER_UI_HTML)
         else:
             self.send_json(404, {'error': 'not found'})
 
@@ -624,6 +928,33 @@ if __name__ == '__main__':
             time.sleep(60)
 
     threading.Thread(target=heartbeat_loop, daemon=True).start()
+
+    # Re-probe OCR engines after 15s — on machines with slow venvs (e.g. M1 mini),
+    # import easyocr/paddleocr/doctr may fail at cold start but succeed shortly after.
+    # A single retry catches this without requiring a manual worker restart.
+    def reprobe_ocr_if_needed():
+        global _cached_tools, _tools_probe_time
+        ocr_pkgs = ['easyocr', 'paddleocr', 'doctr', 'kraken']
+        initial = get_tools()
+        if not any(initial.get(f'py:{pkg}') is False for pkg in ocr_pkgs):
+            return  # all OCR packages found — no retry needed
+        time.sleep(15)
+        print('[worker-agent] re-probing OCR engines (slow venv startup detected)…', flush=True)
+        # Force a fresh probe by resetting the cache timestamp
+        _tools_probe_time = 0
+        fresh = get_tools()
+        gained = [pkg for pkg in ocr_pkgs if not initial.get(f'py:{pkg}') and fresh.get(f'py:{pkg}')]
+        if gained:
+            print(f'[worker-agent] re-probe gained: {", ".join(gained)}', flush=True)
+            # Re-register immediately so the server gets corrected capabilities
+            worker_url = args.public_url or f'http://{HOST}:{PORT}'
+            registry_url_local = args.registry
+            if registry_url_local:
+                register_with_registry(registry_url_local, worker_url)
+        else:
+            print('[worker-agent] re-probe: OCR engines still unavailable', flush=True)
+
+    threading.Thread(target=reprobe_ocr_if_needed, daemon=True).start()
 
     # Pre-warm serve pools in background — models load once at startup so the
     # first real job doesn't pay the 30-60s cold-start cost.

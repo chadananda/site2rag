@@ -44,6 +44,8 @@ const PKG_TO_TOOL = { easyocr: 'easyocr_ocr', paddleocr: 'paddle_ocr', doctr: 'd
 // On a 80-core machine, 4 instances gives ~4× throughput vs single-instance serialization.
 const SERVE_CAPABLE = new Set(['easyocr_ocr', 'paddle_ocr', 'doctr_ocr']);
 const SERVE_POOL_SIZE = parseInt(process.env.SERVE_POOL_SIZE ?? '4');
+// Minimum free RAM to keep — pool stops adding instances below this threshold.
+const MIN_POOL_FREE_RAM_GB = parseFloat(process.env.MIN_POOL_FREE_RAM_GB ?? '4.0');
 const servePools = new Map(); // tool → [{ proc, ready, pending[], buf }, ...]
 
 import { spawn } from 'child_process';
@@ -84,7 +86,14 @@ function startServePool(tool) {
   const needed = SERVE_POOL_SIZE - existing.length;
   if (needed <= 0) return;
   const instances = existing;
-  for (let i = 0; i < needed; i++) instances.push(_startOneServeInstance(tool, existing.length + i));
+  for (let i = 0; i < needed; i++) {
+    const freeGb = freemem() / (1024 ** 3);
+    if (freeGb < MIN_POOL_FREE_RAM_GB) {
+      console.log(`[worker-agent] ${tool} pool capped at ${instances.length} instance(s) — only ${freeGb.toFixed(1)}GB free (need ${MIN_POOL_FREE_RAM_GB}GB)`);
+      break;
+    }
+    instances.push(_startOneServeInstance(tool, existing.length + i));
+  }
   servePools.set(tool, instances);
 }
 
@@ -155,16 +164,72 @@ async function probePythonPkg(pkg) {
   } catch { return false; }
 }
 
+const OLLAMA_PORT = parseInt(process.env.OLLAMA_PORT ?? '11434');
+const MARKER_PORT  = parseInt(process.env.MARKER_PORT ?? '49801');
+
+async function _httpGetJson(url) {
+  try {
+    const res = await fetch(url, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+async function _getVramGb() {
+  // Apple Silicon — unified memory; all RAM is VRAM
+  if (PLATFORM === 'darwin') return RAM_GB;
+  // AMD ROCm APU (Strix Halo etc.) — unified memory; fall back to system RAM
+  try {
+    const { stdout } = await execFileAsync('rocm-smi', ['--showmeminfo', 'vram', '--json'], { timeout: 5000 });
+    const info = JSON.parse(stdout);
+    let total = 0;
+    for (const card of Object.values(info))
+      for (const [k, v] of Object.entries(card))
+        if (k.toLowerCase().includes('total') && k.toLowerCase().includes('vram'))
+          total += parseInt(v) / 1024 ** 3;
+    return total > 0 ? total : RAM_GB; // Strix Halo reports unified pool
+  } catch {}
+  // NVIDIA discrete GPU
+  try {
+    const { stdout } = await execFileAsync('nvidia-smi', ['--query-gpu=memory.total', '--format=csv,noheader,nounits'], { timeout: 5000 });
+    const mb = stdout.trim().split('\n').reduce((s, x) => s + (parseInt(x) || 0), 0);
+    return mb / 1024;
+  } catch {}
+  return 0;
+}
+
+async function _probeOllama() {
+  const data = await _httpGetJson(`http://localhost:${OLLAMA_PORT}/api/tags`);
+  if (!data) return { llm: false, 'llm:thinking': false, vision: false };
+  const models = (data.models ?? []).map(m => m.name ?? '');
+  const hasVision   = models.some(m => /llava|vision|minicpm-v|bakllava|moondream/i.test(m));
+  const hasThinking = models.some(m => /think|r1|qwq|deepseek-r/i.test(m));
+  const hasLlm      = models.length > 0;
+  const vramGb = await _getVramGb();
+  return {
+    llm:           hasLlm      && vramGb >= 8,
+    'llm:thinking': hasThinking && vramGb >= 20,
+    vision:        hasVision   && vramGb >= 8,
+  };
+}
+
 async function detectTools() {
-  const [cmdResults, pkgResults] = await Promise.all([
+  const [cmdResults, pkgResults, ollamaCaps, pandocOk] = await Promise.all([
     Promise.all(TOOLS_TO_PROBE.map(async t => [t, await probeCmd(t)])),
     Promise.all(PYTHON_PKGS.map(async p => [p, await probePythonPkg(p)])),
+    _probeOllama(),
+    probeCmd('pandoc'),
   ]);
   const tools = {};
   for (const [t, ok] of cmdResults) tools[t] = ok;
   for (const [p, ok] of pkgResults) tools[`py:${p}`] = ok;
   // Expose engine tool names for workerPool routing (easyocr_ocr, paddle_ocr, etc.)
   for (const [pkg, toolName] of Object.entries(PKG_TO_TOOL)) tools[toolName] = tools[`py:${pkg}`] === true;
+  // Document intelligence
+  Object.assign(tools, ollamaCaps);
+  tools.html2md  = pandocOk;
+  // marker: check if marker HTTP service is reachable
+  tools.marker   = (await _httpGetJson(`http://localhost:${MARKER_PORT}/health`)) !== null;
   return tools;
 }
 
