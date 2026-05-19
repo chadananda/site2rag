@@ -30,8 +30,9 @@ const baseConfig = {
     paddle_ocr:  workerPoolBackend('paddle_ocr'),
     doctr_ocr:   workerPoolBackend('doctr_ocr'),
     kraken_ocr:  workerPoolBackend('kraken_ocr'),
-    surya_ocr:   workerPoolBackend('surya_ocr'),
-    tesseract:   workerPoolBackend('tesseract'),
+    // surya_ocr excluded — 3-way concurrent GPU (easyocr+doctr+surya) exceeds 120s torch timeout; 2-way parallel stays fast
+    tesseract:        workerPoolBackend('tesseract'),
+    preprocess_image: workerPoolBackend('preprocess_image'),
   },
 };
 
