@@ -13,6 +13,7 @@ import * as childProcess from 'child_process';
 import { promisify } from 'util';
 import { fileURLToPath } from 'url';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync, readdirSync } from 'fs';
+import { tmpdir } from 'os';
 import { dirname, join, basename, extname } from 'path';
 
 const __pyDir = dirname(fileURLToPath(import.meta.url));
@@ -259,7 +260,7 @@ async function runToolHttp(tool, args, opts, baseUrl) {
       // Match worker-returned filename to our outputPathMap key prefix
       const matchKey = outputPaths.find(k => key.startsWith(k) || key === k);
       const localPath = matchKey ? outputPathMap[matchKey].replace(extname(outputPathMap[matchKey]), extname(key))
-                                 : join(dirname(Object.values(outputPathMap)[0] ?? '/tmp'), key);
+                                 : join(Object.values(outputPathMap)[0] ? dirname(Object.values(outputPathMap)[0]) : tmpdir(), key);
       mkdirSync(dirname(localPath), { recursive: true });
       writeFileSync(localPath, Buffer.from(b64, 'base64'));
     }

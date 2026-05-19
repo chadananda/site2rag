@@ -31,7 +31,7 @@ const baseConfig = {
     doctr_ocr:   workerPoolBackend('doctr_ocr'),
     kraken_ocr:  workerPoolBackend('kraken_ocr'),
     // surya_ocr excluded — 3-way concurrent GPU (easyocr+doctr+surya) exceeds 120s torch timeout; 2-way parallel stays fast
-    tesseract:        workerPoolBackend('tesseract'),
+    // tesseract runs locally on tower-nas (80 cores, 0.3s, no network) — routing to boss overwhelms it with 9 concurrent requests
     preprocess_image: workerPoolBackend('preprocess_image'),
   },
 };
