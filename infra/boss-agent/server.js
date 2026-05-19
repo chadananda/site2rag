@@ -189,6 +189,8 @@ async function handleArgsRequest(tool, args, inputFiles, outputPaths) {
   if (tool === 'preprocess_image') {
     const __serverDir = path.dirname(new URL(import.meta.url).pathname);
     const PREPROCESS_PY = path.join(__serverDir, 'tools', 'preprocess_image.py');
+    
+    const PREPROCESS_PYTHON = process.env.PREPROCESS_PYTHON || '/usr/bin/python3';
     const inKey  = args.find(a => a.startsWith('__in_'));
     const outKey = args.find(a => a.startsWith('__out_')) || (outputPaths && outputPaths[0]);
     const imgB64 = inKey && (inputFiles || {})[inKey];
@@ -204,7 +206,7 @@ async function handleArgsRequest(tool, args, inputFiles, outputPaths) {
       await _wf(inPath, Buffer.from(imgB64, 'base64'));
       const remapped = args.map(a => a === inKey ? inPath : a === outKey ? outPath : a);
       const { stdout, stderr } = await execAsync(
-        `python3 ${PREPROCESS_PY} ${remapped.map(a => JSON.stringify(a)).join(' ')}`,
+        `${PREPROCESS_PYTHON} ${PREPROCESS_PY} ${remapped.map(a => JSON.stringify(a)).join(' ')}`,
         { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 }
       );
       const result = { stdout, stderr, exitCode: 0 };
