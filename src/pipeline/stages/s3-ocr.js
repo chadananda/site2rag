@@ -375,6 +375,17 @@ async function checkSuryaCli(ctx) {
   }
 }
 
+// Check if a worker has a tool — handles both health formats:
+//   object format: { tools: { easyocr_ocr: true } }  (tower-nas worker-agent)
+//   array format:  { available_tools: ["easyocr_ocr"] }  (boss worker-agent)
+function workerHasTool(w, tool) {
+  const h = w.health;
+  if (!h) return false;
+  if (h.tools?.[tool] === true) return true;
+  if (Array.isArray(h.available_tools) && h.available_tools.includes(tool)) return true;
+  return false;
+}
+
 async function checkPythonEngine(toolName, ctx) {
   try {
     // For workerPool tools, trust the worker health report — workers don't support --check CLI flag
@@ -384,7 +395,7 @@ async function checkPythonEngine(toolName, ctx) {
       if (registryUrl) {
         const res = await fetch(`${registryUrl}/workers`, { signal: AbortSignal.timeout(10000) });
         const { workers } = await res.json();
-        return workers.some(w => w.health?.tools?.[toolName] === true);
+        return workers.some(w => workerHasTool(w, toolName));
       }
     }
     // Local: run --check (45s timeout for cold Python import over Tailscale)
@@ -597,16 +608,19 @@ export async function s3Ocr(ctx) {
   ctx.addDecision('s3', 'engines_available',
     [suryaOk ? 'surya' : null, ...availableEngines.map(e => e.label)].filter(Boolean).join(', ') || 'tesseract-only');
 
-  // Fail fast if no batch engines available for image documents.
-  // Text PDFs have a text layer and don't need multi-engine OCR context.
-  // Image PDFs require all 4 engines — cloud vision is not a substitute for missing software.
+  // If no engines at all (not even surya or tesseract) and image PDF — nothing to do.
+  // Surya-only is allowed: it produces usable output and is routed to GPU workers.
+  // Tesseract-only is also allowed (low confidence but better than nothing).
+  // Only abort if every possible OCR path is gone AND this is an image PDF.
   const hasTextLayer = (ctx.quality?.baseline?.has_text_layer ?? 1) > 0;
-  if (availableEngines.length === 0 && !hasTextLayer) {
-    const msg = `No batch OCR engines available (easyocr, paddle, doctr, kraken). All 4 engines are required for image PDFs. Verify installations and check server /health endpoint.`;
-    if (ctx.config.failFast !== false) throw new Error(msg);
+  if (availableEngines.length === 0 && !suryaOk && !hasTextLayer) {
+    const msg = `No OCR engines available (tesseract + batch + surya all missing). Verify worker pool and check server /health endpoint.`;
     ctx.addError('s3', new Error(msg), true);
     ctx.endStage('s3', { pages_affected: 0, notes: 'no_engines' });
     return ctx;
+  }
+  if (availableEngines.length === 0 && !hasTextLayer) {
+    ctx.addDecision('s3', 'engines_mode', `no batch engines — surya+tesseract only (${suryaOk ? 'surya available' : 'tesseract only'})`);
   }
 
   // Calibration page: page 2 (first real text page after cover).
@@ -729,7 +743,9 @@ export async function s3Ocr(ctx) {
             } catch (e) { ctx.addDecision('s3', `layout_p${page.pageNo}`, `layout detection failed: ${e.message}`); }
           }
 
-          if (blocks.length < D_MIN_BLOCKS && ctx._scanIssues?.length > 0) {
+          // Multi-DPI search: try alternate resolutions when standard layout finds no blocks.
+          // Not gated on _scanIssues — 0 blocks is itself a signal that something is wrong.
+          if (blocks.length < D_MIN_BLOCKS) {
             try {
               const dpiSearch = await findBestLayoutDpi(ctx.sourcePath, page.pageNo, lang, tmpDir, ctx);
               if (dpiSearch && dpiSearch.result.blocks.length > blocks.length) {
@@ -740,7 +756,7 @@ export async function s3Ocr(ctx) {
             } catch (e) { ctx.addDecision('s3', `layout_p${page.pageNo}`, `dpi_search failed: ${e.message}`); }
           }
 
-          if (blocks.length < D_MIN_BLOCKS && ctx._scanIssues?.length > 0 && ctx.config.apiKey) {
+          if (blocks.length < D_MIN_BLOCKS && ctx.config.apiKey) {
             try {
               const { methods: visionMethods, lang: visionLang } = await consultVisionForPreprocessing(layoutPng, ctx.config.apiKey, ctx);
               if (visionLang && !page._langCandidates.some(c => c.lang === visionLang)) {
