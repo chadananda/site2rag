@@ -46,7 +46,10 @@ def _probe_gpu():
             return open(cache).read().strip() == 'ok'
     except OSError:
         pass
-    env = {**os.environ, 'HSA_OVERRIDE_GFX_VERSION': os.environ.get('HSA_OVERRIDE_GFX_VERSION', '11.0.0')}
+    env = {**os.environ,
+           'HSA_OVERRIDE_GFX_VERSION':  os.environ.get('HSA_OVERRIDE_GFX_VERSION', '11.5.1'),
+           'ROCBLAS_TENSILE_LIBPATH':   os.environ.get('ROCBLAS_TENSILE_LIBPATH',
+               '/usr/lib/x86_64-linux-gnu/rocblas/5.1.0/library')}
     try:
         r = subprocess.run(
             [sys.executable, '-c',
@@ -126,14 +129,17 @@ def _otsu(t):
     return between.argmax().float()
 
 def _pool_dilate(t, ksize):
-    """Morphological dilation via max pooling with reflection padding."""
-    pad = ksize // 2
-    return _F.max_pool2d(_F.pad(t, [pad]*4, mode='reflect'), ksize, stride=1, padding=0)
+    """Morphological dilation via max pooling. Asymmetric padding ensures same output size."""
+    # For even kernels: pad more on right/bottom to keep H×W output
+    p = ksize // 2
+    q = ksize - 1 - p  # p for left/top, q for right/bottom
+    return _F.max_pool2d(_F.pad(t, [p, q, p, q], mode='reflect'), ksize, stride=1, padding=0)
 
 def _pool_erode(t, ksize):
-    """Morphological erosion via -max_pool(-x)."""
-    pad = ksize // 2
-    return -_F.max_pool2d(_F.pad(-t, [pad]*4, mode='reflect'), ksize, stride=1, padding=0)
+    """Morphological erosion via -max_pool(-x). Same asymmetric padding."""
+    p = ksize // 2
+    q = ksize - 1 - p
+    return -_F.max_pool2d(_F.pad(-t, [p, q, p, q], mode='reflect'), ksize, stride=1, padding=0)
 
 # ── GPU variant computation ───────────────────────────────────────────────────
 
@@ -270,14 +276,21 @@ def _cpu_cv2_variants(img, issues):
     def to_rgb(a): return Image.fromarray(a).convert('RGB')
     def auto(a):   return ImageOps.autocontrast(Image.fromarray(a), cutoff=1).convert('RGB')
 
-    # NL-means — best for photocopy grain; no simple GPU equivalent
-    for h in [8, 12, 15, 20, 25]:
+    # NL-means — cv2 releases the GIL so multiple h-values run concurrently
+    def _nlm(h):
         nlm = cv2.fastNlMeansDenoising(gray_cv, None, h=h, templateWindowSize=7, searchWindowSize=21)
-        variants.append((f'nlm_h{h}',      auto(nlm)))
         _, bw = cv2.threshold(nlm, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        return h, nlm, bw
+    with ThreadPoolExecutor(max_workers=5) as nlm_pool:
+        nlm_results = list(nlm_pool.map(lambda h: _nlm(h), [8, 12, 15, 20, 25]))
+    nlm15 = None
+    for h, nlm, bw in sorted(nlm_results, key=lambda x: x[0]):
+        variants.append((f'nlm_h{h}',      auto(nlm)))
         variants.append((f'nlm_h{h}+otsu', to_rgb(bw)))
+        if h == 15: nlm15 = nlm
 
-    nlm15 = cv2.fastNlMeansDenoising(gray_cv, None, h=15, templateWindowSize=7, searchWindowSize=21)
+    if nlm15 is None:  # fallback if parallel NLM didn't capture h=15
+        nlm15 = cv2.fastNlMeansDenoising(gray_cv, None, h=15, templateWindowSize=7, searchWindowSize=21)
     for block in [21, 31]:
         for c in [5, 10]:
             at = cv2.adaptiveThreshold(nlm15, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,

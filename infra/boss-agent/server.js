@@ -190,7 +190,9 @@ async function handleArgsRequest(tool, args, inputFiles, outputPaths) {
     const __serverDir = path.dirname(new URL(import.meta.url).pathname);
     const PREPROCESS_PY = path.join(__serverDir, 'tools', 'preprocess_image.py');
     
-    const PREPROCESS_PYTHON = process.env.PREPROCESS_PYTHON || '/usr/bin/python3';
+    // torch venv for GPU preprocessing (ROCm env scoped to subprocess only)
+    const PREPROCESS_PYTHON = process.env.PREPROCESS_PYTHON || '/home/chad/slp/engines/torch/venv/bin/python3';
+    const PREPROCESS_ENV = { ...process.env, HSA_OVERRIDE_GFX_VERSION: '11.5.1', ROCBLAS_TENSILE_LIBPATH: '/usr/lib/x86_64-linux-gnu/rocblas/5.1.0/library' };
     const inKey  = args.find(a => a.startsWith('__in_'));
     const outKey = args.find(a => a.startsWith('__out_')) || (outputPaths && outputPaths[0]);
     const imgB64 = inKey && (inputFiles || {})[inKey];
@@ -207,7 +209,7 @@ async function handleArgsRequest(tool, args, inputFiles, outputPaths) {
       const remapped = args.map(a => a === inKey ? inPath : a === outKey ? outPath : a);
       const { stdout, stderr } = await execAsync(
         `${PREPROCESS_PYTHON} ${PREPROCESS_PY} ${remapped.map(a => JSON.stringify(a)).join(' ')}`,
-        { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 }
+        { timeout: 120_000, maxBuffer: 10 * 1024 * 1024, env: PREPROCESS_ENV }
       );
       const result = { stdout, stderr, exitCode: 0 };
       const { existsSync: fsExists } = await import('node:fs');
