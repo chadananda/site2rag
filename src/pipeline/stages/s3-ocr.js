@@ -608,19 +608,15 @@ export async function s3Ocr(ctx) {
   ctx.addDecision('s3', 'engines_available',
     [suryaOk ? 'surya' : null, ...availableEngines.map(e => e.label)].filter(Boolean).join(', ') || 'tesseract-only');
 
-  // If no engines at all (not even surya or tesseract) and image PDF — nothing to do.
-  // Surya-only is allowed: it produces usable output and is routed to GPU workers.
-  // Tesseract-only is also allowed (low confidence but better than nothing).
-  // Only abort if every possible OCR path is gone AND this is an image PDF.
+  // Batch engines (easyocr, paddle, doctr, kraken) must all be available on a GPU worker.
+  // Surya is not a valid fallback — it should almost never run. If no batch engine is
+  // reachable on any worker, that's a hard failure indicating a worker pool problem.
   const hasTextLayer = (ctx.quality?.baseline?.has_text_layer ?? 1) > 0;
-  if (availableEngines.length === 0 && !suryaOk && !hasTextLayer) {
-    const msg = `No OCR engines available (tesseract + batch + surya all missing). Verify worker pool and check server /health endpoint.`;
+  if (availableEngines.length === 0 && !hasTextLayer) {
+    const msg = `No batch OCR engines available on any worker (easyocr/paddle/doctr/kraken all missing). Check worker pool health and GPU worker registration.`;
     ctx.addError('s3', new Error(msg), true);
     ctx.endStage('s3', { pages_affected: 0, notes: 'no_engines' });
     return ctx;
-  }
-  if (availableEngines.length === 0 && !hasTextLayer) {
-    ctx.addDecision('s3', 'engines_mode', `no batch engines — surya+tesseract only (${suryaOk ? 'surya available' : 'tesseract only'})`);
   }
 
   // Calibration page: page 2 (first real text page after cover).
