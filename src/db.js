@@ -261,10 +261,19 @@ export const upsertSitemap = (db, entry) => {
 /** Mark sitemap URLs removed that weren't seen in current diff. */
 export const markSitemapRemoved = (db, seenUrls) => {
   const now = new Date().toISOString();
-  const placeholders = seenUrls.map(() => '?').join(',');
-  const clause = seenUrls.length ? `AND url NOT IN (${placeholders})` : '';
-  return db.prepare(`UPDATE sitemaps SET removed=1, removed_at=? WHERE removed=0 ${clause}`)
-    .run(now, ...seenUrls).changes;
+  if (!seenUrls.length) {
+    return db.prepare('UPDATE sitemaps SET removed=1, removed_at=? WHERE removed=0').run(now).changes;
+  }
+  // Use a temp table to avoid SQLite's 999-variable limit on NOT IN
+  db.prepare('CREATE TEMP TABLE IF NOT EXISTS _seen_urls (url TEXT PRIMARY KEY)').run();
+  db.prepare('DELETE FROM _seen_urls').run();
+  const ins = db.prepare('INSERT OR IGNORE INTO _seen_urls (url) VALUES (?)');
+  db.transaction(urls => { for (const url of urls) ins.run(url); })(seenUrls);
+  const changes = db.prepare(
+    'UPDATE sitemaps SET removed=1, removed_at=? WHERE removed=0 AND url NOT IN (SELECT url FROM _seen_urls)'
+  ).run(now).changes;
+  db.prepare('DROP TABLE _seen_urls').run();
+  return changes;
 };
 /** Upsert export row. */
 export const upsertExport = (db, exp) => {
