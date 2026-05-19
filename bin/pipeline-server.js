@@ -4,10 +4,11 @@
 //
 //   PIPELINE_PORT=49900          HTTP port (default 49900)
 //   PIPELINE_DB=/path/jobs.db    Job store SQLite path
-//   PIPELINE_CONCURRENCY=1       Parallel pipeline runs (GPU-bound: keep at 1)
+//   PIPELINE_CONCURRENCY=1       Parallel pipeline runs
 //   PIPELINE_API_KEY=secret      Optional bearer token for auth
 //   ANTHROPIC_API_KEY=...        Passed through to pipeline stages
 //   LOCAL_LLM=http://...         Boss vision model URL
+//   WORKER_URLS=http://boss:49910,...  Comma-separated worker URLs seeded at startup
 
 import { startPipelineServer } from '../src/pipeline/server.js';
 
@@ -16,10 +17,22 @@ const dbPath      = process.env.PIPELINE_DB                   ?? '/tmp/site2rag-
 const concurrency = parseInt(process.env.PIPELINE_CONCURRENCY ?? '1', 10);
 const apiKey      = process.env.PIPELINE_API_KEY              ?? null;
 
-// Pipeline config passed down into runPipeline() for every job
+// Heavy OCR tools route to the worker pool (boss + any registered workers) instead of
+// running locally on the orchestrator. The pool picks the least-loaded GPU-capable worker.
+const REGISTRY = 'http://localhost:49900';
+const workerPoolBackend = (tool) => ({ type: 'workerPool', registryUrl: REGISTRY });
+
 const baseConfig = {
   apiKey:   process.env.ANTHROPIC_API_KEY ?? null,
   bossUrl:  process.env.LOCAL_LLM         ?? 'http://boss.taile945b3.ts.net:49800/v1',
+  toolBackends: {
+    easyocr_ocr: workerPoolBackend('easyocr_ocr'),
+    paddle_ocr:  workerPoolBackend('paddle_ocr'),
+    doctr_ocr:   workerPoolBackend('doctr_ocr'),
+    kraken_ocr:  workerPoolBackend('kraken_ocr'),
+    surya_ocr:   workerPoolBackend('surya_ocr'),
+    tesseract:   workerPoolBackend('tesseract'),
+  },
 };
 
 process.on('unhandledRejection', (r) => console.error('[pipeline-server] unhandledRejection:', r));
@@ -29,7 +42,7 @@ const { close } = await startPipelineServer({ port, dbPath, concurrency, config:
 
 for (const sig of ['SIGTERM', 'SIGINT']) {
   process.on(sig, async () => {
-    console.log(`[pipeline-server] ${sig} — shutting down`);
+    console.log('[pipeline-server] ' + sig + ' — shutting down');
     await close();
     process.exit(0);
   });

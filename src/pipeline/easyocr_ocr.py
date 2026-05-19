@@ -56,9 +56,26 @@ def _gpu_works():
     except Exception:
         return False
 
+def _mps_works():
+    """Return True only if MPS (Apple Metal) is available and functional."""
+    try:
+        r = _subprocess.run(
+            [sys.executable, '-c',
+             'import torch; a=torch.ones(32,32,device="mps"); b=torch.matmul(a,a); print("ok")'],
+            capture_output=True, timeout=15,
+        )
+        return r.returncode == 0 and b'ok' in r.stdout
+    except Exception:
+        return False
+
 try:
     import torch as _torch
-    _GPU = _torch.cuda.is_available() and _gpu_works()
+    if _torch.backends.mps.is_available() and _mps_works():
+        _GPU = True   # EasyOCR gpu=True auto-selects MPS on Apple Silicon
+    elif _torch.cuda.is_available() and _gpu_works():
+        _GPU = True
+    else:
+        _GPU = False
 except ImportError:
     _GPU = False
 

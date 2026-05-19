@@ -1,0 +1,303 @@
+[02:56:59] === Pipeline Optimizer (per-doc iteration) starting ===
+[02:56:59] Domain: bahai-library.com | Pipeline: http://tower-nas.local:49900 | API key: MISSING
+[02:56:59] Pipeline health: {"status":"ok","version":"1.0.0","queue_depth":0}
+[02:56:59] Corpus: 10 documents
+[02:56:59] Remaining: 10 docs to process
+[02:56:59] 
+=== english_text_good_journal_constantinople_1851_08 (english_text_good, english, 1pp, baseline=0.830) ===
+[02:56:59]   Running 2 variants in parallel for english_text_good_journal_constantinople_1851_08
+[02:57:05]      ✓ baseline: score=0.830 cost=$0.0011 time=6s
+[02:57:09]      ✓ surya_primary: score=0.830 cost=$0.0010 time=9s
+[02:57:09]   Round 1: no improvement (0.0%) — round 1/2
+[02:57:09]   FINAL: english_text_good_journal_constantinople_1851_08 → 83.0% (+0.0%) via baseline
+[02:57:09] 
+=== english_text_good_journal_constantinople_1851_10 (english_text_good, english, 1pp, baseline=0.850) ===
+[02:57:09]   Running 2 variants in parallel for english_text_good_journal_constantinople_1851_10
+[02:57:15]      ✓ baseline: score=0.850 cost=$0.0012 time=6s
+[02:57:18]      ✓ surya_primary: score=0.850 cost=$0.0011 time=9s
+[02:57:18]   Round 1: no improvement (0.0%) — round 1/2
+[02:57:18]   FINAL: english_text_good_journal_constantinople_1851_10 → 85.0% (+0.0%) via baseline
+[02:57:18] 
+=== english_scan_ok_masson_bahai_western_advance_s (english_scan_ok, english, 7pp, baseline=0.950) ===
+[02:57:18]   Running 3 variants in parallel for english_scan_ok_masson_bahai_western_advance_s
+[02:57:45]      ✓ baseline: score=0.646 cost=$0.0010 time=27s
+[02:58:21]      ✓ high_res: score=0.642 cost=$0.0009 time=63s
+[02:58:54]      ✓ unpaper_clean: score=0.648 cost=$0.0010 time=96s
+[02:58:54]   Round 1: no improvement (0.0%) — round 1/2
+[02:58:54]   Running 3 variants in parallel for english_scan_ok_masson_bahai_western_advance_s
+[02:59:33]      ✓ unpaper_high_res: score=0.641 cost=$0.0010 time=39s
+[02:59:51] === Pipeline Optimizer (per-doc iteration) starting ===
+[02:59:51] Domain: bahai-library.com | Pipeline: http://tower-nas.local:49900 | API key: present
+[02:59:51] Pipeline health: {"status":"ok","version":"1.0.0","queue_depth":2}
+[02:59:51] Corpus: 10 documents
+[02:59:51] Remaining: 10 docs to process
+[02:59:51] 
+=== english_text_good_journal_constantinople_1851_08 (english_text_good, english, 1pp, baseline=0.830) ===
+[02:59:51]   Running 2 variants in parallel for english_text_good_journal_constantinople_1851_08
+[03:00:40]      ✓ baseline: score=0.830 cost=$0.0010 time=48s
+[03:00:43]      ✓ surya_primary: score=0.830 cost=$0.0010 time=51s
+[03:00:43]   Round 1: no improvement (0.0%) — round 1/2
+[03:00:46]   AI insights: 4 patterns identified
+[03:00:46]   FINAL: english_text_good_journal_constantinople_1851_08 → 83.0% (+0.0%) via baseline
+[03:00:46] 
+=== english_text_good_journal_constantinople_1851_10 (english_text_good, english, 1pp, baseline=0.850) ===
+[03:00:46]   Running 2 variants in parallel for english_text_good_journal_constantinople_1851_10
+[03:00:55]      ✓ baseline: score=0.850 cost=$0.0012 time=9s
+[03:00:58]      ✓ surya_primary: score=0.850 cost=$0.0011 time=12s
+[03:00:58]   Round 1: no improvement (0.0%) — round 1/2
+[03:01:01]   AI insights: 4 patterns identified
+[03:01:01]   FINAL: english_text_good_journal_constantinople_1851_10 → 85.0% (+0.0%) via baseline
+[03:01:01] 
+=== english_scan_ok_masson_bahai_western_advance_s (english_scan_ok, english, 7pp, baseline=0.950) ===
+[03:01:01]   Running 3 variants in parallel for english_scan_ok_masson_bahai_western_advance_s
+[03:01:28]      ✓ baseline: score=0.646 cost=$0.0009 time=27s
+[03:02:01]      ✓ high_res: score=0.642 cost=$0.0011 time=60s
+[03:02:34]      ✓ unpaper_clean: score=0.648 cost=$0.0010 time=93s
+[03:02:34]   Round 1: no improvement (0.0%) — round 1/2
+[03:02:34]   Running 3 variants in parallel for english_scan_ok_masson_bahai_western_advance_s
+[03:03:16]      ✓ unpaper_high_res: score=0.641 cost=$0.0011 time=42s
+[03:03:46]      ✓ contrast_forced: score=0.646 cost=$0.0010 time=72s
+[03:04:25]      ✓ aggressive_clean: score=0.641 cost=$0.0011 time=111s
+[03:04:25]   Round 2: no improvement (0.0%) — round 2/2
+[03:04:28]   AI insights: 5 patterns identified
+[03:04:28]   FINAL: english_scan_ok_masson_bahai_western_advance_s → 95.0% (+0.0%) via baseline
+[03:04:28] 
+=== english_scan_ok_lindfoot_notes_1933_convention (english_scan_ok, english, 8pp, baseline=0.970) ===
+[03:04:28]   Running 3 variants in parallel for english_scan_ok_lindfoot_notes_1933_convention
+[03:05:10]      ✓ baseline: score=0.618 cost=$0.0010 time=42s
+[03:06:04]      ✓ high_res: score=0.618 cost=$0.0010 time=96s
+[03:06:46]      ✓ unpaper_clean: score=0.616 cost=$0.0010 time=138s
+[03:06:46]   Round 1: no improvement (0.0%) — round 1/2
+[03:06:46]   Running 3 variants in parallel for english_scan_ok_lindfoot_notes_1933_convention
+[03:07:47]      ✓ unpaper_high_res: score=0.614 cost=$0.0011 time=60s
+[03:08:29]      ✓ contrast_forced: score=0.618 cost=$0.0010 time=102s
+[03:09:26]      ✓ aggressive_clean: score=0.614 cost=$0.0011 time=159s
+[03:09:26]   Round 2: no improvement (0.0%) — round 2/2
+[03:09:29]   AI insights: 5 patterns identified
+[03:09:29]   FINAL: english_scan_ok_lindfoot_notes_1933_convention → 97.0% (+0.0%) via baseline
+[03:09:29] 
+=== french_scan_journal_constantinople_1851_10 (french_scan, french, 1pp, baseline=0.040) ===
+[03:09:29]   Running 3 variants in parallel for french_scan_journal_constantinople_1851_10
+[03:09:56]      ✓ baseline: score=0.249 cost=$0.0009 time=27s
+[03:10:20]      ✓ french_lang: score=0.249 cost=$0.0008 time=51s
+[03:11:05]      ✓ high_res_french: score=0.248 cost=$0.0010 time=96s
+[03:11:05]   Round 1: improved to 24.9% via baseline
+[03:11:05]   Running 3 variants in parallel for french_scan_journal_constantinople_1851_10
+[03:11:41]      ✓ unpaper_french: score=0.244 cost=$0.0010 time=36s
+[03:12:38]      ✓ aggressive_clean: score=0.241 cost=$0.0011 time=93s
+[03:13:02]      ✓ contrast_french: score=0.249 cost=$0.0009 time=117s
+[03:13:02]   Round 2: no improvement (0.0%) — round 1/2
+[03:13:02]   Running 2 variants in parallel for french_scan_journal_constantinople_1851_10
+[03:13:14]      ✓ surya_primary: score=0.000 cost=$0.0010 time=12s
+[03:13:39]      ✓ multi_french: score=0.249 cost=$0.0009 time=36s
+[03:13:39]   Round 3: no improvement (0.0%) — round 2/2
+[03:13:42]   AI insights: 5 patterns identified
+[03:13:42]   FINAL: french_scan_journal_constantinople_1851_10 → 24.9% (+20.9%) via baseline
+[03:13:42] 
+=== french_scan_journal_constantinople_1851_08 (french_scan, french, 1pp, baseline=0.090) ===
+[03:13:42]   Running 3 variants in parallel for french_scan_journal_constantinople_1851_08
+[03:14:27]      ✓ baseline: score=0.457 cost=$0.0010 time=45s
+[03:15:34]      ✓ high_res_french: score=0.488 cost=$0.0011 time=111s
+[03:16:16]      ✓ french_lang: score=0.457 cost=$0.0010 time=153s
+[03:16:16]   Round 1: improved to 48.8% via high_res_french
+[03:16:16]   Running 3 variants in parallel for french_scan_journal_constantinople_1851_08
+[03:17:10]      ✓ unpaper_french: score=0.489 cost=$0.0010 time=54s
+[03:18:22]      ✓ aggressive_clean: score=0.487 cost=$0.0010 time=126s
+[03:19:07]      ✓ contrast_french: score=0.457 cost=$0.0010 time=171s
+[03:19:07]   Round 2: no improvement (0.1%) — round 1/2
+[03:19:07]   Running 2 variants in parallel for french_scan_journal_constantinople_1851_08
+[03:19:19]      ✓ surya_primary: score=0.430 cost=$0.0010 time=12s
+[03:20:07]      ✓ multi_french: score=0.457 cost=$0.0011 time=60s
+[03:20:07]   Round 3: no improvement (0.0%) — round 2/2
+[03:20:11]   AI insights: 5 patterns identified
+[03:21:41]      ✓ haiku_synthesis: score=0.489 cost=$0.0010 time=90s
+[03:21:41]  Haiku synthesis improved to 48.9%
+[03:21:41]   FINAL: french_scan_journal_constantinople_1851_08 → 48.9% (+39.9%) via haiku_synthesis
+[03:21:41] 
+=== arabic_scan_kharman_adab_honar_contents_17 (arabic_scan, arabic, 7pp, baseline=0.620) ===
+[03:21:41]   Running 3 variants in parallel for arabic_scan_kharman_adab_honar_contents_17
+[03:21:59]      ✓ baseline: score=0.242 cost=$0.0010 time=18s
+[03:22:14]      ✓ arabic_lang: score=0.242 cost=$0.0010 time=33s
+[03:22:41]      ✓ high_res_arabic: score=0.252 cost=$0.0011 time=60s
+[03:22:41]   Round 1: no improvement (0.0%) — round 1/2
+[03:22:41]   Running 3 variants in parallel for arabic_scan_kharman_adab_honar_contents_17
+[03:22:53]      ✓ surya_primary: score=0.000 cost=$0.0011 time=12s
+[03:23:14]      ✓ unpaper_clean: score=0.249 cost=$0.0010 time=33s
+[03:23:29]      ✓ multi_engine: score=0.242 cost=$0.0010 time=48s
+[03:23:29]   Round 2: no improvement (0.0%) — round 2/2
+[03:23:32]   AI insights: 5 patterns identified
+[03:23:32]   FINAL: arabic_scan_kharman_adab_honar_contents_17 → 62.0% (+0.0%) via baseline
+[03:23:32] 
+=== arabic_scan_kharman_adab_honar_contents_16 (arabic_scan, arabic, 5pp, baseline=0.890) ===
+[03:23:32]   Running 3 variants in parallel for arabic_scan_kharman_adab_honar_contents_16
+[03:23:47]      ✓ baseline: score=0.251 cost=$0.0010 time=15s
+[03:24:11]      ✓ high_res_arabic: score=0.256 cost=$0.0010 time=39s
+[03:24:26]      ✓ arabic_lang: score=0.251 cost=$0.0010 time=54s
+[03:24:26]   Round 1: no improvement (0.0%) — round 1/2
+[03:24:26]   Running 3 variants in parallel for arabic_scan_kharman_adab_honar_contents_16
+[03:24:35]      ✓ surya_primary: score=0.000 cost=$0.0010 time=9s
+[03:24:56]      ✓ unpaper_clean: score=0.248 cost=$0.0011 time=30s
+[03:25:08]      ✓ multi_engine: score=0.251 cost=$0.0010 time=42s
+[03:25:08]   Round 2: no improvement (0.0%) — round 2/2
+[03:25:12]   AI insights: 5 patterns identified
+[03:25:12]   FINAL: arabic_scan_kharman_adab_honar_contents_16 → 89.0% (+0.0%) via baseline
+[03:25:12] 
+=== persian_scan__d9_86_d9_88_da_af_d8_b1_d8_a7 (persian_scan, persian, 5pp, baseline=1.000) ===
+[03:25:12]   Running 3 variants in parallel for persian_scan__d9_86_d9_88_da_af_d8_b1_d8_a7
+[03:25:30]      ✓ persian_lang: score=0.219 cost=$0.0010 time=18s
+[03:25:42]      ✓ baseline: score=0.219 cost=$0.0011 time=30s
+[03:25:52]      ✓ surya_primary: score=0.000 cost=$0.0010 time=39s
+[03:25:52]   Round 1: no improvement (0.0%) — round 1/2
+[03:25:56]   AI insights: 5 patterns identified
+[03:25:56]   FINAL: persian_scan__d9_86_d9_88_da_af_d8_b1_d8_a7 → 100.0% (+0.0%) via baseline
+[03:25:56] 
+=== persian_scan__d8_aa_d8_b1_da_a9_db_8c_d8_a8 (persian_scan, persian, 8pp, baseline=1.000) ===
+[03:25:56]   Running 3 variants in parallel for persian_scan__d8_aa_d8_b1_da_a9_db_8c_d8_a8
+[03:26:20]      ✓ persian_lang: score=0.228 cost=$0.0010 time=24s
+[03:26:41]      ✓ baseline: score=0.228 cost=$0.0012 time=45s
+[03:26:47]      ✓ surya_primary: score=0.000 cost=$0.0010 time=51s
+[03:26:47]   Round 1: no improvement (0.0%) — round 1/2
+[03:26:51]   AI insights: 5 patterns identified
+[03:26:51]   FINAL: persian_scan__d8_aa_d8_b1_da_a9_db_8c_d8_a8 → 100.0% (+0.0%) via baseline
+[03:26:51] 
+=== Optimizer complete ===
+[03:27:07] === Pipeline Optimizer (per-doc iteration) starting ===
+[03:27:07] Domain: bahai-library.com | Pipeline: http://tower-nas.local:49900 | API key: present
+[03:27:07] Pipeline health: {"status":"ok","version":"1.0.0","queue_depth":0}
+[03:27:07] Corpus: 10 documents
+[03:27:07] Remaining: 10 docs to process
+[03:27:07] 
+=== english_text_good_journal_constantinople_1851_08 (english_text_good, english, 1pp, baseline=0.830) ===
+[03:27:07]   Running 2 variants in parallel for english_text_good_journal_constantinople_1851_08
+[03:27:13]      ✓ baseline: score=0.830 cost=$0.0011 time=6s
+[03:27:16]      ✓ surya_primary: score=0.830 cost=$0.0011 time=9s
+[03:27:16]   Round 1: no improvement (0.0%) — round 1/2
+[03:27:20]   AI insights: 5 patterns identified
+[03:27:20]   FINAL: english_text_good_journal_constantinople_1851_08 → 83.0% (+0.0%) via baseline
+[03:27:20] 
+=== english_text_good_journal_constantinople_1851_10 (english_text_good, english, 1pp, baseline=0.850) ===
+[03:27:20]   Running 2 variants in parallel for english_text_good_journal_constantinople_1851_10
+[03:27:26]      ✓ baseline: score=0.850 cost=$0.0012 time=6s
+[03:27:29]      ✓ surya_primary: score=0.850 cost=$0.0012 time=9s
+[03:27:29]   Round 1: no improvement (0.0%) — round 1/2
+[03:27:32]   AI insights: 5 patterns identified
+[03:27:32]   FINAL: english_text_good_journal_constantinople_1851_10 → 85.0% (+0.0%) via baseline
+[03:27:32] 
+=== english_scan_ok_masson_bahai_western_advance_s (english_scan_ok, english, 7pp, baseline=0.950) ===
+[03:27:32]   Running 3 variants in parallel for english_scan_ok_masson_bahai_western_advance_s
+[03:27:59]      ✓ baseline: score=0.646 cost=$0.0011 time=27s
+[03:28:35]      ✓ high_res: score=0.642 cost=$0.0011 time=63s
+[03:29:08]      ✓ unpaper_clean: score=0.648 cost=$0.0010 time=96s
+[03:29:08]   Round 1: no improvement (0.0%) — round 1/2
+[03:29:08]   Running 3 variants in parallel for english_scan_ok_masson_bahai_western_advance_s
+[03:29:47]      ✓ unpaper_high_res: score=0.641 cost=$0.0011 time=39s
+[03:30:14]      ✓ contrast_forced: score=0.646 cost=$0.0010 time=66s
+[03:30:53]      ✓ aggressive_clean: score=0.641 cost=$0.0010 time=105s
+[03:30:53]   Round 2: no improvement (0.0%) — round 2/2
+[03:30:57]   AI insights: 5 patterns identified
+[03:30:57]   FINAL: english_scan_ok_masson_bahai_western_advance_s → 95.0% (+0.0%) via baseline
+[03:30:57] 
+=== english_scan_ok_lindfoot_notes_1933_convention (english_scan_ok, english, 8pp, baseline=0.970) ===
+[03:30:57]   Running 3 variants in parallel for english_scan_ok_lindfoot_notes_1933_convention
+[03:31:42]      ✓ baseline: score=0.618 cost=$0.0011 time=45s
+[03:32:33]      ✓ high_res: score=0.618 cost=$0.0010 time=96s
+[03:33:18]      ✓ unpaper_clean: score=0.616 cost=$0.0011 time=141s
+[03:33:18]   Round 1: no improvement (0.0%) — round 1/2
+[03:33:18]   Running 3 variants in parallel for english_scan_ok_lindfoot_notes_1933_convention
+[03:34:16]      ✓ unpaper_high_res: score=0.614 cost=$0.0009 time=57s
+[03:34:58]      ✓ contrast_forced: score=0.618 cost=$0.0010 time=99s
+[03:35:55]      ✓ aggressive_clean: score=0.614 cost=$0.0010 time=156s
+[03:35:55]   Round 2: no improvement (0.0%) — round 2/2
+[03:35:58]   AI insights: 5 patterns identified
+[03:35:58]   FINAL: english_scan_ok_lindfoot_notes_1933_convention → 97.0% (+0.0%) via baseline
+[03:35:58] 
+=== french_scan_journal_constantinople_1851_10 (french_scan, french, 1pp, baseline=0.040) ===
+[03:35:58]   Running 3 variants in parallel for french_scan_journal_constantinople_1851_10
+[03:36:25]      ✓ baseline: score=0.249 cost=$0.0010 time=27s
+[03:36:49]      ✓ french_lang: score=0.249 cost=$0.0010 time=51s
+[03:37:34]      ✓ high_res_french: score=0.248 cost=$0.0009 time=96s
+[03:37:34]   Round 1: improved to 24.9% via baseline
+[03:37:34]   Running 3 variants in parallel for french_scan_journal_constantinople_1851_10
+[03:38:10]      ✓ unpaper_french: score=0.244 cost=$0.0009 time=36s
+[03:38:34]      ✓ contrast_french: score=0.249 cost=$0.0011 time=60s
+[03:39:31]      ✓ aggressive_clean: score=0.241 cost=$0.0010 time=117s
+[03:39:31]   Round 2: no improvement (0.0%) — round 1/2
+[03:39:31]   Running 2 variants in parallel for french_scan_journal_constantinople_1851_10
+[03:39:43]      ✓ surya_primary: score=0.000 cost=$0.0010 time=12s
+[03:40:07]      ✓ multi_french: score=0.249 cost=$0.0010 time=36s
+[03:40:07]   Round 3: no improvement (0.0%) — round 2/2
+[03:40:11]   AI insights: 5 patterns identified
+[03:40:53]      ✓ haiku_synthesis: score=0.249 cost=$0.0011 time=42s
+[03:40:53]   FINAL: french_scan_journal_constantinople_1851_10 → 24.9% (+20.9%) via baseline
+[03:40:53] 
+=== french_scan_journal_constantinople_1851_08 (french_scan, french, 1pp, baseline=0.090) ===
+[03:40:53]   Running 3 variants in parallel for french_scan_journal_constantinople_1851_08
+[03:41:38]      ✓ baseline: score=0.457 cost=$0.0011 time=45s
+[03:42:20]      ✓ french_lang: score=0.457 cost=$0.0010 time=87s
+[03:43:26]      ✓ high_res_french: score=0.488 cost=$0.0012 time=153s
+[03:43:26]   Round 1: improved to 48.8% via high_res_french
+[03:43:26]   Running 3 variants in parallel for french_scan_journal_constantinople_1851_08
+[03:44:26]      ✓ unpaper_french: score=0.489 cost=$0.0010 time=60s
+[03:45:35]      ✓ aggressive_clean: score=0.487 cost=$0.0010 time=129s
+[03:46:17]      ✓ contrast_french: score=0.457 cost=$0.0010 time=171s
+[03:46:17]   Round 2: no improvement (0.1%) — round 1/2
+[03:46:17]   Running 2 variants in parallel for french_scan_journal_constantinople_1851_08
+[03:46:29]      ✓ surya_primary: score=0.430 cost=$0.0009 time=12s
+[03:47:15]      ✓ multi_french: score=0.457 cost=$0.0010 time=57s
+[03:47:15]   Round 3: no improvement (0.0%) — round 2/2
+[03:47:31]   AI insights: 5 patterns identified
+[03:48:58]      ✓ haiku_synthesis: score=0.489 cost=$0.0011 time=87s
+[03:48:58]  Haiku synthesis improved to 48.9%
+[03:48:58]   FINAL: french_scan_journal_constantinople_1851_08 → 48.9% (+39.9%) via haiku_synthesis
+[03:48:58] 
+=== arabic_scan_kharman_adab_honar_contents_17 (arabic_scan, arabic, 7pp, baseline=0.620) ===
+[03:48:58]   Running 3 variants in parallel for arabic_scan_kharman_adab_honar_contents_17
+[03:49:17]      ✓ baseline: score=0.242 cost=$0.0010 time=18s
+[03:49:32]      ✓ arabic_lang: score=0.242 cost=$0.0010 time=33s
+[03:49:56]      ✓ high_res_arabic: score=0.252 cost=$0.0010 time=57s
+[03:49:56]   Round 1: no improvement (0.0%) — round 1/2
+[03:49:56]   Running 3 variants in parallel for arabic_scan_kharman_adab_honar_contents_17
+[03:50:08]      ✓ surya_primary: score=0.000 cost=$0.0010 time=12s
+[03:50:23]      ✓ multi_engine: score=0.242 cost=$0.0011 time=27s
+[03:50:47]      ✓ unpaper_clean: score=0.249 cost=$0.0011 time=51s
+[03:50:47]   Round 2: no improvement (0.0%) — round 2/2
+[03:50:50]   AI insights: 5 patterns identified
+[03:51:20]      ✓ haiku_synthesis: score=0.242 cost=$0.0010 time=30s
+[03:51:20]   FINAL: arabic_scan_kharman_adab_honar_contents_17 → 62.0% (+0.0%) via baseline
+[03:51:20] 
+=== arabic_scan_kharman_adab_honar_contents_16 (arabic_scan, arabic, 5pp, baseline=0.890) ===
+[03:51:20]   Running 3 variants in parallel for arabic_scan_kharman_adab_honar_contents_16
+[03:51:35]      ✓ baseline: score=0.251 cost=$0.0011 time=15s
+[03:51:59]      ✓ high_res_arabic: score=0.256 cost=$0.0010 time=39s
+[03:52:14]      ✓ arabic_lang: score=0.251 cost=$0.0011 time=54s
+[03:52:14]   Round 1: no improvement (0.0%) — round 1/2
+[03:52:14]   Running 3 variants in parallel for arabic_scan_kharman_adab_honar_contents_16
+[03:52:26]      ✓ surya_primary: score=0.000 cost=$0.0011 time=12s
+[03:52:38]      ✓ multi_engine: score=0.251 cost=$0.0008 time=24s
+[03:52:59]      ✓ unpaper_clean: score=0.248 cost=$0.0010 time=45s
+[03:52:59]   Round 2: no improvement (0.0%) — round 2/2
+[03:53:04]   AI insights: 5 patterns identified
+[03:53:34]      ✓ haiku_synthesis: score=0.251 cost=$0.0009 time=30s
+[03:53:34]   FINAL: arabic_scan_kharman_adab_honar_contents_16 → 89.0% (+0.0%) via baseline
+[03:53:34] 
+=== persian_scan__d9_86_d9_88_da_af_d8_b1_d8_a7 (persian_scan, persian, 5pp, baseline=1.000) ===
+[03:53:34]   Running 3 variants in parallel for persian_scan__d9_86_d9_88_da_af_d8_b1_d8_a7
+[03:53:55]      ✓ baseline: score=0.219 cost=$0.0011 time=21s
+[03:54:13]      ✓ persian_lang: score=0.219 cost=$0.0010 time=39s
+[03:54:16]      ✓ surya_primary: score=0.000 cost=$0.0010 time=42s
+[03:54:16]   Round 1: no improvement (0.0%) — round 1/2
+[03:54:21]   AI insights: 5 patterns identified
+[03:56:21]      ✓ haiku_synthesis: score=0.150 cost=$0.0326 time=120s
+[03:56:21]   FINAL: persian_scan__d9_86_d9_88_da_af_d8_b1_d8_a7 → 100.0% (+0.0%) via baseline
+[03:56:21] 
+=== persian_scan__d8_aa_d8_b1_da_a9_db_8c_d8_a8 (persian_scan, persian, 8pp, baseline=1.000) ===
+[03:56:21]   Running 3 variants in parallel for persian_scan__d8_aa_d8_b1_da_a9_db_8c_d8_a8
+[03:56:42]      ✓ baseline: score=0.228 cost=$0.0010 time=21s
+[03:57:03]      ✓ persian_lang: score=0.228 cost=$0.0011 time=42s
+[03:57:09]      ✓ surya_primary: score=0.000 cost=$0.0011 time=48s
+[03:57:09]   Round 1: no improvement (0.0%) — round 1/2
+[03:57:13]   AI insights: 5 patterns identified
+[04:00:07]      ✓ haiku_synthesis: score=0.150 cost=$0.0477 time=174s
+[04:00:07]   FINAL: persian_scan__d8_aa_d8_b1_da_a9_db_8c_d8_a8 → 100.0% (+0.0%) via baseline
+[04:00:07] 
+=== Optimizer complete ===

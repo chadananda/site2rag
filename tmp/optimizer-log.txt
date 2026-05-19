@@ -1,0 +1,195 @@
+[17:39:40] === Pipeline Optimizer starting ===
+[17:39:40] Domain: bahai-library.com | Pipeline: http://localhost:49900
+[17:39:40] Pipeline health: {"status":"ok","version":"1.0.0","queue_depth":64}
+[17:39:40] Building test corpus...
+[17:39:40] Corpus: 10 documents
+[17:39:40]   english_text_good    1pp english score=0.83 journal_constantinople_1851-08-19_p2.pdf
+[17:39:40]   english_text_good    1pp english score=0.85 journal_constantinople_1851-10-29_p3.pdf
+[17:39:40]   english_scan_ok      7pp english score=0.95 masson_bahai_western_advance_scan.pdf
+[17:39:40]   english_scan_ok      8pp english score=0.97 lindfoot_notes_1933_convention.pdf
+[17:39:40]   french_scan          1pp french score=0.04 journal_constantinople_1851-10-14_p4.pdf
+[17:39:40]   french_scan          1pp french score=0.09 journal_constantinople_1851-08-29_p3.pdf
+[17:39:40]   arabic_scan          7pp arabic score=0.62 kharman_adab_honar_contents_17.pdf
+[17:39:40]   arabic_scan          5pp arabic score=0.89 kharman_adab_honar_contents_16.pdf
+[17:39:40]   persian_scan         5pp persian score=1.00 %d9%86%d9%88%da%af%d8%b1%d8%a7%db%8c%db%8c%20%d8%af%d8%b1%20%d9%86%d9%82%d8%a7%d8%b4%db%8c%20%d8%a7%db%8c%d8%b1%d8%a7%d9%86%20-%20%d8%b9%d8%a8%d8%af%d8%a7%d9%84%d8%ad%d9%85%db%8c%d8%af%20%d8%a7%d8%b4%d8%b1%d8%a7%d9%82(%d8%ae%d9%88%d8%b4%d9%87%20%d9%87%d8%a717).pdf
+[17:39:40]   persian_scan         8pp persian score=1.00 %d8%aa%d8%b1%da%a9%db%8c%d8%a8%20%d8%a7%d9%93%d8%ab%d8%a7%d8%b1%20%d9%87%d9%86%d8%b1%db%8c%20%d9%88%20%d8%aa%d9%86%d8%a7%d8%b3%d8%a8%20%d8%b7%d9%84%d8%a7%d9%8a%d9%94%db%8c%20-%20%d9%87%d9%88%d8%b4%d9%86%da%af%20%d8%b3%db%8c%d8%ad%d9%88%d9%86(%d8%ae%d9%88%d8%b4%d9%87%20%d9%87%d8%a717).pdf
+[17:39:40] 
+=== Document: english_text_good_journal_constantinople_1851_08 (english_text_good) ===
+[17:39:40]   → baseline: english_text_good_journal_constantinople_1851_08 (1pp english)
+[17:51:17]      FAILED: pipeline GET /jobs/f83db998-2c5b-4b2b-bc23-73f9e77dadea: HTTP 404 not found
+%88%d9%86(%d8%ae%d9%88%d8%b4%d9%87%20%d9%87%d8%a717).pdf
+[17:39:40] 
+=== Document: english_text_good_journal_constantinople_1851_08 (english_text_good) ===
+[17:39:40]   → baseline: english_text_good_journal_constantinople_1851_08 (1pp english)
+[17:51:17]      FAILED: pipeline GET /jobs/f83db998-2c5b-4b2b-bc23-73f9e77dadea: HTTP 404 not found
+[17:51:39] === Pipeline Optimizer starting ===
+[17:51:39] Domain: bahai-library.com | Pipeline: http://tower-nas.local:49900
+[17:51:39] Warning: No ANTHROPIC_API_KEY — vision analysis will be skipped
+[17:51:39] Pipeline health: {"status":"ok","version":"1.0.0","queue_depth":61}
+[17:51:39] Building test corpus...
+[17:51:39] Corpus: 10 documents
+[17:51:39]   english_text_good    1pp english score=0.83 journal_constantinople_1851-08-19_p2.pdf
+[17:51:39]   english_text_good    1pp english score=0.85 journal_constantinople_1851-10-29_p3.pdf
+[17:51:39]   english_scan_ok      7pp english score=0.95 masson_bahai_western_advance_scan.pdf
+[17:51:39]   english_scan_ok      8pp english score=0.97 lindfoot_notes_1933_convention.pdf
+[17:51:39]   french_scan          1pp french score=0.04 journal_constantinople_1851-10-14_p4.pdf
+[17:51:39]   french_scan          1pp french score=0.09 journal_constantinople_1851-08-29_p3.pdf
+[17:51:39]   arabic_scan          7pp arabic score=0.62 kharman_adab_honar_contents_17.pdf
+[17:51:39]   arabic_scan          5pp arabic score=0.89 kharman_adab_honar_contents_16.pdf
+[17:51:39]   persian_scan         5pp persian score=1.00 %d9%86%d9%88%da%af%d8%b1%d8%a7%db%8c%db%8c%20%d8%af%d8%b1%20%d9%86%d9%82%d8%a7%d8%b4%db%8c%20%d8%a7%db%8c%d8%b1%d8%a7%d9%86%20-%20%d8%b9%d8%a8%d8%af%d8%a7%d9%84%d8%ad%d9%85%db%8c%d8%af%20%d8%a7%d8%b4%d8%b1%d8%a7%d9%82(%d8%ae%d9%88%d8%b4%d9%87%20%d9%87%d8%a717).pdf
+[17:51:39]   persian_scan         8pp persian score=1.00 %d8%aa%d8%b1%da%a9%db%8c%d8%a8%20%d8%a7%d9%93%d8%ab%d8%a7%d8%b1%20%d9%87%d9%86%d8%b1%db%8c%20%d9%88%20%d8%aa%d9%86%d8%a7%d8%b3%d8%a8%20%d8%b7%d9%84%d8%a7%d9%8a%d9%94%db%8c%20-%20%d9%87%d9%88%d8%b4%d9%86%da%af%20%d8%b3%db%8c%d8%ad%d9%88%d9%86(%d8%ae%d9%88%d8%b4%d9%87%20%d9%87%d8%a717).pdf
+[17:51:39] 
+=== Document: english_text_good_journal_constantinople_1851_08 (english_text_good) ===
+[17:51:39]   → baseline: english_text_good_journal_constantinople_1851_08 (1pp english)
+[17:54:32] === Pipeline Optimizer starting ===
+[17:54:32] Domain: bahai-library.com | Pipeline: http://tower-nas.local:49900
+[17:54:32] Pipeline health: {"status":"ok","version":"1.0.0","queue_depth":62}
+[17:54:32] Building test corpus...
+[17:54:32] Corpus: 10 documents
+[17:54:32]   english_text_good    1pp english score=0.83 journal_constantinople_1851-08-19_p2.pdf
+[17:54:32]   english_text_good    1pp english score=0.85 journal_constantinople_1851-10-29_p3.pdf
+[17:54:32]   english_scan_ok      7pp english score=0.95 masson_bahai_western_advance_scan.pdf
+[17:54:32]   english_scan_ok      8pp english score=0.97 lindfoot_notes_1933_convention.pdf
+[17:54:32]   french_scan          1pp french score=0.04 journal_constantinople_1851-10-14_p4.pdf
+[17:54:32]   french_scan          1pp french score=0.09 journal_constantinople_1851-08-29_p3.pdf
+[17:54:32]   arabic_scan          7pp arabic score=0.62 kharman_adab_honar_contents_17.pdf
+[17:54:32]   arabic_scan          5pp arabic score=0.89 kharman_adab_honar_contents_16.pdf
+[17:54:32]   persian_scan         5pp persian score=1.00 %d9%86%d9%88%da%af%d8%b1%d8%a7%db%8c%db%8c%20%d8%af%d8%b1%20%d9%86%d9%82%d8%a7%d8%b4%db%8c%20%d8%a7%db%8c%d8%b1%d8%a7%d9%86%20-%20%d8%b9%d8%a8%d8%af%d8%a7%d9%84%d8%ad%d9%85%db%8c%d8%af%20%d8%a7%d8%b4%d8%b1%d8%a7%d9%82(%d8%ae%d9%88%d8%b4%d9%87%20%d9%87%d8%a717).pdf
+[17:54:32]   persian_scan         8pp persian score=1.00 %d8%aa%d8%b1%da%a9%db%8c%d8%a8%20%d8%a7%d9%93%d8%ab%d8%a7%d8%b1%20%d9%87%d9%86%d8%b1%db%8c%20%d9%88%20%d8%aa%d9%86%d8%a7%d8%b3%d8%a8%20%d8%b7%d9%84%d8%a7%d9%8a%d9%94%db%8c%20-%20%d9%87%d9%88%d8%b4%d9%86%da%af%20%d8%b3%db%8c%d8%ad%d9%88%d9%86(%d8%ae%d9%88%d8%b4%d9%87%20%d9%87%d8%a717).pdf
+[17:54:32] 
+=== Document: english_text_good_journal_constantinople_1851_08 (english_text_good) ===
+[17:54:32]   → baseline: english_text_good_journal_constantinople_1851_08 (1pp english)
+[17:59:42]      score=0.830 cost=$0.0010 time=309s
+[17:59:44]   → high_res: english_text_good_journal_constantinople_1851_08 (1pp english)
+[18:19:45]      FAILED: pipeline job 2502794d-b96b-4985-9fc1-ae99616907b1 timed out after 1200000ms
+[18:19:47]   → contrast_forced: english_text_good_journal_constantinople_1851_08 (1pp english)
+[18:21:12]      score=0.830 cost=$0.0011 time=84s
+[18:21:14]   → otsu_only: english_text_good_journal_constantinople_1851_08 (1pp english)
+[18:21:26]      score=0.830 cost=$0.0011 time=12s
+[18:21:28]   → low_escalate: english_text_good_journal_constantinople_1851_08 (1pp english)
+[18:40:08]      score=0.830 cost=$0.0011 time=1120s
+[18:40:10]   → high_res_contrast: english_text_good_journal_constantinople_1851_08 (1pp english)
+[18:49:08]      score=0.830 cost=$0.0013 time=538s
+[18:49:10]   Best: baseline → 0.830
+[18:49:10] 
+=== Document: english_text_good_journal_constantinople_1851_10 (english_text_good) ===
+[18:49:10]   → baseline: english_text_good_journal_constantinople_1851_10 (1pp english)
+[19:09:11]      FAILED: pipeline job 0a52607c-792e-4aff-b6da-b860c4aa6b0d timed out after 1200000ms
+[19:09:13]   → high_res: english_text_good_journal_constantinople_1851_10 (1pp english)
+[19:25:03]      score=0.850 cost=$0.0012 time=949s
+[19:25:05]   → contrast_forced: english_text_good_journal_constantinople_1851_10 (1pp english)
+[19:41:21]      score=0.850 cost=$0.0013 time=976s
+[19:41:23]   → otsu_only: english_text_good_journal_constantinople_1851_10 (1pp english)
+[19:54:09]      score=0.850 cost=$0.0012 time=766s
+[19:54:11]   → low_escalate: english_text_good_journal_constantinople_1851_10 (1pp english)
+[20:14:13]      FAILED: pipeline job 72628988-d790-4a1d-a2dd-faee9db3fe75 timed out after 1200000ms
+[20:14:15]   → high_res_contrast: english_text_good_journal_constantinople_1851_10 (1pp english)
+[20:20:27]      score=0.850 cost=$0.0013 time=373s
+[20:20:29]   Best: high_res → 0.850
+[20:20:29] 
+=== Document: english_scan_ok_masson_bahai_western_advance_s (english_scan_ok) ===
+[20:20:29]   → baseline: english_scan_ok_masson_bahai_western_advance_s (7pp english)
+[20:40:31]      FAILED: pipeline job f090ad1d-b679-4b20-af24-a2743d87f245 timed out after 1200000ms
+[20:40:33]   → high_res: english_scan_ok_masson_bahai_western_advance_s (7pp english)
+[21:00:34]      FAILED: pipeline job b7b7ced6-95bd-4b43-a67e-42e90a508f4c timed out after 1200000ms
+[21:00:36]   → contrast_forced: english_scan_ok_masson_bahai_western_advance_s (7pp english)
+[21:14:04]      score=0.950 cost=$0.4534 time=808s
+[21:14:06]   → otsu_only: english_scan_ok_masson_bahai_western_advance_s (7pp english)
+[21:34:08]      FAILED: pipeline job 568f9542-c37a-4529-928d-8e60b88f315e timed out after 1200000ms
+[21:34:10]   → low_escalate: english_scan_ok_masson_bahai_western_advance_s (7pp english)
+[21:54:11]      FAILED: pipeline job 06052c6d-fcb7-46c4-a3f6-95045835d705 timed out after 1200000ms
+[21:54:13]   → high_res_contrast: english_scan_ok_masson_bahai_western_advance_s (7pp english)
+[22:14:15]      FAILED: pipeline job ac1b370d-b7ee-4cb1-a476-9d268779975a timed out after 1200000ms
+[22:14:17]   Best: contrast_forced → 0.950
+[22:14:17] 
+=== Document: english_scan_ok_lindfoot_notes_1933_convention (english_scan_ok) ===
+[22:14:17]   → baseline: english_scan_ok_lindfoot_notes_1933_convention (8pp english)
+[22:34:18]      FAILED: pipeline job 4036e572-c210-4ea6-a116-fdd0a205791f timed out after 1200000ms
+[22:34:20]   → high_res: english_scan_ok_lindfoot_notes_1933_convention (8pp english)
+[22:52:00]      score=0.970 cost=$0.9303 time=1060s
+[22:52:02]   → contrast_forced: english_scan_ok_lindfoot_notes_1933_convention (8pp english)
+[23:12:04]      FAILED: pipeline job ee773cef-b43e-46c9-b879-73e25cecaf22 timed out after 1200000ms
+[23:12:06]   → otsu_only: english_scan_ok_lindfoot_notes_1933_convention (8pp english)
+[23:32:07]      FAILED: pipeline job 7afb63d2-ee70-40dd-b2f1-4246684b4847 timed out after 1200000ms
+[23:32:09]   → low_escalate: english_scan_ok_lindfoot_notes_1933_convention (8pp english)
+[23:52:11]      FAILED: pipeline job bd69e61a-6941-4404-9b56-3dbb388fe626 timed out after 1200000ms
+[23:52:13]   → high_res_contrast: english_scan_ok_lindfoot_notes_1933_convention (8pp english)
+[00:08:26]      score=0.970 cost=$0.9315 time=973s
+[00:08:28]   Best: high_res → 0.970
+[00:08:28] Time limit reached, stopping.
+[00:08:28] 
+=== Generating report ===
+[00:08:28] Report written to /tank/site2rag/app/tmp/optimizer-report.md
+[00:08:28] 
+--- SUMMARY ---
+[00:08:28] # Pipeline Optimizer Report
+Generated: 2026-05-07T00:08:28.772Z
+Runtime: 373.9 minutes
+
+## Test Corpus
+- **english_text_good** (english, 1pp, baseline=83%): `journal_constantinople_1851-08-19_p2.pdf`
+- **english_text_good** (english, 1pp, baseline=85%): `journal_constantinople_1851-10-29_p3.pdf`
+- **english_scan_ok** (english, 7pp, baseline=95%): `masson_bahai_western_advance_scan.pdf`
+- **english_scan_ok** (english, 8pp, baseline=97%): `lindfoot_notes_1933_convention.pdf`
+- **french_scan** (french, 1pp, baseline=4%): `journal_constantinople_1851-10-14_p4.pdf`
+- **french_scan** (french, 1pp, baseline=9%): `journal_constantinople_1851-08-29_p3.pdf`
+- **arabic_scan** (arabic, 7pp, baseline=62%): `kharman_adab_honar_contents_17.pdf`
+- **arabic_scan** (arabic, 5pp, baseline=89%): `kharman_adab_honar_contents_16.pdf`
+- **persian_scan** (persian, 5pp, baseline=100%): `%d9%86%d9%88%da%af%d8%b1%d8%a7%db%8c%db%8c%20%d8%af%d8%b1%20%d9%86%d9%82%d8%a7%d8%b4%db%8c%20%d8%a7%db%8c%d8%b1%d8%a7%d9%86%20-%20%d8%b9%d8%a8%d8%af%d8%a7%d9%84%d8%ad%d9%85%db%8c%d8%af%20%d8%a7%d8%b4%d8%b1%d8%a7%d9%82(%d8%ae%d9%88%d8%b4%d9%87%20%d9%87%d8%a717).pdf`
+- **persian_scan** (persian, 8pp, baseline=100%): `%d8%aa%d8%b1%da%a9%db%8c%d8%a8%20%d8%a7%d9%93%d8%ab%d8%a7%d8%b1%20%d9%87%d9%86%d8%b1%db%8c%20%d9%88%20%d8%aa%d9%86%d8%a7%d8%b3%d8%a8%20%d8%b7%d9%84%d8%a7%d9%8a%d9%94%db%8c%20-%20%d9%87%d9%88%d8%b4%d9%86%da%af%20%d8%b3%db%8c%d8%ad%d9%88%d9%86(%d8%ae%d9%88%d8%b4%d9%87%20%d9%87%d8%a717).pdf`
+
+## Results by Category & Variant
+| Category | Language | Variant | Avg Score | Avg Gain | Avg Cost |
+|---|---|---|---|---|---|
+| english_scan_ok | english | high_res | 48.5% | +1.0% | $0.4651 |
+| english_scan_ok | english | high_res_contrast | 48.5% | +1.0% | $0.4657 |
+| english_scan_ok | english | contrast_forced | 47.5% | -1.0% | $0.2267 |
+| english_scan_ok | english | baseline | 0.0% | -96.0% | $0 |
+| english_scan_ok | english | low_escalate | 0.0% | -96.0% | $0 |
+| english_scan_ok | english | otsu_only | 0.0% | -96.0% | $0 |
+| english_text_good | english | contrast_forced | 84.0% | +0.0% | $0.0012 |
+| english_text_good | english | high_res_contrast | 84.0% | +0.0% | $0.0013 |
+| english_text_good | english | otsu_only | 84.0% | +0.0% | $0.0011 |
+| english_text_good | english | high_res | 42.5% | -41.5% | $0.0006 |
+| english_text_good | english | low_escalate | 41.5% | -42.5% | $0.0006 |
+| english_text_good | english | baseline | 27.7% | -56.0% | $0.0003 |
+
+## Best Variant Per Category
+- **english_scan_ok:english**: `high_res` → 48.5% (+1.0%)
+- **english_text_good:english**: `contrast_forced` → 84.0% (+0.0%)
+
+## Vision Analysis Insights
+No insights generated yet.
+
+## Recommended Pipeline Config by Document Type
+[02:21:38] === Pipeline Optimizer (per-doc iteration) starting ===
+[02:21:38] Domain: bahai-library.com | Pipeline: http://localhost:49900 | API key: present
+[02:21:38] Pipeline health: {"status":"ok","version":"1.0.0","queue_depth":0}
+[02:21:38] Corpus: 10 documents
+[02:21:38] Remaining: 10 docs to process
+[02:21:38] 
+=== english_text_good_journal_constantinople_1851_08 (english_text_good, english, 1pp, baseline=0.830) ===
+[02:21:38]   Running 3 variants in parallel for english_text_good_journal_constantinople_1851_08
+[02:21:47]      ✓ baseline: score=0.830 cost=$0.0011 time=9s
+[02:21:50]      ✓ no_escalate: score=0.830 cost=$0.0011 time=12s
+[02:21:56]      ✓ surya_primary: score=0.830 cost=$0.0012 time=18s
+[02:21:56]   Round 1: no improvement (0.0%) — round 1/2
+[02:22:00]   AI insights: 5 patterns identified
+[02:22:00]   FINAL: english_text_good_journal_constantinople_1851_08 → 83.0% (+0.0%) via baseline
+[02:22:00] 
+=== english_text_good_journal_constantinople_1851_10 (english_text_good, english, 1pp, baseline=0.850) ===
+[02:22:00]   Running 3 variants in parallel for english_text_good_journal_constantinople_1851_10
+[02:22:06]      ✓ baseline: score=0.850 cost=$0.0011 time=6s
+[02:22:12]      ✓ no_escalate: score=0.850 cost=$0.0011 time=12s
+[02:22:18]      ✓ surya_primary: score=0.850 cost=$0.0011 time=18s
+[02:22:18]   Round 1: no improvement (0.0%) — round 1/2
+[02:22:28]   AI insights: 5 patterns identified
+[02:22:28]   FINAL: english_text_good_journal_constantinople_1851_10 → 85.0% (+0.0%) via baseline
+[02:22:28] 
+=== english_scan_ok_masson_bahai_western_advance_s (english_scan_ok, english, 7pp, baseline=0.950) ===
+[02:22:28]   Running 3 variants in parallel for english_scan_ok_masson_bahai_western_advance_s
+[02:29:58]      ✓ baseline: score=0.950 cost=$0.4534 time=451s
+[02:32:28]      ✗ high_res: FAILED — pipeline job 038a8481-4b26-49b2-9da5-9d12a310bb78 timed out after 600000ms
+[02:32:28]      ✗ unpaper_clean: FAILED — pipeline job 94a7151e-4c57-4192-a298-74e7a816d282 timed out after 600000ms
+[02:32:28]   Round 1: no improvement (0.0%) — round 1/2
+[02:32:28]   Running 3 variants in parallel for english_scan_ok_masson_bahai_western_advance_s

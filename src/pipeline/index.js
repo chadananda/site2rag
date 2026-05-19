@@ -70,6 +70,24 @@ export async function runPipeline(opts) {
       throw err;
     }
 
+    // Fast-path: after s0 baseline, skip OCR/vision stages for docs that don't need them.
+    // A high-quality text PDF with low difficulty already has a good text layer —
+    // running s3/s4/s5 adds cost and risk with near-zero quality gain (empirically: 74% of
+    // jobs have gain < 0.1). Skip to s6/s7/s8 directly.
+    if (stageName === 's0') {
+      const b = ctx.quality.baseline ?? {};
+      const fastPathThreshold = ctx.config.thresholds?.fastPathBaseline ?? 0.85;
+      const maxDifficulty = ctx.config.thresholds?.fastPathMaxDifficulty ?? 0.20;
+      if (b.composite_score >= fastPathThreshold
+          && b.has_text_layer
+          && (b.processing_difficulty ?? 1) < maxDifficulty) {
+        ctx.config.skip = [...new Set([...(ctx.config.skip ?? []), 's1', 's2', 's3', 's4', 's5'])];
+        ctx.addDecision('index', 'fast_path',
+          `baseline=${b.composite_score.toFixed(3)} difficulty=${(b.processing_difficulty??0).toFixed(2)} → skip s1-s5`);
+        log(`  fast-path: baseline=${b.composite_score.toFixed(3)} skipping s1-s5`);
+      }
+    }
+
     // Log stage result and fire progress callback
     const stageRecord = ctx.metrics.stages.find(s => s.stage === stageName);
     if (stageRecord) {

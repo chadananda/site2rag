@@ -60,6 +60,34 @@ def _get_ram_gb():
     except Exception:
         return 0
 
+def _free_ram_gb():
+    """Available (not just free) RAM in GB — accounts for reclaimable cache."""
+    try:
+        if PLATFORM == 'linux':
+            with open('/proc/meminfo') as f:
+                for line in f:
+                    if line.startswith('MemAvailable:'):
+                        return int(line.split()[1]) / 1024**2
+        elif PLATFORM == 'darwin':
+            vm = subprocess.check_output(['vm_stat'], text=True)
+            page_size = 16384  # 16K pages on Apple Silicon, 4K on Intel
+            for line in vm.splitlines():
+                if 'page size of' in line:
+                    page_size = int(line.split()[-2])
+                    break
+            stats = {}
+            for line in vm.splitlines():
+                if ':' in line:
+                    k, v = line.split(':', 1)
+                    stats[k.strip()] = int(v.strip().rstrip('.'))
+            free = stats.get('Pages free', 0)
+            inactive = stats.get('Pages inactive', 0)
+            speculative = stats.get('Pages speculative', 0)
+            return round((free + inactive + speculative) * page_size / 1024**3, 1)
+    except Exception:
+        pass
+    return RAM_GB  # if check fails, assume plenty of RAM
+
 RAM_GB = _get_ram_gb()
 STARTED_AT = datetime.now(timezone.utc).isoformat()
 
@@ -153,6 +181,9 @@ if _SCRIPTS_DIR:
 # SERVE_POOL_SIZE: parallel instances per engine for throughput (each handles one page at a time).
 SERVE_CAPABLE = {'easyocr_ocr', 'paddle_ocr', 'doctr_ocr'}
 SERVE_POOL_SIZE = int(os.environ.get('SERVE_POOL_SIZE', '4'))
+# Minimum free RAM to keep available — serve pool stops adding instances if this would be violated.
+# Prevents OOM on machines where large models exceed available RAM.
+MIN_POOL_FREE_RAM_GB = float(os.environ.get('MIN_POOL_FREE_RAM_GB', '4.0'))
 
 # Warm process pool: tool_name → [{'proc': Popen, 'lock': Lock}, ...]
 _serve_pool = {}       # tool → list of instance dicts
@@ -194,8 +225,15 @@ def _get_serve_instance(tool):
         pool = _serve_pool.get(tool, [])
         # Remove dead instances
         pool = [e for e in pool if e['proc'].poll() is None]
-        # Start new instances if pool is below target size
+        # Start new instances if pool is below target size, stopping if RAM is low.
+        # _start_serve_instance blocks until the model is fully loaded, so the RAM
+        # check after each instance reflects actual consumption — not a race.
         while len(pool) < SERVE_POOL_SIZE:
+            free_gb = _free_ram_gb()
+            if free_gb < MIN_POOL_FREE_RAM_GB:
+                print(f'[worker-agent] {tool} pool capped at {len(pool)} instance(s) '
+                      f'— only {free_gb:.1f}GB free (need {MIN_POOL_FREE_RAM_GB}GB)', flush=True)
+                break
             try:
                 pool.append(_start_serve_instance(tool))
                 print(f'[worker-agent] {tool}[{len(pool)-1}] serve ready', flush=True)
@@ -624,6 +662,33 @@ if __name__ == '__main__':
             time.sleep(60)
 
     threading.Thread(target=heartbeat_loop, daemon=True).start()
+
+    # Re-probe OCR engines after 15s — on machines with slow venvs (e.g. M1 mini),
+    # import easyocr/paddleocr/doctr may fail at cold start but succeed shortly after.
+    # A single retry catches this without requiring a manual worker restart.
+    def reprobe_ocr_if_needed():
+        global _cached_tools, _tools_probe_time
+        ocr_pkgs = ['easyocr', 'paddleocr', 'doctr', 'kraken']
+        initial = get_tools()
+        if not any(initial.get(f'py:{pkg}') is False for pkg in ocr_pkgs):
+            return  # all OCR packages found — no retry needed
+        time.sleep(15)
+        print('[worker-agent] re-probing OCR engines (slow venv startup detected)…', flush=True)
+        # Force a fresh probe by resetting the cache timestamp
+        _tools_probe_time = 0
+        fresh = get_tools()
+        gained = [pkg for pkg in ocr_pkgs if not initial.get(f'py:{pkg}') and fresh.get(f'py:{pkg}')]
+        if gained:
+            print(f'[worker-agent] re-probe gained: {", ".join(gained)}', flush=True)
+            # Re-register immediately so the server gets corrected capabilities
+            worker_url = args.public_url or f'http://{HOST}:{PORT}'
+            registry_url_local = args.registry
+            if registry_url_local:
+                register_with_registry(registry_url_local, worker_url)
+        else:
+            print('[worker-agent] re-probe: OCR engines still unavailable', flush=True)
+
+    threading.Thread(target=reprobe_ocr_if_needed, daemon=True).start()
 
     # Pre-warm serve pools in background — models load once at startup so the
     # first real job doesn't pay the 30-60s cold-start cost.

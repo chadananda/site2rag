@@ -618,6 +618,9 @@ export async function s3Ocr(ctx) {
     ctx.endStage('s3', { pages_affected: 0, notes: 'no_engines' });
     return ctx;
   }
+  if (availableEngines.length === 0 && !hasTextLayer) {
+    ctx.addDecision('s3', 'engines_mode', `no batch engines — surya+tesseract only (${suryaOk ? 'surya available' : 'tesseract only'})`);
+  }
 
   // Calibration page: page 2 (first real text page after cover).
   // Winning {method, dpi} is shared via ctx._layoutCalibration before pages 3+ start.

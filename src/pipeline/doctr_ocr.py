@@ -21,6 +21,29 @@ except ImportError:
     print(json.dumps({'error': 'doctr not installed — pip install python-doctr'}))
     sys.exit(1)
 
+import subprocess as _subprocess
+def _device():
+    """Detect best available device: mps > cuda > cpu."""
+    try:
+        import torch
+        if torch.backends.mps.is_available():
+            r = _subprocess.run(
+                [sys.executable, '-c', 'import torch; a=torch.ones(4,device="mps"); print("ok")'],
+                capture_output=True, timeout=10)
+            if r.returncode == 0 and b'ok' in r.stdout:
+                return 'mps'
+        if torch.cuda.is_available():
+            r = _subprocess.run(
+                [sys.executable, '-c', 'import torch; a=torch.ones(4).cuda(); print("ok")'],
+                capture_output=True, timeout=10)
+            if r.returncode == 0 and b'ok' in r.stdout:
+                return 'cuda'
+    except Exception:
+        pass
+    return 'cpu'
+
+_DEVICE = os.environ.get('DOCTR_DEVICE') or _device()
+
 # Scripts docTR handles well; skip for others to avoid garbage output
 SUPPORTED = {'eng', 'fra', 'deu', 'spa', 'ita', 'por', 'nld', 'pol', 'tur', 'rus', 'chi_sim', 'chi_tra', 'jpn', 'kor'}
 
@@ -36,6 +59,12 @@ def run_batch(input_dir, output_json, langs_str, model=None):
     if pngs and is_supported(langs_str):
         if model is None:
             model = ocr_predictor(pretrained=True)
+            if _DEVICE in ('cuda', 'mps'):
+                try:
+                    import torch
+                    model = model.to(_DEVICE)
+                except Exception:
+                    pass
         for png in pngs:
             stem = os.path.splitext(os.path.basename(png))[0]
             try:
@@ -64,6 +93,12 @@ if '--serve' in sys.argv:
     # Persistent server mode: load model once, serve jobs from stdin.
     # Eliminates 30-60s cold-start on every invocation.
     model = ocr_predictor(pretrained=True)
+    if _DEVICE in ('cuda', 'mps'):
+        try:
+            import torch
+            model = model.to(_DEVICE)
+        except Exception:
+            pass
     print('ready', flush=True)
     for line in sys.stdin:
         line = line.strip()

@@ -44,6 +44,8 @@ const PKG_TO_TOOL = { easyocr: 'easyocr_ocr', paddleocr: 'paddle_ocr', doctr: 'd
 // On a 80-core machine, 4 instances gives ~4× throughput vs single-instance serialization.
 const SERVE_CAPABLE = new Set(['easyocr_ocr', 'paddle_ocr', 'doctr_ocr']);
 const SERVE_POOL_SIZE = parseInt(process.env.SERVE_POOL_SIZE ?? '4');
+// Minimum free RAM to keep — pool stops adding instances below this threshold.
+const MIN_POOL_FREE_RAM_GB = parseFloat(process.env.MIN_POOL_FREE_RAM_GB ?? '4.0');
 const servePools = new Map(); // tool → [{ proc, ready, pending[], buf }, ...]
 
 import { spawn } from 'child_process';
@@ -84,7 +86,14 @@ function startServePool(tool) {
   const needed = SERVE_POOL_SIZE - existing.length;
   if (needed <= 0) return;
   const instances = existing;
-  for (let i = 0; i < needed; i++) instances.push(_startOneServeInstance(tool, existing.length + i));
+  for (let i = 0; i < needed; i++) {
+    const freeGb = freemem() / (1024 ** 3);
+    if (freeGb < MIN_POOL_FREE_RAM_GB) {
+      console.log(`[worker-agent] ${tool} pool capped at ${instances.length} instance(s) — only ${freeGb.toFixed(1)}GB free (need ${MIN_POOL_FREE_RAM_GB}GB)`);
+      break;
+    }
+    instances.push(_startOneServeInstance(tool, existing.length + i));
+  }
   servePools.set(tool, instances);
 }
 
