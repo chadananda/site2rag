@@ -358,8 +358,16 @@ export async function startPipelineServer({
             upsertWorkerDb(url, entry.lastSeen ?? Date.now(), entry.health);
           }
         }
+        // Deduplicate by health.hostname — keep the entry with the most recent lastSeen.
+        // Prevents same machine registering under both IP and hostname URL.
+        const deduped = new Map();
+        for (const w of workerRegistry.values()) {
+          const key = w.health?.hostname ?? w.hostname ?? w.url;
+          const existing = deduped.get(key);
+          if (!existing || (w.lastSeen ?? 0) > (existing.lastSeen ?? 0)) deduped.set(key, w);
+        }
         return reply(res, 200, {
-          workers: [...workerRegistry.values()].map(({ url, hostname, platform, lastSeen, health }) => ({
+          workers: [...deduped.values()].map(({ url, hostname, platform, lastSeen, health }) => ({
             url, hostname, platform, lastSeen, health,
           })),
         });
