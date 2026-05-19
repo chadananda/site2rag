@@ -177,8 +177,10 @@ export function createToolRunner(config = {}) {
         }
       }
 
-      // All eligible workers failed or none available — fall through to local
-      log(`no available worker for ${tool}${lastErr ? ` (${lastErr.message.slice(0, 80)})` : ''}, running locally`);
+      // All eligible workers failed or none available — fail hard, no local fallback
+      const errMsg = `no available worker for ${tool}${lastErr ? ` (${lastErr.message.slice(0, 80)})` : ''} — CPU fallback disabled, fix the worker pool`;
+      log(errMsg);
+      throw new Error(errMsg);
     }
 
     if (backend.type === 'http') {
