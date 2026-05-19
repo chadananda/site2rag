@@ -37,8 +37,9 @@ const TOOL_KEY_ALIASES = {};
 // pickWorker must route these to workers regardless of available flag to prevent local fallback.
 const SERVE_CAPABLE_TOOLS = new Set(['easyocr_ocr', 'paddle_ocr', 'doctr_ocr', 'kraken_ocr']);
 
-// Tools that run significantly faster on GPU — prefer GPU workers when routing these.
-const GPU_PREFERRED_TOOLS = new Set(['easyocr_ocr', 'paddle_ocr', 'doctr_ocr', 'surya_ocr']);
+// Tools routed to boss/GPU workers — all OCR including CPU tools (tesseract, kraken) should run
+// on dedicated worker machines, not the orchestrator. GPU workers get a 30-point score advantage.
+const GPU_PREFERRED_TOOLS = new Set(['easyocr_ocr', 'paddle_ocr', 'doctr_ocr', 'surya_ocr', 'kraken_ocr', 'tesseract']);
 
 // Worker health cache — shared across all tool runners in this process
 const _workerCache = new Map(); // registryUrl → { workers, fetchedAt }
@@ -67,13 +68,14 @@ function workerHasGpu(w) {
 
 // Score a worker — lower is better.
 // cpu_pct drives primary selection; queue_depth penalizes workers with backlogged jobs.
-// GPU workers get a 30-point advantage for GPU-preferred tools (big but not absolute —
-// a CPU-only worker at 0% still beats a GPU worker at >30% load).
+// Unknown cpu_pct (worker doesn't report it) defaults to 30 (assume mostly idle) so
+// workers like boss that omit the field aren't penalized vs. known-loaded workers.
+// GPU workers get a 30-point advantage for GPU-preferred tools.
 function scoreWorker(w, tool) {
-  const cpu = w.health.cpu_pct ?? 100;
+  const cpu = w.health.cpu_pct ?? 30;
   const q   = w.health.queue_depth ?? 0;
   let score = cpu + q * 10;
-  if (GPU_PREFERRED_TOOLS.has(tool) && !workerHasGpu(w)) score += 10;
+  if (GPU_PREFERRED_TOOLS.has(tool) && !workerHasGpu(w)) score += 30;
   return score;
 }
 
