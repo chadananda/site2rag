@@ -640,12 +640,8 @@ export async function s3Ocr(ctx) {
   const hasTextLayer = (ctx.quality?.baseline?.has_text_layer ?? 1) > 0;
   if (availableEngines.length === 0 && !hasTextLayer) {
     const msg = `No batch OCR engines available on any worker (easyocr/paddle/doctr/kraken all missing). Check worker pool health and GPU worker registration.`;
-    ctx.addError('s3', new Error(msg), true);
     ctx.endStage('s3', { pages_affected: 0, notes: 'no_engines' });
-    return ctx;
-  }
-  if (availableEngines.length === 0 && !hasTextLayer) {
-    ctx.addDecision('s3', 'engines_mode', `no batch engines — surya+tesseract only (${suryaOk ? 'surya available' : 'tesseract only'})`);
+    throw new Error(msg);
   }
 
   // Calibration page: page 2 (first real text page after cover).
