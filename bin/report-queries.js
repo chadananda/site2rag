@@ -1,17 +1,26 @@
 // SQL query functions for API routes: site summaries, doc lists, recent runs. Exports: siteSummary, siteDocs, siteTabCounts, recentRuns. Deps: db, config, report-utils
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { execSync } from 'child_process';
+import { execSync, exec } from 'child_process';
 import { getMirrorRoot, mdDir } from '../src/config.js';
 import { openDb } from '../src/db.js';
 import { mapDoc } from './report-utils.js';
 
 const PER_PAGE = 50;
 
+// Cache dir sizes — du -sb on large mirrors (oceanoflights) blocks for seconds
+const _dirSizeCache = new Map(); // path → { bytes, at }
+const DIR_SIZE_TTL = 5 * 60 * 1000;
 const dirSizeBytes = (path) => {
   if (!existsSync(path)) return 0;
-  try { return parseInt(execSync(`du -sb "${path}"`, { timeout: 10000 }).toString().split('\t')[0], 10) || 0; }
-  catch { return 0; }
+  const cached = _dirSizeCache.get(path);
+  if (cached && Date.now() - cached.at < DIR_SIZE_TTL) return cached.bytes;
+  // Return stale/zero immediately; refresh asynchronously so requests never block
+  const stale = cached?.bytes ?? 0;
+  exec(`du -sb "${path}"`, { timeout: 30000 }, (err, stdout) => {
+    if (!err) _dirSizeCache.set(path, { bytes: parseInt(stdout.split('\t')[0], 10) || 0, at: Date.now() });
+  });
+  return stale;
 };
 
 const safeOpenDb = (domain) => {
@@ -45,10 +54,8 @@ export const siteSummary = (domain, siteUrl, description = null) => {
     const exp = db.prepare(`SELECT SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) as ok, SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed FROM exports`).get();
     const lastRun = db.prepare(`SELECT started_at, finished_at, status, message FROM runs ORDER BY id DESC LIMIT 1`).get();
     const recentFails = db.prepare(`SELECT COUNT(*) as cnt FROM runs WHERE status='failed' AND started_at > datetime('now','-1 day')`).get()?.cnt || 0;
-    const doneDocs = db.prepare(`SELECT started_at, finished_at FROM pdf_upgrade_queue WHERE status='done' AND finished_at IS NOT NULL`).all();
-    const avgSec = doneDocs.length
-      ? doneDocs.reduce((a, d) => a + (new Date(d.finished_at) - new Date(d.started_at)) / 1000, 0) / doneDocs.length
-      : 300;
+    const avgSecRow = db.prepare(`SELECT AVG((julianday(finished_at) - julianday(started_at)) * 86400) as avg_sec FROM pdf_upgrade_queue WHERE status='done' AND finished_at IS NOT NULL`).get();
+    const avgSec = avgSecRow?.avg_sec || 300;
     const mirrorProgressRaw = db.prepare(`SELECT value FROM site_meta WHERE key='mirror_progress'`).get()?.value;
     const mirror_progress = mirrorProgressRaw ? JSON.parse(mirrorProgressRaw) : null;
     const current_stage = db.prepare(`SELECT value FROM site_meta WHERE key='current_stage'`).get()?.value || null;

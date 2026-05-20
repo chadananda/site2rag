@@ -32,12 +32,23 @@ const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://site2rag.lnker.com';
 
 let _sitesCache = null;
 let _sitesCacheAt = 0;
+let _sitesRefreshing = false;
 const SITES_CACHE_MS = 30_000;
+const _refreshSitesCache = (sites) => {
+  if (_sitesRefreshing) return;
+  _sitesRefreshing = true;
+  setImmediate(() => {
+    try {
+      _sitesCache = { sites: sites.map(s => siteSummary(s.domain, s.url, s.description)) };
+      _sitesCacheAt = Date.now();
+    } catch (e) { console.error('[sites-cache] refresh failed:', e.message); }
+    finally { _sitesRefreshing = false; }
+  });
+};
 const getSitesData = (sites) => {
   if (_sitesCache && Date.now() - _sitesCacheAt < SITES_CACHE_MS) return _sitesCache;
-  _sitesCache = { sites: sites.map(s => siteSummary(s.domain, s.url, s.description)) };
-  _sitesCacheAt = Date.now();
-  return _sitesCache;
+  _refreshSitesCache(sites);
+  return _sitesCache || { sites: [] };
 };
 const invalidateSitesCache = () => { _sitesCacheAt = 0; };
 const ADMIN_PASSWORD = process.env.SITE_ADMIN_PASS || process.env.REPORT_ADMIN_PASSWORD || null;
