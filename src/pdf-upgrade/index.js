@@ -171,7 +171,7 @@ const submitViaPipeline = async (db, domain, row, page, siteConfig, openDbs = []
 };
 
 /** Poll all in-flight pipeline jobs and update site DB when done/failed. */
-const checkPipelineJobs = async (db, openDbs = []) => {
+const checkPipelineJobs = async (db, domain, openDbs = []) => {
   // Include any status with a pipeline_job_id — catches rows where status was
   // accidentally left at 'pending' but the job is actually running in the pipeline.
   const running = db.prepare(
@@ -194,6 +194,14 @@ const checkPipelineJobs = async (db, openDbs = []) => {
         logUpgradeHistory(db, url, { method: 'pipeline-v2', score_before: before_score,
           score_after: receipt.quality?.final ?? null, pages_processed: receipt.page_count ?? null });
         log(`Pipeline done: ${url.split('/').pop()}`);
+        // Fetch markdown from pipeline and save to domain's md dir
+        if (pipelineClient) {
+          try {
+            const md = await pipelineClient.getMarkdown(jobId);
+            const page = db.prepare('SELECT * FROM pages WHERE url=?').get(url);
+            if (md && page) saveMarkerMd(db, domain, page, md);
+          } catch (mdErr) { log(`Pipeline done (no md): ${url.split('/').pop()}: ${mdErr.message}`); }
+        }
 
         // Propagate cached result to all siblings with same content hash (same + other domains)
         if (content_hash) {
@@ -522,7 +530,7 @@ const tick = async () => {
       let pipelineReachable = true;
       try {
         await pipelineClient.health();
-        await Promise.all(openDbs.map(({ db }) => checkPipelineJobs(db, openDbs)));
+        await Promise.all(openDbs.map(({ db, domain }) => checkPipelineJobs(db, domain, openDbs)));
       } catch (err) {
         pipelineReachable = false;
         log(`ERROR: Pipeline service unreachable (${err.message}) — skipping pass-1 this tick. Fix PIPELINE_URL or start pipeline-server.`);

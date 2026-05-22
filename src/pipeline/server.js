@@ -27,6 +27,7 @@ import { PIPELINE_VERSION } from './context.js';
 import { runPipeline } from './index.js';
 import { openJobStore } from './job-store.js';
 import { getTmpDir } from '../config.js';
+import { handleRelayRequest } from './ai-relay.js';
 
 const __pyDir = join(dirname(fileURLToPath(import.meta.url)), '.');
 
@@ -108,6 +109,78 @@ async function refreshWorkerHealth(entry) {
     upsertWorkerDb(entry.url, entry.lastSeen ?? Date.now(), fresh);
   } else entry.healthOk = false; // keep last-known health for routing, but flag as unreachable
   entry.healthAt = Date.now();
+}
+
+
+// Pick the least-loaded healthy registered worker. Returns null if none available.
+async function pickWorker() {
+  const entries = [...workerRegistry.values()];
+  if (!entries.length) return null;
+  await Promise.all(entries.map(refreshWorkerHealth));
+  const healthy = entries.filter(e => e.healthOk !== false && e.health?.status === 'ok' && e.health?.worker_version != null);
+  if (!healthy.length) return null;
+  return healthy.sort((a, b) =>
+    (a.health?.jobs_active ?? 99) - (b.health?.jobs_active ?? 99)
+  )[0];
+}
+
+// Dispatch a job to a remote worker via multipart PDF upload.
+// Returns { md, receipt } when done, or throws on failure.
+async function dispatchToWorker(workerUrl, jobId, pdfPath) {
+  const { readFileSync } = await import('fs');
+  const pdfData = readFileSync(pdfPath);
+  const boundary = '----SLPBoundary' + Date.now();
+  const CRLF = '\r\n';
+  const field = (name, value) => Buffer.concat([
+    Buffer.from('--' + boundary + CRLF),
+    Buffer.from('Content-Disposition: form-data; name="' + name + '"' + CRLF + CRLF),
+    Buffer.from(String(value)),
+    Buffer.from(CRLF),
+  ]);
+  const body = Buffer.concat([
+    field('doc_id', jobId),
+    Buffer.from('--' + boundary + CRLF +
+      'Content-Disposition: form-data; name="file"; filename="source.pdf"' + CRLF +
+      'Content-Type: application/pdf' + CRLF + CRLF),
+    pdfData,
+    Buffer.from(CRLF + '--' + boundary + '--' + CRLF),
+  ]);
+  const submitRes = await fetch(workerUrl + '/jobs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'multipart/form-data; boundary=' + boundary, 'Content-Length': String(body.length) },
+    body, signal: AbortSignal.timeout(30_000),
+  });
+  if (!submitRes.ok) {
+    const errBody = await submitRes.text();
+    if (submitRes.status !== 409) throw new Error('worker submit HTTP ' + submitRes.status + ': ' + errBody.slice(0, 200));
+    log('dispatch: 409 job already on worker, polling for completion: ' + jobId);
+  }
+
+  const deadline = Date.now() + 4 * 60 * 60 * 1000; // 4h — large docs can take 90+ min
+  while (Date.now() < deadline) {
+    await new Promise(r => setTimeout(r, 5000));
+    try {
+      const d = await (await fetch(workerUrl + '/jobs/' + jobId, { signal: AbortSignal.timeout(15_000) })).json();
+      if (d.status === 'done') {
+        const mdRes = await fetch(workerUrl + '/jobs/' + jobId + '/md', { signal: AbortSignal.timeout(30_000) });
+        const md = mdRes.ok ? await mdRes.text() : null;
+        const rcptRes = await fetch(workerUrl + '/jobs/' + jobId + '/receipt', { signal: AbortSignal.timeout(15_000) });
+        const rawReceipt = rcptRes.ok ? await rcptRes.json() : d;
+        // Normalize boss receipt to format expected by pdf-upgrade consumer
+        const pages = rawReceipt.pages ?? 0;
+        const blocks = rawReceipt.blocks ?? 0;
+        const synthBlocks = rawReceipt.synth_blocks ?? 0;
+        const coverage = blocks > 0 ? synthBlocks / blocks : 0;
+        const qualityFinal = parseFloat((0.5 + coverage * 0.4).toFixed(3));
+        const receipt = { ...rawReceipt, page_count: pages, quality: { final: qualityFinal, gain: null } };
+        // Clean up job on worker after successful retrieval
+        fetch(workerUrl + '/jobs/' + jobId, { method: 'DELETE', signal: AbortSignal.timeout(5_000) }).catch(() => {});
+        return { md, receipt };
+      }
+      if (d.status === 'failed' || d.status === 'cancelled') throw new Error('worker job ' + d.status);
+    } catch (e) { if (e.message.startsWith('worker job')) throw e; }
+  }
+  throw new Error('worker job timed out: ' + jobId);
 }
 
 // Seed from WORKER_URLS env var: comma-separated list of http://host:port URLs
@@ -261,48 +334,58 @@ export async function startPipelineServer({
     jobs.setProcessing(job.id);
     log(`start job=${job.id}`);
 
-    let stageStartedAt = null;
-    const completedStages = [];
     try {
-      const ctx = await runPipeline({
-        docId:      job.id,
-        sourcePath: job.pdf_path,
-        sourceUrl:  job.source_url ?? null,
-        importance: job.importance ?? 1,
-        meta:       job.meta ?? {},
-        config:     { ...baseConfig, ...job.config },
-        onStageStart: (stage) => {
-          stageStartedAt = Date.now();
-          if (jobs.isClosed()) return;
-          const prev = jobs.getProgress(job.id) || {};
-          jobs.setProgress(job.id, {
-            stage,
-            stage_started_at: new Date().toISOString(),
-            total_pages: prev.total_pages || 0,
-            pages_done: 0,
-            completed: completedStages,
-          });
-        },
-        onProgress: (stage, pagesAffected, totalPages) => {
-          const duration_ms = stageStartedAt ? Date.now() - stageStartedAt : 0;
-          completedStages.push({ stage, pages: pagesAffected, ms: duration_ms });
-          if (jobs.isClosed()) return;
-          jobs.setProgress(job.id, {
-            stage: null,
-            stage_started_at: null,
-            total_pages: totalPages,
-            pages_done: pagesAffected,
-            completed: completedStages,
-          });
-        },
-      });
-
-      if (!jobs.isClosed()) jobs.setDone(job.id, {
-        mdPath:     ctx.outputs.mdPath ?? null,
-        pdfOutPath: ctx.outputs.archivalPdfPath ?? null,
-        receipt:    ctx.toReceipt(),
-      });
-      log(`done job=${job.id}`);
+      // Prefer GPU worker (boss) — falls back to local pipeline if none available
+      const worker = await pickWorker();
+      if (worker) {
+        log(`dispatch job=${job.id} → ${worker.hostname ?? worker.url}`);
+        const { md, receipt } = await dispatchToWorker(worker.url, job.id, job.pdf_path);
+        // Write output markdown to the expected location
+        if (md && job.pdf_path) {
+          const { writeFileSync, mkdirSync } = await import('fs');
+          const { join, dirname } = await import('path');
+          const outDir = join(dirname(job.pdf_path), '..', 'content');
+          mkdirSync(outDir, { recursive: true });
+          const mdPath = join(outDir, job.id + '.md');
+          writeFileSync(mdPath, md, 'utf8');
+          if (!jobs.isClosed()) jobs.setDone(job.id, { mdPath, receipt });
+        } else {
+          if (!jobs.isClosed()) jobs.setDone(job.id, { receipt });
+        }
+        log(`done job=${job.id} via ${worker.hostname ?? worker.url}`);
+      } else {
+        // No GPU worker — run locally
+        log(`no worker available, running job=${job.id} locally`);
+        let stageStartedAt = null;
+        const completedStages = [];
+        const ctx = await runPipeline({
+          docId:      job.id,
+          sourcePath: job.pdf_path,
+          sourceUrl:  job.source_url ?? null,
+          importance: job.importance ?? 1,
+          meta:       job.meta ?? {},
+          config:     { ...baseConfig, ...job.config },
+          onStageStart: (stage) => {
+            stageStartedAt = Date.now();
+            if (jobs.isClosed()) return;
+            const prev = jobs.getProgress(job.id) || {};
+            jobs.setProgress(job.id, { stage, stage_started_at: new Date().toISOString(),
+              total_pages: prev.total_pages || 0, pages_done: 0, completed: completedStages });
+          },
+          onProgress: (stage, pagesAffected, totalPages) => {
+            completedStages.push({ stage, pages: pagesAffected, ms: stageStartedAt ? Date.now() - stageStartedAt : 0 });
+            if (jobs.isClosed()) return;
+            jobs.setProgress(job.id, { stage: null, stage_started_at: null,
+              total_pages: totalPages, pages_done: pagesAffected, completed: completedStages });
+          },
+        });
+        if (!jobs.isClosed()) jobs.setDone(job.id, {
+          mdPath: ctx.outputs.mdPath ?? null,
+          pdfOutPath: ctx.outputs.archivalPdfPath ?? null,
+          receipt: ctx.toReceipt(),
+        });
+        log(`done job=${job.id} locally`);
+      }
     } catch (err) {
       if (!jobs.isClosed()) jobs.setFailed(job.id, err.message);
       log(`failed job=${job.id}: ${err.message}`);
@@ -383,6 +466,16 @@ export async function startPipelineServer({
         upsertWorkerDb(url, Date.now(), existing.health ?? null);
         log(`worker registered: ${hostname ?? url} → ${url}`);
         return reply(res, 200, { ok: true });
+      }
+
+      // POST /api/relay — workers relay AI calls through here; orchestrator owns keys + throttling
+      if (req.method === 'POST' && path === '/api/relay') {
+        const workerToken = req.headers['x-worker-token'] ?? '';
+        const secret = process.env.WORKER_SECRET ?? '';
+        if (secret && workerToken !== secret) return reply(res, 401, { error: 'unauthorized' });
+        const body = await readBody(req);
+        const outcome = handleRelayRequest(body, secret, log);
+        return reply(res, outcome.error ? 400 : 202, outcome);
       }
 
       // POST /tools/run — execute a CLI tool on this host (for remote tool backend usage)
