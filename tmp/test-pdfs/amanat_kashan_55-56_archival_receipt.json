@@ -1,0 +1,404 @@
+{
+  "doc_id": "ecbc1364-425c-4242-9179-151fb03c8d8a",
+  "source_url": null,
+  "processed_at": "2026-05-10T04:47:29.395Z",
+  "pipeline_version": "1.0.0",
+  "importance": 1,
+  "page_count": 2,
+  "quality": {
+    "baseline": {
+      "composite_score": 0,
+      "readable_pages_pct": 0,
+      "word_quality": 0,
+      "has_text_layer": 0,
+      "avg_chars_per_page": 2,
+      "language": "unknown",
+      "excerpt": "",
+      "processing_difficulty": 0.3
+    },
+    "per_stage": {
+      "s0": 0,
+      "s3": 0,
+      "s5": 1,
+      "s8": 1
+    },
+    "final": 1,
+    "gain": 1,
+    "cost_per_quality_point": 0.019686399999999996
+  },
+  "stages": [
+    {
+      "stage": "s0",
+      "version": null,
+      "duration_ms": 1661,
+      "pages_affected": 2,
+      "tokens_in": 329,
+      "tokens_out": 42,
+      "cost_usd": 0.00043119999999999996,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s1",
+      "version": null,
+      "duration_ms": 5358,
+      "pages_affected": 2,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s2",
+      "version": null,
+      "duration_ms": 2134,
+      "pages_affected": 2,
+      "tokens_in": 2172,
+      "tokens_out": 106,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s3",
+      "version": null,
+      "duration_ms": 168402,
+      "pages_affected": 2,
+      "tokens_in": 2129,
+      "tokens_out": 321,
+      "cost_usd": 0.0029871999999999998,
+      "approach": null,
+      "notes": "fas"
+    },
+    {
+      "stage": "s4",
+      "version": null,
+      "duration_ms": 25018,
+      "pages_affected": 2,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s5",
+      "version": null,
+      "duration_ms": 148981,
+      "pages_affected": 2,
+      "tokens_in": 7510,
+      "tokens_out": 2565,
+      "cost_usd": 0.016267999999999998,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s7",
+      "version": null,
+      "duration_ms": 9167,
+      "pages_affected": 2,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": "method:ocrmypdf-pdfa3"
+    },
+    {
+      "stage": "s8",
+      "version": null,
+      "duration_ms": 1,
+      "pages_affected": 2,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": "bbox_words:2p"
+    }
+  ],
+  "errors": [],
+  "decisions": [
+    {
+      "stage": "s0",
+      "decision": "baseline_computed",
+      "reason": "composite=0.000 readable=0.00 lang=unknown pages=2",
+      "value": 0,
+      "ts": 1778388088690
+    },
+    {
+      "stage": "s0",
+      "decision": "scan_profile",
+      "reason": "lang=fas conf=0.95 issues=faded",
+      "value": null,
+      "ts": 1778388090324
+    },
+    {
+      "stage": "s0",
+      "decision": "domain_detected",
+      "reason": "pattern_match_fallback confidence=0.00",
+      "value": 0,
+      "ts": 1778388090325
+    },
+    {
+      "stage": "s1",
+      "decision": "pdf_ok",
+      "reason": "no normalization needed",
+      "value": 1,
+      "ts": 1778388090411
+    },
+    {
+      "stage": "s1",
+      "decision": "preprocess",
+      "reason": "unpaper: 2/2 pages",
+      "value": null,
+      "ts": 1778388095685
+    },
+    {
+      "stage": "s2",
+      "decision": "page_2",
+      "reason": "haiku:printed_persian",
+      "value": null,
+      "ts": 1778388097548
+    },
+    {
+      "stage": "s2",
+      "decision": "page_1",
+      "reason": "haiku:printed_persian",
+      "value": null,
+      "ts": 1778388097821
+    },
+    {
+      "stage": "s3",
+      "decision": "engines_available",
+      "reason": "surya, easyocr, paddle, doctr",
+      "value": null,
+      "ts": 1778388104789
+    },
+    {
+      "stage": "s3",
+      "decision": "script_p1",
+      "reason": "OSD: Arabic (ara) conf=94.44 — differs from metadata lang=fas",
+      "value": null,
+      "ts": 1778388144862
+    },
+    {
+      "stage": "s3",
+      "decision": "script_p2",
+      "reason": "OSD: Arabic (ara) conf=92.22 — differs from metadata lang=fas",
+      "value": null,
+      "ts": 1778388144913
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p2",
+      "reason": "raw: 0 raw → 0 usable",
+      "value": null,
+      "ts": 1778388156393
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p1",
+      "reason": "raw: 0 raw → 0 usable",
+      "value": null,
+      "ts": 1778388157355
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p2",
+      "reason": "vision suggested: [otsu]",
+      "value": null,
+      "ts": 1778388193006
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p2",
+      "reason": "opencv: 5 blocks",
+      "value": null,
+      "ts": 1778388197561
+    },
+    {
+      "stage": "s3",
+      "decision": "blocks_p2",
+      "reason": "5 blocks detected, 5 OCR'd",
+      "value": null,
+      "ts": 1778388200004
+    },
+    {
+      "stage": "s3",
+      "decision": "paddle_p2",
+      "reason": "2/5 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778388205414
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p1",
+      "reason": "opencv: 5 blocks",
+      "value": null,
+      "ts": 1778388208719
+    },
+    {
+      "stage": "s3",
+      "decision": "easyocr_p2",
+      "reason": "2/5 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778388209805
+    },
+    {
+      "stage": "s3",
+      "decision": "blocks_p1",
+      "reason": "5 blocks detected, 5 OCR'd",
+      "value": null,
+      "ts": 1778388212447
+    },
+    {
+      "stage": "s3",
+      "decision": "easyocr_p1",
+      "reason": "3/5 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778388220664
+    },
+    {
+      "stage": "s3",
+      "decision": "paddle_p1",
+      "reason": "3/5 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778388223218
+    },
+    {
+      "stage": "s3",
+      "decision": "consensus_p2_b2",
+      "reason": "batch engines agree on ara (2/2) — re-ran tesseract",
+      "value": null,
+      "ts": 1778388256693
+    },
+    {
+      "stage": "s3",
+      "decision": "consensus_p2_b1",
+      "reason": "batch engines agree on ara (2/2) — re-ran tesseract",
+      "value": null,
+      "ts": 1778388257176
+    },
+    {
+      "stage": "s3",
+      "decision": "consensus_p1_b2",
+      "reason": "batch engines agree on ara (2/2) — re-ran tesseract",
+      "value": null,
+      "ts": 1778388264370
+    },
+    {
+      "stage": "s3",
+      "decision": "consensus_p1_b1",
+      "reason": "batch engines agree on ara (2/2) — re-ran tesseract",
+      "value": null,
+      "ts": 1778388264810
+    },
+    {
+      "stage": "s3",
+      "decision": "synth_p1",
+      "reason": "1/5 blocks synthesized",
+      "value": null,
+      "ts": 1778388266223
+    },
+    {
+      "stage": "s3",
+      "decision": "routing_summary",
+      "reason": "{\"fas\":2}",
+      "value": null,
+      "ts": 1778388266223
+    },
+    {
+      "stage": "s4",
+      "decision": "page_1",
+      "reason": "kept-original",
+      "value": -0.24800046115490204,
+      "ts": 1778388291235
+    },
+    {
+      "stage": "s4",
+      "decision": "page_2",
+      "reason": "kept-original",
+      "value": 3.17236301635279,
+      "ts": 1778388291242
+    },
+    {
+      "stage": "s5",
+      "decision": "engines",
+      "reason": "surya, easyocr, paddle",
+      "value": null,
+      "ts": 1778388298545
+    },
+    {
+      "stage": "s5",
+      "decision": "paddle_batch",
+      "reason": "2/2 pages",
+      "value": null,
+      "ts": 1778388306624
+    },
+    {
+      "stage": "s5",
+      "decision": "easyocr_batch",
+      "reason": "2/2 pages",
+      "value": null,
+      "ts": 1778388418179
+    },
+    {
+      "stage": "s5",
+      "decision": "page_1",
+      "reason": "haiku+[paddle+easyocr]",
+      "value": 1947,
+      "ts": 1778388438312
+    },
+    {
+      "stage": "s5",
+      "decision": "page_2",
+      "reason": "haiku+[paddle+easyocr]",
+      "value": 1831,
+      "ts": 1778388440223
+    },
+    {
+      "stage": "s7",
+      "decision": "rebuilt",
+      "reason": "method=ocrmypdf-pdfa3",
+      "value": "/tank/site2rag/app/tmp/test-pdfs/amanat_kashan_55-56_archival.pdf",
+      "ts": 1778388449393
+    },
+    {
+      "stage": "s8",
+      "decision": "wrote_md",
+      "reason": "bbox_words",
+      "value": "/tank/site2rag/app/tmp/test-pdfs/amanat_kashan_55-56_archival.md",
+      "ts": 1778388449394
+    }
+  ],
+  "totals": {
+    "cost_usd": 0.019686399999999996,
+    "tokens_in": 12140,
+    "tokens_out": 3034,
+    "duration_ms": 360722
+  },
+  "outputs": {
+    "archivalPdfPath": "/tank/site2rag/app/tmp/test-pdfs/amanat_kashan_55-56_archival.pdf",
+    "mdPath": "/tank/site2rag/app/tmp/test-pdfs/amanat_kashan_55-56_archival.md",
+    "receiptPath": null
+  },
+  "assessment": {
+    "doc_type": "image_pdf",
+    "correction_summary": "normalize → OCR → escalate → vision → archive → export",
+    "domain_context": "religious-texts",
+    "quality_gain_pct": 100,
+    "gs_normalized": false
+  },
+  "suggestions": [
+    {
+      "category": "stage_value",
+      "priority": "low",
+      "suggestion": "s3 ran with no quality improvement",
+      "detail": {
+        "stage": "s3",
+        "quality_delta": 0,
+        "cost_usd": 0.003
+      }
+    }
+  ]
+}

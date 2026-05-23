@@ -1,0 +1,2357 @@
+{
+  "ts": "2026-05-08T00:14:38.585Z",
+  "docCounts": {
+    "arabic": 4,
+    "french": 3,
+    "english": 2
+  },
+  "langSurvey": [
+    {
+      "ai_language": "arabic",
+      "n": 23,
+      "avg_score": 0.8521739130434783,
+      "avg_pages": 17.347826086956523
+    },
+    {
+      "ai_language": "french",
+      "n": 21,
+      "avg_score": 0.7183868378812199,
+      "avg_pages": 9.428571428571429
+    },
+    {
+      "ai_language": "persian",
+      "n": 14,
+      "avg_score": 0.86,
+      "avg_pages": 21.214285714285715
+    },
+    {
+      "ai_language": "english",
+      "n": 12,
+      "avg_score": 0.6681811031338327,
+      "avg_pages": 69.58333333333333
+    }
+  ],
+  "results": {
+    "arabic": [
+      {
+        "docId": "arabic_kharman_adab_honar_contents_17",
+        "results": [
+          {
+            "ok": true,
+            "variantId": "surya_multi_haiku_ara",
+            "score": 0.749,
+            "cost": 0.0165032,
+            "elapsed": 1111,
+            "receipt": {
+              "doc_id": "b0580922-8494-44c7-aa90-d84f2e5bb5ce",
+              "source_url": "https://bahai-library.com/pdf/k/kharman_adab_honar_contents_17.pdf",
+              "processed_at": "2026-05-07T21:33:37.448Z",
+              "pipeline_version": "1.0.0",
+              "importance": 5,
+              "page_count": 7,
+              "quality": {
+                "baseline": {
+                  "composite_score": 0,
+                  "readable_pages_pct": 0,
+                  "word_quality": 0,
+                  "has_text_layer": 0,
+                  "avg_chars_per_page": 2,
+                  "language": "unknown",
+                  "excerpt": "",
+                  "processing_difficulty": 0.3
+                },
+                "per_stage": {
+                  "s0": 0,
+                  "s3": 0.122,
+                  "s5": 0.749
+                },
+                "final": 0.749,
+                "gain": 0.749,
+                "cost_per_quality_point": 0.022033644859813083
+              },
+              "stages": [
+                {
+                  "stage": "s0",
+                  "version": null,
+                  "duration_ms": 3268,
+                  "pages_affected": 7,
+                  "tokens_in": 193,
+                  "tokens_out": 202,
+                  "cost_usd": 0.0009624,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s1",
+                  "version": null,
+                  "duration_ms": 31207,
+                  "pages_affected": 7,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s2",
+                  "version": null,
+                  "duration_ms": 11897,
+                  "pages_affected": 7,
+                  "tokens_in": 6580,
+                  "tokens_out": 400,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s3",
+                  "version": null,
+                  "duration_ms": 138667,
+                  "pages_affected": 6,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": "ara"
+                },
+                {
+                  "stage": "s5",
+                  "version": null,
+                  "duration_ms": 220658,
+                  "pages_affected": 5,
+                  "tokens_in": 9141,
+                  "tokens_out": 2057,
+                  "cost_usd": 0.0155408,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s6",
+                  "version": "1.0",
+                  "duration_ms": 0,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": "claude-haiku-4-5-20251001",
+                  "notes": null
+                }
+              ],
+              "errors": [],
+              "decisions": [
+                {
+                  "stage": "s0",
+                  "decision": "baseline_computed",
+                  "reason": "composite=0.000 readable=0.00 lang=unknown pages=7",
+                  "value": 0,
+                  "ts": 1778189211869
+                },
+                {
+                  "stage": "s0",
+                  "decision": "domain_detected",
+                  "reason": "haiku_thin_signals confidence=0.75",
+                  "value": 0.75,
+                  "ts": 1778189215004
+                },
+                {
+                  "stage": "s1",
+                  "decision": "pdf_ok",
+                  "reason": "no normalization needed",
+                  "value": 1,
+                  "ts": 1778189215098
+                },
+                {
+                  "stage": "s1",
+                  "decision": "preprocess",
+                  "reason": "unpaper: 7/7 pages",
+                  "value": null,
+                  "ts": 1778189246214
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_1",
+                  "reason": "haiku:figure,printed_persian",
+                  "value": null,
+                  "ts": 1778189249071
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_2",
+                  "reason": "haiku:figure",
+                  "value": null,
+                  "ts": 1778189251221
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_3",
+                  "reason": "haiku:printed_latin",
+                  "value": null,
+                  "ts": 1778189252231
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_4",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189253930
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_5",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189256104
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_6",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189257179
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_7",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189258113
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p3",
+                  "reason": "autocontrast+boost: 84%→85% clean",
+                  "value": 0.006153846153846176,
+                  "ts": 1778189267900
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p4",
+                  "reason": "autocontrast+boost tried but kept original (0% vs 0%)",
+                  "value": 0,
+                  "ts": 1778189271777
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p5",
+                  "reason": "autocontrast tried but kept original (0% vs 0%)",
+                  "value": 0,
+                  "ts": 1778189278437
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p6",
+                  "reason": "autocontrast+boost: 0%→1% clean",
+                  "value": 0.00847457627118644,
+                  "ts": 1778189283204
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p7",
+                  "reason": "autocontrast+boost tried but kept original (0% vs 0%)",
+                  "value": 0,
+                  "ts": 1778189287254
+                },
+                {
+                  "stage": "s3",
+                  "decision": "surya_batch",
+                  "reason": "0/7 pages",
+                  "value": null,
+                  "ts": 1778189396782
+                },
+                {
+                  "stage": "s3",
+                  "decision": "routing_summary",
+                  "reason": "{\"ara\":6}",
+                  "value": null,
+                  "ts": 1778189396782
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-haiku-4-5-20251001_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 8804748 bytes > 5242880 bytes\"},\"request_id\":\"req_011CaovXBykgLU2DDtVoxL1S\"}",
+                  "value": null,
+                  "ts": 1778189538357
+                },
+                {
+                  "stage": "s5",
+                  "decision": "boss_failed",
+                  "reason": "page 1: boss HTTP 400",
+                  "value": null,
+                  "ts": 1778189538583
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-opus-4-7_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 8804748 bytes > 5242880 bytes\"},\"request_id\":\"req_011CaovYGZrgTrTNwQh8Rn3V\"}",
+                  "value": null,
+                  "ts": 1778189553020
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-haiku-4-5-20251001_failed",
+                  "reason": "page 2: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 6036008 bytes > 5242880 bytes\"},\"request_id\":\"req_011CaovZ3khdphncVUATuEcS\"}",
+                  "value": null,
+                  "ts": 1778189563472
+                },
+                {
+                  "stage": "s5",
+                  "decision": "boss_failed",
+                  "reason": "page 2: boss HTTP 400",
+                  "value": null,
+                  "ts": 1778189563631
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-opus-4-7_failed",
+                  "reason": "page 2: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 6036008 bytes > 5242880 bytes\"},\"request_id\":\"req_011CaovZo7fbLDxpms1ewE56\"}",
+                  "value": null,
+                  "ts": 1778189573627
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_3",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 215,
+                  "ts": 1778189575798
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_4",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 274,
+                  "ts": 1778189580814
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_5",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 1186,
+                  "ts": 1778189600282
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_6",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 724,
+                  "ts": 1778189610049
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_7",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 532,
+                  "ts": 1778189617442
+                },
+                {
+                  "stage": "s6",
+                  "decision": "skip",
+                  "reason": "baseline 0.000 < min 0.45 — too broken for spell-fix",
+                  "value": 0,
+                  "ts": 1778189617446
+                }
+              ],
+              "totals": {
+                "cost_usd": 0.0165032,
+                "tokens_in": 15914,
+                "tokens_out": 2659,
+                "duration_ms": 405697
+              },
+              "outputs": {
+                "archivalPdfPath": null,
+                "mdPath": null,
+                "receiptPath": null
+              },
+              "assessment": {
+                "doc_type": "image_pdf",
+                "correction_summary": "normalize → OCR → vision → spell-fix",
+                "domain_context": "religious-texts",
+                "quality_gain_pct": 75,
+                "gs_normalized": false
+              },
+              "suggestions": [
+                {
+                  "category": "model_config",
+                  "priority": "low",
+                  "suggestion": "domain detected via Haiku on thin signals — provide richer caller context"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "docId": "arabic__d8_a7_d9_93_d8_ab_d8_a7_d8_b1",
+        "results": [
+          {
+            "ok": true,
+            "variantId": "surya_multi_haiku_ara",
+            "score": 1,
+            "cost": 0.080212,
+            "elapsed": 901,
+            "receipt": {
+              "doc_id": "1434bcab-1220-4c53-8390-581fe02fcaa8",
+              "source_url": "https://bahai-library.com/pdf/k/kharman_adab_honar/1/%d8%a7%d9%93%d8%ab%d8%a7%d8%b1%20%d9%88%20%d8%a7%d8%ad%d9%88%d8%a7%d9%84%20%d8%a8%d8%b9%d8%b6%db%8c%20%d8%a7%d8%b2%20%d8%ae%d9%88%d8%b4%d9%86%d9%88%db%8c%d8%b3%d8%a7%d9%86%20%d8%a8%d9%87%d8%a7%d9%8a%d9%94%db%8c%20-%20%d8%a7%d9%85%d8%a7%d9%86%20%d8%a7%d9%84%d9%84%d9%87%20%d9%85%d9%88%d9%82%d9%86(%d8%ae%d9%88%d8%b4%d9%87%20%d9%87%d8%a71).pdf",
+              "processed_at": "2026-05-07T21:48:37.357Z",
+              "pipeline_version": "1.0.0",
+              "importance": 5,
+              "page_count": 14,
+              "quality": {
+                "baseline": {
+                  "composite_score": 0,
+                  "readable_pages_pct": 0,
+                  "word_quality": 0,
+                  "has_text_layer": 0,
+                  "avg_chars_per_page": 2,
+                  "language": "unknown",
+                  "excerpt": "",
+                  "processing_difficulty": 0.3
+                },
+                "per_stage": {
+                  "s0": 0,
+                  "s3": 0.001,
+                  "s5": 1
+                },
+                "final": 1,
+                "gain": 1,
+                "cost_per_quality_point": 0.080212
+              },
+              "stages": [
+                {
+                  "stage": "s0",
+                  "version": null,
+                  "duration_ms": 2605,
+                  "pages_affected": 14,
+                  "tokens_in": 207,
+                  "tokens_out": 223,
+                  "cost_usd": 0.0010576000000000001,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s1",
+                  "version": null,
+                  "duration_ms": 40427,
+                  "pages_affected": 14,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s2",
+                  "version": null,
+                  "duration_ms": 18520,
+                  "pages_affected": 14,
+                  "tokens_in": 10556,
+                  "tokens_out": 780,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s3",
+                  "version": null,
+                  "duration_ms": 309188,
+                  "pages_affected": 11,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": "ara"
+                },
+                {
+                  "stage": "s5",
+                  "version": null,
+                  "duration_ms": 526734,
+                  "pages_affected": 14,
+                  "tokens_in": 31463,
+                  "tokens_out": 13496,
+                  "cost_usd": 0.0791544,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s6",
+                  "version": "1.0",
+                  "duration_ms": 0,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": "claude-haiku-4-5-20251001",
+                  "notes": null
+                }
+              ],
+              "errors": [],
+              "decisions": [
+                {
+                  "stage": "s0",
+                  "decision": "baseline_computed",
+                  "reason": "composite=0.000 readable=0.00 lang=unknown pages=14",
+                  "value": 0,
+                  "ts": 1778189619966
+                },
+                {
+                  "stage": "s0",
+                  "decision": "domain_detected",
+                  "reason": "haiku_thin_signals confidence=0.65",
+                  "value": 0.65,
+                  "ts": 1778189622479
+                },
+                {
+                  "stage": "s1",
+                  "decision": "pdf_ok",
+                  "reason": "no normalization needed",
+                  "value": 1,
+                  "ts": 1778189622536
+                },
+                {
+                  "stage": "s1",
+                  "decision": "preprocess",
+                  "reason": "unpaper: 14/14 pages",
+                  "value": null,
+                  "ts": 1778189662907
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_1",
+                  "reason": "haiku:figure",
+                  "value": null,
+                  "ts": 1778189664082
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_2",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189665390
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_3",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189666477
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_4",
+                  "reason": "haiku:printed_arabic,handwritten",
+                  "value": null,
+                  "ts": 1778189668043
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_5",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189669437
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_6",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189671044
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_7",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189672339
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_8",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189673428
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_9",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189674653
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_10",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189675989
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_11",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189677713
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_12",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189678955
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_13",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189680039
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_14",
+                  "reason": "haiku:printed_persian",
+                  "value": null,
+                  "ts": 1778189681429
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p2",
+                  "reason": "otsu_threshold tried but kept original (0% vs 0%)",
+                  "value": 0,
+                  "ts": 1778189687529
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p3",
+                  "reason": "otsu_threshold tried but kept original (0% vs 0%)",
+                  "value": 0,
+                  "ts": 1778189695450
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p4",
+                  "reason": "otsu_threshold tried but kept original (0% vs 0%)",
+                  "value": 0,
+                  "ts": 1778189702302
+                },
+                {
+                  "stage": "s3",
+                  "decision": "surya_batch",
+                  "reason": "0/14 pages",
+                  "value": null,
+                  "ts": 1778189990618
+                },
+                {
+                  "stage": "s3",
+                  "decision": "routing_summary",
+                  "reason": "{\"ara\":13}",
+                  "value": null,
+                  "ts": 1778189990618
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_1",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 6,
+                  "ts": 1778190261395
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_2",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 140,
+                  "ts": 1778190265900
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_3",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 9,
+                  "ts": 1778190268988
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_4",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 958,
+                  "ts": 1778190274047
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_5",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 1708,
+                  "ts": 1778190294087
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_6",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 2085,
+                  "ts": 1778190318346
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_7",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 2053,
+                  "ts": 1778190341922
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_8",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 2069,
+                  "ts": 1778190364301
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_9",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 2241,
+                  "ts": 1778190392269
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_10",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 1798,
+                  "ts": 1778190414230
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_11",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 2394,
+                  "ts": 1778190445099
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_12",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 2164,
+                  "ts": 1778190472773
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_13",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 2028,
+                  "ts": 1778190496230
+                },
+                {
+                  "stage": "s5",
+                  "decision": "page_14",
+                  "reason": "claude-haiku-4-5-20251001",
+                  "value": 1695,
+                  "ts": 1778190517354
+                },
+                {
+                  "stage": "s6",
+                  "decision": "skip",
+                  "reason": "baseline 0.000 < min 0.45 — too broken for spell-fix",
+                  "value": 0,
+                  "ts": 1778190517355
+                }
+              ],
+              "totals": {
+                "cost_usd": 0.080212,
+                "tokens_in": 42226,
+                "tokens_out": 14499,
+                "duration_ms": 897474
+              },
+              "outputs": {
+                "archivalPdfPath": null,
+                "mdPath": null,
+                "receiptPath": null
+              },
+              "assessment": {
+                "doc_type": "image_pdf",
+                "correction_summary": "normalize → OCR → vision → spell-fix",
+                "domain_context": "religious-texts",
+                "quality_gain_pct": 100,
+                "gs_normalized": false
+              },
+              "suggestions": [
+                {
+                  "category": "model_config",
+                  "priority": "low",
+                  "suggestion": "domain detected via Haiku on thin signals — provide richer caller context"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "docId": "arabic__d8_aa_d8_ac_d8_af_d8_af_20_d8",
+        "results": [
+          {
+            "ok": false,
+            "variantId": "surya_multi_haiku_ara",
+            "score": 0,
+            "cost": 0,
+            "elapsed": 0,
+            "receipt": null
+          }
+        ]
+      },
+      {
+        "docId": "arabic__d9_85_d8_b1_d9_88_d8_b2_db_8c",
+        "results": [
+          {
+            "ok": false,
+            "variantId": "surya_multi_haiku_ara",
+            "score": 0,
+            "cost": 0,
+            "elapsed": 0,
+            "receipt": null
+          }
+        ]
+      }
+    ],
+    "french": [
+      {
+        "docId": "french_journal_constantinople_1849_03",
+        "results": [
+          {
+            "ok": true,
+            "variantId": "haiku_fra",
+            "score": 0.227,
+            "cost": 0.0010072,
+            "elapsed": 757,
+            "receipt": {
+              "doc_id": "8e11705f-7184-4c93-8fb6-14ad701bd72e",
+              "source_url": "https://bahai-library.com/pdf/journal-de-constantinople/original_pdfs/1849/journal_constantinople_1849-03-29_p2.pdf",
+              "processed_at": "2026-05-07T22:41:17.378Z",
+              "pipeline_version": "1.0.0",
+              "importance": 5,
+              "page_count": 1,
+              "quality": {
+                "baseline": {
+                  "composite_score": 0,
+                  "readable_pages_pct": 0,
+                  "word_quality": 0,
+                  "has_text_layer": 0,
+                  "avg_chars_per_page": 2,
+                  "language": "unknown",
+                  "excerpt": "",
+                  "processing_difficulty": 0.3
+                },
+                "per_stage": {
+                  "s0": 0,
+                  "s3": 0.227
+                },
+                "final": 0.227,
+                "gain": 0.227,
+                "cost_per_quality_point": 0.004437004405286343
+              },
+              "stages": [
+                {
+                  "stage": "s0",
+                  "version": null,
+                  "duration_ms": 4859,
+                  "pages_affected": 1,
+                  "tokens_in": 189,
+                  "tokens_out": 214,
+                  "cost_usd": 0.0010072,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s1",
+                  "version": null,
+                  "duration_ms": 9817,
+                  "pages_affected": 1,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s2",
+                  "version": null,
+                  "duration_ms": 3821,
+                  "pages_affected": 1,
+                  "tokens_in": 940,
+                  "tokens_out": 55,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s3",
+                  "version": null,
+                  "duration_ms": 103965,
+                  "pages_affected": 1,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": "fra"
+                },
+                {
+                  "stage": "s5",
+                  "version": null,
+                  "duration_ms": 352278,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s6",
+                  "version": "1.0",
+                  "duration_ms": 0,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": "claude-haiku-4-5-20251001",
+                  "notes": null
+                }
+              ],
+              "errors": [
+                {
+                  "stage": "s5",
+                  "error": "surya batch failed: Command failed: /tank/site2rag/surya-venv/bin/surya_ocr /tmp/site2rag-surya-7c9a6c359b39-chunk0 --langs fr --results_dir /tmp/site2rag-surya-7c9a6c359b39-chunk0-out\n2026-05-07 15:35:34.161466: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered\nWARNING: All log messages before absl::InitializeLog() is called are written to STDERR\nE0000 00:00:1778193334.182796 1473449 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered\nE0000 00:00:1778193334.189841 1473449 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered\nW0000 00:00:1778193334.206853 1473449 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778193334.206869 1473449 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778193334.206872 1473449 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778193334.206874 1473449 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\n2026-05-07 15:35:34.211427: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.\nTo enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.\n/tank/site2rag/surya-venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884\n  warnings.warn(\n\rDetecting bboxes:   0%|          | 0/1 [00:00<?, ?it/s]\rDetecting bboxes: 100%|██████████| 1/1 [00:04<00:00,  4.91s/it]\rDetecting bboxes: 100%|██████████| 1/1 [00:04<00:00,  4.91s/it]\n\rRecognizing Text:   0%|          | 0/23 [00:00<?, ?it/s]\rRecognizing Text:   4%|▍         | 1/23 [00:15<05:33, 15.15s/it]\rRecognizing Text:   9%|▊         | 2/23 [00:26<04:35, 13.12s/it]\rRecognizing Text:  13%|█▎        | 3/23 [00:38<04:08, 12.44s/it]\rRecognizing Text:  17%|█▋        | 4/23 [00:52<04:05, 12.92s/it]\rRecognizing Text:  22%|██▏       | 5/23 [01:05<03:54, 13.03s/it]\rRecognizing Text:  26%|██▌       | 6/23 [01:18<03:39, 12.90s/it]\rRecognizing Text:  30%|███       | 7/23 [01:30<03:23, 12.70s/it]\rRecognizing Text:  35%|███▍      | 8/23 [01:44<03:15, 13.03s/it]\rRecognizing Text:  39%|███▉      | 9/23 [01:58<03:07, 13.39s/it]\rRecognizing Text:  43%|████▎     | 10/23 [02:13<03:02, 14.05s/it]\rRecognizing Text:  48%|████▊     | 11/23 [02:29<02:53, 14.48s/it]\rRecognizing Text:  52%|█████▏    | 12/23 [02:41<02:31, 13.80s/it]\rRecognizing Text:  57%|█████▋    | 13/23 [02:54<02:15, 13.55s/it]\rRecognizing Text:  61%|██████    | 14/23 [03:08<02:02, 13.61s/it]\rRecognizing Text:  65%|██████▌   | 15/23 [03:22<01:51, 13.93s/it]\rRecognizing Text:  70%|██████▉   | 16/23 [03:36<01:37, 13.98s/it]\rRecognizing Text:  74%|███████▍  | 17/23 [03:50<01:22, 13.81s/it]\rRecognizing Text:  78%|███████▊  | 18/23 [04:03<01:07, 13.52s/it]\rRecognizing Text:  83%|████████▎ | 19/23 [04:15<00:52, 13.23s/it]\rRecognizing Text:  87%|████████▋ | 20/23 [04:28<00:38, 12.97s/it]\rRecognizing Text:  91%|█████████▏| 21/23 [04:40<00:25, 12.92s/it]",
+                  "recoverable": true
+                }
+              ],
+              "decisions": [
+                {
+                  "stage": "s0",
+                  "decision": "baseline_computed",
+                  "reason": "composite=0.000 readable=0.00 lang=unknown pages=1",
+                  "value": 0,
+                  "ts": 1778193202745
+                },
+                {
+                  "stage": "s0",
+                  "decision": "domain_detected",
+                  "reason": "haiku_thin_signals confidence=0.78",
+                  "value": 0.78,
+                  "ts": 1778193207490
+                },
+                {
+                  "stage": "s1",
+                  "decision": "pdf_ok",
+                  "reason": "no normalization needed",
+                  "value": 1,
+                  "ts": 1778193209609
+                },
+                {
+                  "stage": "s1",
+                  "decision": "preprocess",
+                  "reason": "unpaper: 1/1 pages",
+                  "value": null,
+                  "ts": 1778193217308
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_1",
+                  "reason": "haiku:printed_latin",
+                  "value": null,
+                  "ts": 1778193221130
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p1",
+                  "reason": "otsu_threshold tried but kept original (23% vs 22%)",
+                  "value": 0,
+                  "ts": 1778193325094
+                },
+                {
+                  "stage": "s3",
+                  "decision": "routing_summary",
+                  "reason": "{\"fra\":1}",
+                  "value": null,
+                  "ts": 1778193325095
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-haiku-4-5-20251001_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 16601344 bytes > 5242880 bytes\"},\"request_id\":\"req_011Cap1kh4vHRtkQj5FS9sXV\"}",
+                  "value": null,
+                  "ts": 1778193655702
+                },
+                {
+                  "stage": "s5",
+                  "decision": "boss_failed",
+                  "reason": "page 1: boss HTTP 400",
+                  "value": null,
+                  "ts": 1778193656083
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-opus-4-7_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 16601344 bytes > 5242880 bytes\"},\"request_id\":\"req_011Cap1nD3kLGyDQjMqSPFMm\"}",
+                  "value": null,
+                  "ts": 1778193677375
+                },
+                {
+                  "stage": "s6",
+                  "decision": "skip",
+                  "reason": "baseline 0.000 < min 0.45 — too broken for spell-fix",
+                  "value": 0,
+                  "ts": 1778193677377
+                }
+              ],
+              "totals": {
+                "cost_usd": 0.0010072,
+                "tokens_in": 1129,
+                "tokens_out": 269,
+                "duration_ms": 474740
+              },
+              "outputs": {
+                "archivalPdfPath": null,
+                "mdPath": null,
+                "receiptPath": null
+              },
+              "assessment": {
+                "doc_type": "image_pdf",
+                "correction_summary": "normalize → OCR → vision → spell-fix",
+                "domain_context": "historical",
+                "quality_gain_pct": 23,
+                "gs_normalized": false
+              },
+              "suggestions": [
+                {
+                  "category": "model_config",
+                  "priority": "low",
+                  "suggestion": "domain detected via Haiku on thin signals — provide richer caller context"
+                }
+              ]
+            }
+          },
+          {
+            "ok": true,
+            "variantId": "surya_multi_haiku_fra",
+            "score": 0.227,
+            "cost": 0.0011032000000000001,
+            "elapsed": 775,
+            "receipt": {
+              "doc_id": "362093d0-5276-4de7-a1cb-1377dd441b6f",
+              "source_url": "https://bahai-library.com/pdf/journal-de-constantinople/original_pdfs/1849/journal_constantinople_1849-03-29_p2.pdf",
+              "processed_at": "2026-05-07T22:54:14.728Z",
+              "pipeline_version": "1.0.0",
+              "importance": 5,
+              "page_count": 1,
+              "quality": {
+                "baseline": {
+                  "composite_score": 0,
+                  "readable_pages_pct": 0,
+                  "word_quality": 0,
+                  "has_text_layer": 0,
+                  "avg_chars_per_page": 2,
+                  "language": "unknown",
+                  "excerpt": "",
+                  "processing_difficulty": 0.3
+                },
+                "per_stage": {
+                  "s0": 0,
+                  "s3": 0.227
+                },
+                "final": 0.227,
+                "gain": 0.227,
+                "cost_per_quality_point": 0.004859911894273128
+              },
+              "stages": [
+                {
+                  "stage": "s0",
+                  "version": null,
+                  "duration_ms": 3295,
+                  "pages_affected": 1,
+                  "tokens_in": 189,
+                  "tokens_out": 238,
+                  "cost_usd": 0.0011032000000000001,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s1",
+                  "version": null,
+                  "duration_ms": 9620,
+                  "pages_affected": 1,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s2",
+                  "version": null,
+                  "duration_ms": 4578,
+                  "pages_affected": 1,
+                  "tokens_in": 940,
+                  "tokens_out": 55,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s3",
+                  "version": null,
+                  "duration_ms": 409854,
+                  "pages_affected": 1,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": "fra"
+                },
+                {
+                  "stage": "s5",
+                  "version": null,
+                  "duration_ms": 346586,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s6",
+                  "version": "1.0",
+                  "duration_ms": 0,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": "claude-haiku-4-5-20251001",
+                  "notes": null
+                }
+              ],
+              "errors": [
+                {
+                  "stage": "s5",
+                  "error": "surya batch failed: Command failed: /tank/site2rag/surya-venv/bin/surya_ocr /tmp/site2rag-surya-ea3803a993b7-chunk0 --langs fr --results_dir /tmp/site2rag-surya-ea3803a993b7-chunk0-out\n2026-05-07 15:48:36.864451: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered\nWARNING: All log messages before absl::InitializeLog() is called are written to STDERR\nE0000 00:00:1778194116.884294 1497553 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered\nE0000 00:00:1778194116.890886 1497553 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered\nW0000 00:00:1778194116.907747 1497553 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778194116.907768 1497553 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778194116.907771 1497553 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778194116.907774 1497553 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\n2026-05-07 15:48:36.912375: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.\nTo enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.\n/tank/site2rag/surya-venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884\n  warnings.warn(\n\rDetecting bboxes:   0%|          | 0/1 [00:00<?, ?it/s]\rDetecting bboxes: 100%|██████████| 1/1 [00:05<00:00,  5.36s/it]\rDetecting bboxes: 100%|██████████| 1/1 [00:05<00:00,  5.36s/it]\n\rRecognizing Text:   0%|          | 0/23 [00:00<?, ?it/s]\rRecognizing Text:   4%|▍         | 1/23 [00:13<05:02, 13.74s/it]\rRecognizing Text:   9%|▊         | 2/23 [00:26<04:39, 13.31s/it]\rRecognizing Text:  13%|█▎        | 3/23 [00:41<04:39, 13.97s/it]\rRecognizing Text:  17%|█▋        | 4/23 [00:57<04:43, 14.91s/it]\rRecognizing Text:  22%|██▏       | 5/23 [01:12<04:23, 14.64s/it]\rRecognizing Text:  26%|██▌       | 6/23 [01:25<04:00, 14.16s/it]\rRecognizing Text:  30%|███       | 7/23 [01:37<03:37, 13.62s/it]\rRecognizing Text:  35%|███▍      | 8/23 [01:50<03:22, 13.47s/it]\rRecognizing Text:  39%|███▉      | 9/23 [02:04<03:09, 13.55s/it]\rRecognizing Text:  43%|████▎     | 10/23 [02:18<02:57, 13.65s/it]\rRecognizing Text:  48%|████▊     | 11/23 [02:31<02:41, 13.43s/it]\rRecognizing Text:  52%|█████▏    | 12/23 [02:44<02:27, 13.40s/it]\rRecognizing Text:  57%|█████▋    | 13/23 [02:59<02:17, 13.78s/it]\rRecognizing Text:  61%|██████    | 14/23 [03:12<02:02, 13.59s/it]\rRecognizing Text:  65%|██████▌   | 15/23 [03:27<01:51, 13.97s/it]\rRecognizing Text:  70%|██████▉   | 16/23 [03:40<01:35, 13.71s/it]\rRecognizing Text:  74%|███████▍  | 17/23 [03:52<01:18, 13.07s/it]\rRecognizing Text:  78%|███████▊  | 18/23 [04:05<01:05, 13.06s/it]\rRecognizing Text:  83%|████████▎ | 19/23 [04:18<00:52, 13.12s/it]\rRecognizing Text:  87%|████████▋ | 20/23 [04:30<00:38, 12.93s/it]\rRecognizing Text:  91%|█████████▏| 21/23 [04:43<00:25, 12.81s/it]",
+                  "recoverable": true
+                }
+              ],
+              "decisions": [
+                {
+                  "stage": "s0",
+                  "decision": "baseline_computed",
+                  "reason": "composite=0.000 readable=0.00 lang=unknown pages=1",
+                  "value": 0,
+                  "ts": 1778193680850
+                },
+                {
+                  "stage": "s0",
+                  "decision": "domain_detected",
+                  "reason": "haiku_thin_signals confidence=0.75",
+                  "value": 0.75,
+                  "ts": 1778193684082
+                },
+                {
+                  "stage": "s1",
+                  "decision": "pdf_ok",
+                  "reason": "no normalization needed",
+                  "value": 1,
+                  "ts": 1778193686169
+                },
+                {
+                  "stage": "s1",
+                  "decision": "preprocess",
+                  "reason": "unpaper: 1/1 pages",
+                  "value": null,
+                  "ts": 1778193693703
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_1",
+                  "reason": "haiku:printed_latin",
+                  "value": null,
+                  "ts": 1778193698283
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p1",
+                  "reason": "otsu_threshold tried but kept original (23% vs 22%)",
+                  "value": 0,
+                  "ts": 1778193805550
+                },
+                {
+                  "stage": "s3",
+                  "decision": "surya_batch",
+                  "reason": "0/1 pages",
+                  "value": null,
+                  "ts": 1778194108137
+                },
+                {
+                  "stage": "s3",
+                  "decision": "routing_summary",
+                  "reason": "{\"fra\":1}",
+                  "value": null,
+                  "ts": 1778194108137
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-haiku-4-5-20251001_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 16601344 bytes > 5242880 bytes\"},\"request_id\":\"req_011Cap2k4tRQBx3cQ1De3LgX\"}",
+                  "value": null,
+                  "ts": 1778194434198
+                },
+                {
+                  "stage": "s5",
+                  "decision": "boss_failed",
+                  "reason": "page 1: boss HTTP 400",
+                  "value": null,
+                  "ts": 1778194434568
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-opus-4-7_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 16601344 bytes > 5242880 bytes\"},\"request_id\":\"req_011Cap2mbGK5rWJHyBLnUEKK\"}",
+                  "value": null,
+                  "ts": 1778194454725
+                },
+                {
+                  "stage": "s6",
+                  "decision": "skip",
+                  "reason": "baseline 0.000 < min 0.45 — too broken for spell-fix",
+                  "value": 0,
+                  "ts": 1778194454726
+                }
+              ],
+              "totals": {
+                "cost_usd": 0.0011032000000000001,
+                "tokens_in": 1129,
+                "tokens_out": 293,
+                "duration_ms": 773933
+              },
+              "outputs": {
+                "archivalPdfPath": null,
+                "mdPath": null,
+                "receiptPath": null
+              },
+              "assessment": {
+                "doc_type": "image_pdf",
+                "correction_summary": "normalize → OCR → vision → spell-fix",
+                "domain_context": "historical",
+                "quality_gain_pct": 23,
+                "gs_normalized": false
+              },
+              "suggestions": [
+                {
+                  "category": "model_config",
+                  "priority": "low",
+                  "suggestion": "domain detected via Haiku on thin signals — provide richer caller context"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "docId": "french_journal_constantinople_1849_03",
+        "results": [
+          {
+            "ok": true,
+            "variantId": "haiku_fra",
+            "score": 0.348,
+            "cost": 0.0010152,
+            "elapsed": 466,
+            "receipt": {
+              "doc_id": "d8298aba-7e01-46d0-976c-8b70dbaddfa2",
+              "source_url": "https://bahai-library.com/pdf/journal-de-constantinople/original_pdfs/1849/journal_constantinople_1849-03-24_p2.pdf",
+              "processed_at": "2026-05-07T23:01:57.809Z",
+              "pipeline_version": "1.0.0",
+              "importance": 5,
+              "page_count": 1,
+              "quality": {
+                "baseline": {
+                  "composite_score": 0,
+                  "readable_pages_pct": 0,
+                  "word_quality": 0,
+                  "has_text_layer": 0,
+                  "avg_chars_per_page": 2,
+                  "language": "unknown",
+                  "excerpt": "",
+                  "processing_difficulty": 0.3
+                },
+                "per_stage": {
+                  "s0": 0,
+                  "s3": 0.348
+                },
+                "final": 0.348,
+                "gain": 0.348,
+                "cost_per_quality_point": 0.002917241379310345
+              },
+              "stages": [
+                {
+                  "stage": "s0",
+                  "version": null,
+                  "duration_ms": 2862,
+                  "pages_affected": 1,
+                  "tokens_in": 189,
+                  "tokens_out": 216,
+                  "cost_usd": 0.0010152,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s1",
+                  "version": null,
+                  "duration_ms": 9956,
+                  "pages_affected": 1,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s2",
+                  "version": null,
+                  "duration_ms": 3496,
+                  "pages_affected": 1,
+                  "tokens_in": 940,
+                  "tokens_out": 53,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s3",
+                  "version": null,
+                  "duration_ms": 108294,
+                  "pages_affected": 1,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": "fra"
+                },
+                {
+                  "stage": "s5",
+                  "version": null,
+                  "duration_ms": 338175,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s6",
+                  "version": "1.0",
+                  "duration_ms": 0,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": "claude-haiku-4-5-20251001",
+                  "notes": null
+                }
+              ],
+              "errors": [],
+              "decisions": [
+                {
+                  "stage": "s0",
+                  "decision": "baseline_computed",
+                  "reason": "composite=0.000 readable=0.00 lang=unknown pages=1",
+                  "value": 0,
+                  "ts": 1778194455108
+                },
+                {
+                  "stage": "s0",
+                  "decision": "domain_detected",
+                  "reason": "haiku_thin_signals confidence=0.85",
+                  "value": 0.85,
+                  "ts": 1778194457880
+                },
+                {
+                  "stage": "s1",
+                  "decision": "pdf_ok",
+                  "reason": "no normalization needed",
+                  "value": 1,
+                  "ts": 1778194459947
+                },
+                {
+                  "stage": "s1",
+                  "decision": "preprocess",
+                  "reason": "unpaper: 1/1 pages",
+                  "value": null,
+                  "ts": 1778194467837
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_1",
+                  "reason": "haiku:printed_latin",
+                  "value": null,
+                  "ts": 1778194471334
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p1",
+                  "reason": "otsu_threshold tried but kept original (35% vs 20%)",
+                  "value": 0,
+                  "ts": 1778194579626
+                },
+                {
+                  "stage": "s3",
+                  "decision": "routing_summary",
+                  "reason": "{\"fra\":1}",
+                  "value": null,
+                  "ts": 1778194579629
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-haiku-4-5-20251001_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 15477192 bytes > 5242880 bytes\"},\"request_id\":\"req_011Cap3LSGzM4G6zwXhP8S7K\"}",
+                  "value": null,
+                  "ts": 1778194900418
+                },
+                {
+                  "stage": "s5",
+                  "decision": "boss_failed",
+                  "reason": "page 1: boss HTTP 400",
+                  "value": null,
+                  "ts": 1778194900774
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-opus-4-7_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 15477192 bytes > 5242880 bytes\"},\"request_id\":\"req_011Cap3Mj6Yp4nao2a1HmpFw\"}",
+                  "value": null,
+                  "ts": 1778194917806
+                },
+                {
+                  "stage": "s6",
+                  "decision": "skip",
+                  "reason": "baseline 0.000 < min 0.45 — too broken for spell-fix",
+                  "value": 0,
+                  "ts": 1778194917807
+                }
+              ],
+              "totals": {
+                "cost_usd": 0.0010152,
+                "tokens_in": 1129,
+                "tokens_out": 269,
+                "duration_ms": 462783
+              },
+              "outputs": {
+                "archivalPdfPath": null,
+                "mdPath": null,
+                "receiptPath": null
+              },
+              "assessment": {
+                "doc_type": "image_pdf",
+                "correction_summary": "normalize → OCR → vision → spell-fix",
+                "domain_context": "historical",
+                "quality_gain_pct": 35,
+                "gs_normalized": false
+              },
+              "suggestions": [
+                {
+                  "category": "model_config",
+                  "priority": "low",
+                  "suggestion": "domain detected via Haiku on thin signals — provide richer caller context"
+                }
+              ]
+            }
+          },
+          {
+            "ok": true,
+            "variantId": "surya_multi_haiku_fra",
+            "score": 0.348,
+            "cost": 0.0009431999999999999,
+            "elapsed": 766,
+            "receipt": {
+              "doc_id": "3d1ef6fe-2dd7-4a7e-819e-91710f981545",
+              "source_url": "https://bahai-library.com/pdf/journal-de-constantinople/original_pdfs/1849/journal_constantinople_1849-03-24_p2.pdf",
+              "processed_at": "2026-05-07T23:14:44.669Z",
+              "pipeline_version": "1.0.0",
+              "importance": 5,
+              "page_count": 1,
+              "quality": {
+                "baseline": {
+                  "composite_score": 0,
+                  "readable_pages_pct": 0,
+                  "word_quality": 0,
+                  "has_text_layer": 0,
+                  "avg_chars_per_page": 2,
+                  "language": "unknown",
+                  "excerpt": "",
+                  "processing_difficulty": 0.3
+                },
+                "per_stage": {
+                  "s0": 0,
+                  "s3": 0.348
+                },
+                "final": 0.348,
+                "gain": 0.348,
+                "cost_per_quality_point": 0.002710344827586207
+              },
+              "stages": [
+                {
+                  "stage": "s0",
+                  "version": null,
+                  "duration_ms": 2835,
+                  "pages_affected": 1,
+                  "tokens_in": 189,
+                  "tokens_out": 198,
+                  "cost_usd": 0.0009431999999999999,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s1",
+                  "version": null,
+                  "duration_ms": 10973,
+                  "pages_affected": 1,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s2",
+                  "version": null,
+                  "duration_ms": 3682,
+                  "pages_affected": 1,
+                  "tokens_in": 940,
+                  "tokens_out": 55,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s3",
+                  "version": null,
+                  "duration_ms": 417262,
+                  "pages_affected": 1,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": "fra"
+                },
+                {
+                  "stage": "s5",
+                  "version": null,
+                  "duration_ms": 328755,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s6",
+                  "version": "1.0",
+                  "duration_ms": 0,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": "claude-haiku-4-5-20251001",
+                  "notes": null
+                }
+              ],
+              "errors": [
+                {
+                  "stage": "s3",
+                  "error": "surya batch failed: Command failed: /tank/site2rag/surya-venv/bin/surya_ocr /tmp/site2rag-s3-surya-9f62fc425e89-chunk0 --langs fr --results_dir /tmp/site2rag-s3-surya-9f62fc425e89-chunk0-out\n2026-05-07 16:04:19.494696: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered\nWARNING: All log messages before absl::InitializeLog() is called are written to STDERR\nE0000 00:00:1778195059.514642 1525123 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered\nE0000 00:00:1778195059.521295 1525123 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered\nW0000 00:00:1778195059.538513 1525123 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778195059.538532 1525123 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778195059.538536 1525123 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778195059.538554 1525123 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\n2026-05-07 16:04:19.543078: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.\nTo enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.\n/tank/site2rag/surya-venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884\n  warnings.warn(\n\rDetecting bboxes:   0%|          | 0/1 [00:00<?, ?it/s]\rDetecting bboxes: 100%|██████████| 1/1 [00:05<00:00,  5.12s/it]\rDetecting bboxes: 100%|██████████| 1/1 [00:05<00:00,  5.12s/it]\n\rRecognizing Text:   0%|          | 0/22 [00:00<?, ?it/s]\rRecognizing Text:   5%|▍         | 1/22 [00:13<04:37, 13.19s/it]\rRecognizing Text:   9%|▉         | 2/22 [00:28<04:47, 14.40s/it]\rRecognizing Text:  14%|█▎        | 3/22 [00:42<04:26, 14.04s/it]\rRecognizing Text:  18%|█▊        | 4/22 [00:55<04:06, 13.71s/it]\rRecognizing Text:  23%|██▎       | 5/22 [01:07<03:42, 13.09s/it]\rRecognizing Text:  27%|██▋       | 6/22 [01:19<03:26, 12.92s/it]\rRecognizing Text:  32%|███▏      | 7/22 [01:32<03:11, 12.73s/it]\rRecognizing Text:  36%|███▋      | 8/22 [01:46<03:04, 13.14s/it]\rRecognizing Text:  41%|████      | 9/22 [01:59<02:50, 13.14s/it]\rRecognizing Text:  45%|████▌     | 10/22 [02:12<02:38, 13.19s/it]\rRecognizing Text:  50%|█████     | 11/22 [02:25<02:23, 13.08s/it]\rRecognizing Text:  55%|█████▍    | 12/22 [02:38<02:09, 12.98s/it]\rRecognizing Text:  59%|█████▉    | 13/22 [02:50<01:54, 12.76s/it]\rRecognizing Text:  64%|██████▎   | 14/22 [03:04<01:44, 13.00s/it]\rRecognizing Text:  68%|██████▊   | 15/22 [03:16<01:30, 12.96s/it]\rRecognizing Text:  73%|███████▎  | 16/22 [03:30<01:18, 13.13s/it]\rRecognizing Text:  77%|███████▋  | 17/22 [03:44<01:06, 13.32s/it]\rRecognizing Text:  82%|████████▏ | 18/22 [03:57<00:53, 13.44s/it]\rRecognizing Text:  86%|████████▋ | 19/22 [04:12<00:40, 13.64s/it]\rRecognizing Text:  91%|█████████ | 20/22 [04:25<00:27, 13.56s/it]\rRecognizing Text:  95%|█████████▌| 21/22 [04:38<00:13, 13.51s/it]",
+                  "recoverable": true
+                }
+              ],
+              "decisions": [
+                {
+                  "stage": "s0",
+                  "decision": "baseline_computed",
+                  "reason": "composite=0.000 readable=0.00 lang=unknown pages=1",
+                  "value": 0,
+                  "ts": 1778194921214
+                },
+                {
+                  "stage": "s0",
+                  "decision": "domain_detected",
+                  "reason": "haiku_thin_signals confidence=0.72",
+                  "value": 0.72,
+                  "ts": 1778194923989
+                },
+                {
+                  "stage": "s1",
+                  "decision": "pdf_ok",
+                  "reason": "no normalization needed",
+                  "value": 1,
+                  "ts": 1778194926149
+                },
+                {
+                  "stage": "s1",
+                  "decision": "preprocess",
+                  "reason": "unpaper: 1/1 pages",
+                  "value": null,
+                  "ts": 1778194934963
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_1",
+                  "reason": "haiku:printed_latin",
+                  "value": null,
+                  "ts": 1778194938646
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p1",
+                  "reason": "otsu_threshold tried but kept original (35% vs 20%)",
+                  "value": 0,
+                  "ts": 1778195050508
+                },
+                {
+                  "stage": "s3",
+                  "decision": "routing_summary",
+                  "reason": "{\"fra\":1}",
+                  "value": null,
+                  "ts": 1778195355909
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-haiku-4-5-20251001_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 15477192 bytes > 5242880 bytes\"},\"request_id\":\"req_011Cap4Jjg4byawpkiTKSL7p\"}",
+                  "value": null,
+                  "ts": 1778195664079
+                },
+                {
+                  "stage": "s5",
+                  "decision": "boss_failed",
+                  "reason": "page 1: boss HTTP 400",
+                  "value": null,
+                  "ts": 1778195664426
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-opus-4-7_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 15477192 bytes > 5242880 bytes\"},\"request_id\":\"req_011Cap4LFUiZsds1b3KP2RjK\"}",
+                  "value": null,
+                  "ts": 1778195684666
+                },
+                {
+                  "stage": "s6",
+                  "decision": "skip",
+                  "reason": "baseline 0.000 < min 0.45 — too broken for spell-fix",
+                  "value": 0,
+                  "ts": 1778195684668
+                }
+              ],
+              "totals": {
+                "cost_usd": 0.0009431999999999999,
+                "tokens_in": 1129,
+                "tokens_out": 253,
+                "duration_ms": 763507
+              },
+              "outputs": {
+                "archivalPdfPath": null,
+                "mdPath": null,
+                "receiptPath": null
+              },
+              "assessment": {
+                "doc_type": "image_pdf",
+                "correction_summary": "normalize → OCR → vision → spell-fix",
+                "domain_context": "historical",
+                "quality_gain_pct": 35,
+                "gs_normalized": false
+              },
+              "suggestions": [
+                {
+                  "category": "model_config",
+                  "priority": "low",
+                  "suggestion": "domain detected via Haiku on thin signals — provide richer caller context"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "docId": "french_journal_constantinople_1851_11",
+        "results": [
+          {
+            "ok": true,
+            "variantId": "haiku_fra",
+            "score": 0.204,
+            "cost": 0.0010232000000000002,
+            "elapsed": 399,
+            "receipt": {
+              "doc_id": "ca57686f-3427-4b67-88ea-ebf49bb5679a",
+              "source_url": "https://bahai-library.com/pdf/journal-de-constantinople/ocr-ed_pdfs/1851/journal_constantinople_1851-11-14_p2.pdf",
+              "processed_at": "2026-05-07T23:21:25.393Z",
+              "pipeline_version": "1.0.0",
+              "importance": 5,
+              "page_count": 1,
+              "quality": {
+                "baseline": {
+                  "composite_score": 0,
+                  "readable_pages_pct": 0,
+                  "word_quality": 0,
+                  "has_text_layer": 0,
+                  "avg_chars_per_page": 2,
+                  "language": "unknown",
+                  "excerpt": "",
+                  "processing_difficulty": 0.3
+                },
+                "per_stage": {
+                  "s0": 0,
+                  "s3": 0.204
+                },
+                "final": 0.204,
+                "gain": 0.204,
+                "cost_per_quality_point": 0.005015686274509805
+              },
+              "stages": [
+                {
+                  "stage": "s0",
+                  "version": null,
+                  "duration_ms": 2846,
+                  "pages_affected": 1,
+                  "tokens_in": 189,
+                  "tokens_out": 218,
+                  "cost_usd": 0.0010232000000000002,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s1",
+                  "version": null,
+                  "duration_ms": 7089,
+                  "pages_affected": 1,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s2",
+                  "version": null,
+                  "duration_ms": 2039,
+                  "pages_affected": 1,
+                  "tokens_in": 940,
+                  "tokens_out": 55,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s3",
+                  "version": null,
+                  "duration_ms": 85152,
+                  "pages_affected": 1,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": "fra"
+                },
+                {
+                  "stage": "s5",
+                  "version": null,
+                  "duration_ms": 300965,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s6",
+                  "version": "1.0",
+                  "duration_ms": 0,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": "claude-haiku-4-5-20251001",
+                  "notes": null
+                }
+              ],
+              "errors": [],
+              "decisions": [
+                {
+                  "stage": "s0",
+                  "decision": "baseline_computed",
+                  "reason": "composite=0.000 readable=0.00 lang=unknown pages=1",
+                  "value": 0,
+                  "ts": 1778195687348
+                },
+                {
+                  "stage": "s0",
+                  "decision": "domain_detected",
+                  "reason": "haiku_thin_signals confidence=0.78",
+                  "value": 0.78,
+                  "ts": 1778195690141
+                },
+                {
+                  "stage": "s1",
+                  "decision": "pdf_ok",
+                  "reason": "no normalization needed",
+                  "value": 1,
+                  "ts": 1778195690700
+                },
+                {
+                  "stage": "s1",
+                  "decision": "preprocess",
+                  "reason": "unpaper: 1/1 pages",
+                  "value": null,
+                  "ts": 1778195697231
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_1",
+                  "reason": "haiku:printed_latin",
+                  "value": null,
+                  "ts": 1778195699271
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p1",
+                  "reason": "otsu_threshold tried but kept original (20% vs 7%)",
+                  "value": 0,
+                  "ts": 1778195784423
+                },
+                {
+                  "stage": "s3",
+                  "decision": "routing_summary",
+                  "reason": "{\"fra\":1}",
+                  "value": null,
+                  "ts": 1778195784424
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-haiku-4-5-20251001_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 11149168 bytes > 5242880 bytes\"},\"request_id\":\"req_011Cap4prn2uXY8gTZh8f9en\"}",
+                  "value": null,
+                  "ts": 1778196072616
+                },
+                {
+                  "stage": "s5",
+                  "decision": "boss_failed",
+                  "reason": "page 1: boss HTTP 400",
+                  "value": null,
+                  "ts": 1778196072882
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-opus-4-7_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 11149168 bytes > 5242880 bytes\"},\"request_id\":\"req_011Cap4qoQA5vy3bQ9WcVKNm\"}",
+                  "value": null,
+                  "ts": 1778196085391
+                },
+                {
+                  "stage": "s6",
+                  "decision": "skip",
+                  "reason": "baseline 0.000 < min 0.45 — too broken for spell-fix",
+                  "value": 0,
+                  "ts": 1778196085392
+                }
+              ],
+              "totals": {
+                "cost_usd": 0.0010232000000000002,
+                "tokens_in": 1129,
+                "tokens_out": 273,
+                "duration_ms": 398091
+              },
+              "outputs": {
+                "archivalPdfPath": null,
+                "mdPath": null,
+                "receiptPath": null
+              },
+              "assessment": {
+                "doc_type": "image_pdf",
+                "correction_summary": "normalize → OCR → vision → spell-fix",
+                "domain_context": "historical",
+                "quality_gain_pct": 20,
+                "gs_normalized": false
+              },
+              "suggestions": [
+                {
+                  "category": "model_config",
+                  "priority": "low",
+                  "suggestion": "domain detected via Haiku on thin signals — provide richer caller context"
+                }
+              ]
+            }
+          },
+          {
+            "ok": true,
+            "variantId": "surya_multi_haiku_fra",
+            "score": 0.204,
+            "cost": 0.0011232,
+            "elapsed": 697,
+            "receipt": {
+              "doc_id": "e1d9a907-ed8f-4f58-8cbe-3afb1eef7838",
+              "source_url": "https://bahai-library.com/pdf/journal-de-constantinople/ocr-ed_pdfs/1851/journal_constantinople_1851-11-14_p2.pdf",
+              "processed_at": "2026-05-07T23:32:59.792Z",
+              "pipeline_version": "1.0.0",
+              "importance": 5,
+              "page_count": 1,
+              "quality": {
+                "baseline": {
+                  "composite_score": 0,
+                  "readable_pages_pct": 0,
+                  "word_quality": 0,
+                  "has_text_layer": 0,
+                  "avg_chars_per_page": 2,
+                  "language": "unknown",
+                  "excerpt": "",
+                  "processing_difficulty": 0.3
+                },
+                "per_stage": {
+                  "s0": 0,
+                  "s3": 0.204
+                },
+                "final": 0.204,
+                "gain": 0.204,
+                "cost_per_quality_point": 0.005505882352941176
+              },
+              "stages": [
+                {
+                  "stage": "s0",
+                  "version": null,
+                  "duration_ms": 2917,
+                  "pages_affected": 1,
+                  "tokens_in": 189,
+                  "tokens_out": 243,
+                  "cost_usd": 0.0011232,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s1",
+                  "version": null,
+                  "duration_ms": 6913,
+                  "pages_affected": 1,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s2",
+                  "version": null,
+                  "duration_ms": 2083,
+                  "pages_affected": 1,
+                  "tokens_in": 940,
+                  "tokens_out": 55,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s3",
+                  "version": null,
+                  "duration_ms": 374575,
+                  "pages_affected": 1,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": "fra"
+                },
+                {
+                  "stage": "s5",
+                  "version": null,
+                  "duration_ms": 305917,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": null,
+                  "notes": null
+                },
+                {
+                  "stage": "s6",
+                  "version": "1.0",
+                  "duration_ms": 0,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": "claude-haiku-4-5-20251001",
+                  "notes": null
+                }
+              ],
+              "errors": [],
+              "decisions": [
+                {
+                  "stage": "s0",
+                  "decision": "baseline_computed",
+                  "reason": "composite=0.000 readable=0.00 lang=unknown pages=1",
+                  "value": 0,
+                  "ts": 1778196087415
+                },
+                {
+                  "stage": "s0",
+                  "decision": "domain_detected",
+                  "reason": "haiku_thin_signals confidence=0.75",
+                  "value": 0.75,
+                  "ts": 1778196090297
+                },
+                {
+                  "stage": "s1",
+                  "decision": "pdf_ok",
+                  "reason": "no normalization needed",
+                  "value": 1,
+                  "ts": 1778196090879
+                },
+                {
+                  "stage": "s1",
+                  "decision": "preprocess",
+                  "reason": "unpaper: 1/1 pages",
+                  "value": null,
+                  "ts": 1778196097211
+                },
+                {
+                  "stage": "s2",
+                  "decision": "page_1",
+                  "reason": "haiku:printed_latin",
+                  "value": null,
+                  "ts": 1778196099295
+                },
+                {
+                  "stage": "s3",
+                  "decision": "contrast_p1",
+                  "reason": "otsu_threshold tried but kept original (20% vs 7%)",
+                  "value": 0,
+                  "ts": 1778196187707
+                },
+                {
+                  "stage": "s3",
+                  "decision": "surya_batch",
+                  "reason": "0/1 pages",
+                  "value": null,
+                  "ts": 1778196473870
+                },
+                {
+                  "stage": "s3",
+                  "decision": "routing_summary",
+                  "reason": "{\"fra\":1}",
+                  "value": null,
+                  "ts": 1778196473870
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-haiku-4-5-20251001_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 11149168 bytes > 5242880 bytes\"},\"request_id\":\"req_011Cap5i1TqTk1u5z66VSsvM\"}",
+                  "value": null,
+                  "ts": 1778196766521
+                },
+                {
+                  "stage": "s5",
+                  "decision": "boss_failed",
+                  "reason": "page 1: boss HTTP 400",
+                  "value": null,
+                  "ts": 1778196766795
+                },
+                {
+                  "stage": "s5",
+                  "decision": "claude-opus-4-7_failed",
+                  "reason": "page 1: 400 {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"messages.0.content.0.image.source.base64: image exceeds 5 MB maximum: 11149168 bytes > 5242880 bytes\"},\"request_id\":\"req_011Cap5izDx2dYxLJ5uvw2HV\"}",
+                  "value": null,
+                  "ts": 1778196779789
+                },
+                {
+                  "stage": "s6",
+                  "decision": "skip",
+                  "reason": "baseline 0.000 < min 0.45 — too broken for spell-fix",
+                  "value": 0,
+                  "ts": 1778196779790
+                }
+              ],
+              "totals": {
+                "cost_usd": 0.0011232,
+                "tokens_in": 1129,
+                "tokens_out": 298,
+                "duration_ms": 692405
+              },
+              "outputs": {
+                "archivalPdfPath": null,
+                "mdPath": null,
+                "receiptPath": null
+              },
+              "assessment": {
+                "doc_type": "image_pdf",
+                "correction_summary": "normalize → OCR → vision → spell-fix",
+                "domain_context": "historical",
+                "quality_gain_pct": 20,
+                "gs_normalized": false
+              },
+              "suggestions": [
+                {
+                  "category": "model_config",
+                  "priority": "low",
+                  "suggestion": "domain detected via Haiku on thin signals — provide richer caller context"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ],
+    "english": [
+      {
+        "docId": "eng_scan_pilgrims_notes_us_archives_190",
+        "results": [
+          {
+            "ok": false,
+            "variantId": "haiku_eng",
+            "score": 0,
+            "cost": 0,
+            "elapsed": 0,
+            "receipt": null
+          },
+          {
+            "ok": false,
+            "variantId": "surya_multi_haiku_eng",
+            "score": 0,
+            "cost": 0,
+            "elapsed": 0,
+            "receipt": null
+          }
+        ]
+      },
+      {
+        "docId": "eng_scan_pilgrims_notes_us_archives_190",
+        "results": [
+          {
+            "ok": true,
+            "variantId": "haiku_eng",
+            "score": 0.42,
+            "cost": 0.001196,
+            "elapsed": 87,
+            "receipt": {
+              "doc_id": "81da82d2-e7fd-4155-8c60-51265044fc68",
+              "source_url": "https://bahai-library.com/pdf/p/pilgrims_notes_us-archives_1900_heh.pdf",
+              "processed_at": "2026-05-08T00:14:31.475Z",
+              "pipeline_version": "1.0.0",
+              "importance": 5,
+              "page_count": 81,
+              "quality": {
+                "baseline": {
+                  "composite_score": 0.42,
+                  "readable_pages_pct": 0.2,
+                  "word_quality": 0,
+                  "has_text_layer": 1,
+                  "avg_chars_per_page": 353,
+                  "language": "unknown",
+                  "excerpt": "(t:t DO ----.--.--.. -..... ----.----.. -- --.--.- -.. --.-----.---~ . __ ....... \" ,. , ._-----'--:..---.... -.-- ---\" --,--_._ .. _._.---- , .' \" ! \"\\\"::' ' . ' , ...!---'~-------~-. -------~---~-- -----------~ -- ------_ . . ' - - --------------- --.. _--....---- _... .._-----",
+                  "processing_difficulty": 0.05
+                },
+                "per_stage": {
+                  "s0": 0.42
+                },
+                "final": 0.42,
+                "gain": 0,
+                "cost_per_quality_point": null
+              },
+              "stages": [
+                {
+                  "stage": "s0",
+                  "version": null,
+                  "duration_ms": 3428,
+                  "pages_affected": 81,
+                  "tokens_in": 290,
+                  "tokens_out": 241,
+                  "cost_usd": 0.001196,
+                  "approach": null,
+                  "notes": "text_layer_skip: no OCR needed"
+                },
+                {
+                  "stage": "s6",
+                  "version": "1.0",
+                  "duration_ms": 0,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": "claude-haiku-4-5-20251001",
+                  "notes": null
+                }
+              ],
+              "errors": [],
+              "decisions": [
+                {
+                  "stage": "s0",
+                  "decision": "baseline_computed",
+                  "reason": "composite=0.420 readable=0.20 lang=unknown pages=81",
+                  "value": 0.42,
+                  "ts": 1778199268426
+                },
+                {
+                  "stage": "s0",
+                  "decision": "domain_detected",
+                  "reason": "haiku_thin_signals confidence=0.30",
+                  "value": 0.3,
+                  "ts": 1778199271473
+                },
+                {
+                  "stage": "s0",
+                  "decision": "skip_all_ocr",
+                  "reason": "has_text_layer=1 avg_chars=353 — text PDF needs no OCR",
+                  "value": 0.42,
+                  "ts": 1778199271473
+                },
+                {
+                  "stage": "s6",
+                  "decision": "skip",
+                  "reason": "baseline 0.420 < min 0.45 — too broken for spell-fix",
+                  "value": 0.42,
+                  "ts": 1778199271474
+                }
+              ],
+              "totals": {
+                "cost_usd": 0.001196,
+                "tokens_in": 290,
+                "tokens_out": 241,
+                "duration_ms": 3428
+              },
+              "outputs": {
+                "archivalPdfPath": null,
+                "mdPath": null,
+                "receiptPath": null
+              },
+              "assessment": {
+                "doc_type": "text_pdf",
+                "correction_summary": "spell-fix",
+                "domain_context": "religious-texts",
+                "quality_gain_pct": 0,
+                "gs_normalized": false
+              },
+              "suggestions": [
+                {
+                  "category": "model_config",
+                  "priority": "low",
+                  "suggestion": "domain detected via Haiku on thin signals — provide richer caller context"
+                }
+              ]
+            }
+          },
+          {
+            "ok": true,
+            "variantId": "surya_multi_haiku_eng",
+            "score": 0.42,
+            "cost": 0.001156,
+            "elapsed": 6,
+            "receipt": {
+              "doc_id": "2254704f-b0ea-47a7-b3fd-fc5e34061d4a",
+              "source_url": "https://bahai-library.com/pdf/p/pilgrims_notes_us-archives_1900_heh.pdf",
+              "processed_at": "2026-05-08T00:14:37.214Z",
+              "pipeline_version": "1.0.0",
+              "importance": 5,
+              "page_count": 81,
+              "quality": {
+                "baseline": {
+                  "composite_score": 0.42,
+                  "readable_pages_pct": 0.2,
+                  "word_quality": 0,
+                  "has_text_layer": 1,
+                  "avg_chars_per_page": 353,
+                  "language": "unknown",
+                  "excerpt": "(t:t DO ----.--.--.. -..... ----.----.. -- --.--.- -.. --.-----.---~ . __ ....... \" ,. , ._-----'--:..---.... -.-- ---\" --,--_._ .. _._.---- , .' \" ! \"\\\"::' ' . ' , ...!---'~-------~-. -------~---~-- -----------~ -- ------_ . . ' - - --------------- --.. _--....---- _... .._-----",
+                  "processing_difficulty": 0.05
+                },
+                "per_stage": {
+                  "s0": 0.42
+                },
+                "final": 0.42,
+                "gain": 0,
+                "cost_per_quality_point": null
+              },
+              "stages": [
+                {
+                  "stage": "s0",
+                  "version": null,
+                  "duration_ms": 2973,
+                  "pages_affected": 81,
+                  "tokens_in": 290,
+                  "tokens_out": 231,
+                  "cost_usd": 0.001156,
+                  "approach": null,
+                  "notes": "text_layer_skip: no OCR needed"
+                },
+                {
+                  "stage": "s6",
+                  "version": "1.0",
+                  "duration_ms": 0,
+                  "pages_affected": 0,
+                  "tokens_in": 0,
+                  "tokens_out": 0,
+                  "cost_usd": 0,
+                  "approach": "claude-haiku-4-5-20251001",
+                  "notes": null
+                }
+              ],
+              "errors": [],
+              "decisions": [
+                {
+                  "stage": "s0",
+                  "decision": "baseline_computed",
+                  "reason": "composite=0.420 readable=0.20 lang=unknown pages=81",
+                  "value": 0.42,
+                  "ts": 1778199274383
+                },
+                {
+                  "stage": "s0",
+                  "decision": "domain_detected",
+                  "reason": "haiku_thin_signals confidence=0.35",
+                  "value": 0.35,
+                  "ts": 1778199277212
+                },
+                {
+                  "stage": "s0",
+                  "decision": "skip_all_ocr",
+                  "reason": "has_text_layer=1 avg_chars=353 — text PDF needs no OCR",
+                  "value": 0.42,
+                  "ts": 1778199277212
+                },
+                {
+                  "stage": "s6",
+                  "decision": "skip",
+                  "reason": "baseline 0.420 < min 0.45 — too broken for spell-fix",
+                  "value": 0.42,
+                  "ts": 1778199277213
+                }
+              ],
+              "totals": {
+                "cost_usd": 0.001156,
+                "tokens_in": 290,
+                "tokens_out": 231,
+                "duration_ms": 2973
+              },
+              "outputs": {
+                "archivalPdfPath": null,
+                "mdPath": null,
+                "receiptPath": null
+              },
+              "assessment": {
+                "doc_type": "text_pdf",
+                "correction_summary": "spell-fix",
+                "domain_context": "religious-texts",
+                "quality_gain_pct": 0,
+                "gs_normalized": false
+              },
+              "suggestions": [
+                {
+                  "category": "model_config",
+                  "priority": "low",
+                  "suggestion": "domain detected via Haiku on thin signals — provide richer caller context"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

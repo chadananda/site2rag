@@ -329,6 +329,7 @@ export async function s4Escalate(ctx) {
 
         page._bucketed = page._bucketed ?? { clean: 0, fuzzy: 0, dirty: 0, needs_vision: 0 };
         page._bucketed.needs_vision = page.words.filter(w => w.needs_vision).length;
+
         pagesAffected++;
       } catch (pageErr) {
         ctx.addError('s4', pageErr, true);

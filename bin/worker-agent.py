@@ -172,7 +172,7 @@ def _find_pipeline_scripts_dir():
 _SCRIPTS_DIR = _find_pipeline_scripts_dir()
 PYTHON_SCRIPTS = {}
 if _SCRIPTS_DIR:
-    for _name in ('easyocr_ocr', 'paddle_ocr', 'doctr_ocr', 'kraken_ocr'):
+    for _name in ('easyocr_ocr', 'paddle_ocr', 'doctr_ocr', 'kraken_ocr', 'preprocess_image'):
         _path = os.path.join(_SCRIPTS_DIR, f'{_name}.py')
         if os.path.isfile(_path):
             PYTHON_SCRIPTS[_name] = _path

@@ -92,7 +92,11 @@ export class JobStore {
 
   /** Reset jobs stuck in 'processing' that started before a given ISO timestamp. Returns count.
    *  Pass the server start time so only orphaned jobs from previous instances are reset. */
-  resetStuck(beforeIso) {
+  requeue(id) {
+    this.db.prepare("UPDATE jobs SET status='pending', started_at=NULL, progress=NULL WHERE id=?").run(id);
+  }
+
+    resetStuck(beforeIso) {
     const sql = beforeIso
       ? "UPDATE jobs SET status='pending', started_at=NULL, progress=NULL WHERE status='processing' AND (started_at IS NULL OR started_at < ?)"
       : "UPDATE jobs SET status='pending', started_at=NULL, progress=NULL WHERE status='processing'";

@@ -404,10 +404,21 @@ async function buildBackendChain(ctx) {
   if (ctx.config.disableCloudVision) return [];
   const order = ctx.config.implementations?.vision ?? ['boss', 'azure', 'google', 'claude-opus-4-7'];
   const difficulty = ctx.quality?.baseline?.processing_difficulty ?? 0;
-  // Hard/handwritten docs escalate to cloud vision regardless of importance (difficulty >= 0.5).
-  // Standard cloud gate still applies for easy docs (importance >= cloudVision threshold).
+  // Cloud gate: standard importance threshold OR high-difficulty (handwritten/degraded) doc with importance >= 4.
+  // Handwritten Arabic without importance >= 4 is not worth cloud spend — skip it.
+  // Additional gate: low-importance + low-difficulty + already-decent score → skip all cloud vision.
+  // Empirically 21% of jobs hit s5 at $0.25/run; most are not worth the spend.
+  const minImportanceForCloud = ctx.config.escalation?.minImportanceForCloud ?? 2;
+  const minDifficultyForCloud = ctx.config.escalation?.minDifficultyForCloud ?? 0.30;
+  const s4Score = ctx.quality.perStage?.s4 ?? ctx.quality.perStage?.s3 ?? 0;
+  if (ctx.importance < minImportanceForCloud && difficulty < minDifficultyForCloud && s4Score > 0.70) {
+    ctx.addDecision('s5', 'skip_low_value',
+      `importance=${ctx.importance} difficulty=${difficulty.toFixed(2)} s4_score=${s4Score.toFixed(3)} → no cloud vision`);
+    ctx.endStage('s5', { pages_affected: 0 });
+    return ctx;
+  }
   const cloudVisionGate = ctx.config.escalation?.cloudVision ?? 3;
-  const needsCloud = ctx.importance >= cloudVisionGate || difficulty >= 0.5;
+  const needsCloud = ctx.importance >= cloudVisionGate || (difficulty >= 0.5 && ctx.importance >= 4);
   // Use appropriate prompt: RTL languages need explicit Arabic/Persian guidance; hard/handwritten use handwriting prompt
   const docLang = ctx.pages[0]?._lang ?? ctx.quality?.baseline?.language ?? 'eng';
   const isRtl = RTL_LANGS.has(docLang);

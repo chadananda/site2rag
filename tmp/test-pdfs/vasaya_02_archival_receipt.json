@@ -1,0 +1,563 @@
+{
+  "doc_id": "bench-3",
+  "source_url": null,
+  "processed_at": "2026-05-11T01:31:40.562Z",
+  "pipeline_version": "1.0.0",
+  "importance": 1,
+  "page_count": 5,
+  "quality": {
+    "baseline": {
+      "composite_score": 0,
+      "readable_pages_pct": 0,
+      "word_quality": 0,
+      "has_text_layer": 0,
+      "avg_chars_per_page": 2,
+      "language": "unknown",
+      "excerpt": "",
+      "processing_difficulty": 0.3
+    },
+    "per_stage": {
+      "s0": 0,
+      "s3": 0.669,
+      "s5": 1,
+      "s8": 1
+    },
+    "final": 1,
+    "gain": 1,
+    "cost_per_quality_point": null
+  },
+  "stages": [
+    {
+      "stage": "s0",
+      "version": null,
+      "duration_ms": 107,
+      "pages_affected": 5,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s1",
+      "version": null,
+      "duration_ms": 10385,
+      "pages_affected": 5,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s2",
+      "version": null,
+      "duration_ms": 0,
+      "pages_affected": 5,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s3",
+      "version": null,
+      "duration_ms": 377030,
+      "pages_affected": 4,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": "eng"
+    },
+    {
+      "stage": "s4",
+      "version": null,
+      "duration_ms": 120013,
+      "pages_affected": 5,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s5",
+      "version": null,
+      "duration_ms": 61529,
+      "pages_affected": 5,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s7",
+      "version": null,
+      "duration_ms": 10377,
+      "pages_affected": 5,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": "method:ocrmypdf-pdfa3"
+    },
+    {
+      "stage": "s8",
+      "version": null,
+      "duration_ms": 1,
+      "pages_affected": 5,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": "bbox_words:5p"
+    }
+  ],
+  "errors": [
+    {
+      "stage": "s3",
+      "error": "surya batch chunk 0: Command failed: /tank/site2rag/surya-venv/bin/surya_ocr /tank/site2rag/tmp/site2rag-s3-ffdc450e4c35a5a9/surya-p1-in-0 --output_dir /tank/site2rag/tmp/site2rag-s3-ffdc450e4c35a5a9/surya-p1-out-0\n2026-05-10 18:22:44.177191: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered\nWARNING: All log messages before absl::InitializeLog() is called are written to STDERR\nE0000 00:00:1778462564.220468  424421 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered\nE0000 00:00:1778462564.244101  424421 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered\nW0000 00:00:1778462564.280612  424421 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778462564.280727  424421 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778462564.280738  424421 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778462564.280746  424421 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\n2026-05-10 18:22:44.290409: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.\nTo enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.\nusage: surya_ocr [-h] [--results_dir RESULTS_DIR] [--max MAX]\n                 [--start_page START_PAGE] [--images] [--langs LANGS]\n                 [--lang_file LANG_FILE] [--debug]\n                 input_path\nsurya_ocr: error: unrecognized arguments: --output_dir /tank/site2rag/tmp/site2rag-s3-ffdc450e4c35a5a9/surya-p1-out-0\n",
+      "recoverable": true
+    },
+    {
+      "stage": "s3",
+      "error": "surya batch chunk 0: Command failed: /tank/site2rag/surya-venv/bin/surya_ocr /tank/site2rag/tmp/site2rag-s3-ffdc450e4c35a5a9/surya-p2-in-0 --output_dir /tank/site2rag/tmp/site2rag-s3-ffdc450e4c35a5a9/surya-p2-out-0\n2026-05-10 18:22:47.905194: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered\nWARNING: All log messages before absl::InitializeLog() is called are written to STDERR\nE0000 00:00:1778462567.950873  425193 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered\nE0000 00:00:1778462567.961228  425193 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered\nW0000 00:00:1778462567.988224  425193 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778462567.988263  425193 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778462567.988269  425193 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778462567.988274  425193 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\n2026-05-10 18:22:47.993722: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.\nTo enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.\nusage: surya_ocr [-h] [--results_dir RESULTS_DIR] [--max MAX]\n                 [--start_page START_PAGE] [--images] [--langs LANGS]\n                 [--lang_file LANG_FILE] [--debug]\n                 input_path\nsurya_ocr: error: unrecognized arguments: --output_dir /tank/site2rag/tmp/site2rag-s3-ffdc450e4c35a5a9/surya-p2-out-0\n",
+      "recoverable": true
+    },
+    {
+      "stage": "s3",
+      "error": "surya batch chunk 0: Command failed: /tank/site2rag/surya-venv/bin/surya_ocr /tank/site2rag/tmp/site2rag-s3-ffdc450e4c35a5a9/surya-p3-in-0 --output_dir /tank/site2rag/tmp/site2rag-s3-ffdc450e4c35a5a9/surya-p3-out-0\n2026-05-10 18:22:52.826789: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered\nWARNING: All log messages before absl::InitializeLog() is called are written to STDERR\nE0000 00:00:1778462572.863346  425997 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered\nE0000 00:00:1778462572.894165  425997 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered\nW0000 00:00:1778462572.925170  425997 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778462572.925248  425997 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778462572.925256  425997 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778462572.925269  425997 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\n2026-05-10 18:22:52.942739: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.\nTo enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.\nusage: surya_ocr [-h] [--results_dir RESULTS_DIR] [--max MAX]\n                 [--start_page START_PAGE] [--images] [--langs LANGS]\n                 [--lang_file LANG_FILE] [--debug]\n                 input_path\nsurya_ocr: error: unrecognized arguments: --output_dir /tank/site2rag/tmp/site2rag-s3-ffdc450e4c35a5a9/surya-p3-out-0\n",
+      "recoverable": true
+    }
+  ],
+  "decisions": [
+    {
+      "stage": "s0",
+      "decision": "baseline_computed",
+      "reason": "composite=0.000 readable=0.00 lang=unknown pages=5",
+      "value": 0,
+      "ts": 1778462521215
+    },
+    {
+      "stage": "s0",
+      "decision": "domain_detected",
+      "reason": "pattern_match_fallback confidence=0.00",
+      "value": 0,
+      "ts": 1778462521215
+    },
+    {
+      "stage": "s1",
+      "decision": "pdf_ok",
+      "reason": "no normalization needed",
+      "value": 1,
+      "ts": 1778462521328
+    },
+    {
+      "stage": "s1",
+      "decision": "preprocess",
+      "reason": "unpaper: 5/5 pages",
+      "value": null,
+      "ts": 1778462531601
+    },
+    {
+      "stage": "s2",
+      "decision": "fallback",
+      "reason": "no apiKey — language default",
+      "value": null,
+      "ts": 1778462531602
+    },
+    {
+      "stage": "s3",
+      "decision": "engines_available",
+      "reason": "surya, easyocr, paddle, doctr",
+      "value": null,
+      "ts": 1778462547961
+    },
+    {
+      "stage": "s3",
+      "decision": "script_p1",
+      "reason": "OSD: Cyrillic (rus) conf=0.73 — differs from metadata lang=eng",
+      "value": null,
+      "ts": 1778462551385
+    },
+    {
+      "stage": "s3",
+      "decision": "script_p2",
+      "reason": "OSD confirms: Latin (eng) conf=1.74",
+      "value": null,
+      "ts": 1778462551954
+    },
+    {
+      "stage": "s3",
+      "decision": "script_p3",
+      "reason": "OSD confirms: Latin (eng) conf=2.45",
+      "value": null,
+      "ts": 1778462553420
+    },
+    {
+      "stage": "s3",
+      "decision": "script_p5",
+      "reason": "OSD confirms: Latin (eng) conf=3.52",
+      "value": null,
+      "ts": 1778462553459
+    },
+    {
+      "stage": "s3",
+      "decision": "script_p4",
+      "reason": "OSD confirms: Latin (eng) conf=3.76",
+      "value": null,
+      "ts": 1778462553471
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p1",
+      "reason": "raw: 0 raw → 0 usable",
+      "value": null,
+      "ts": 1778462555498
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p1",
+      "reason": "opencv: 13 blocks",
+      "value": null,
+      "ts": 1778462555877
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p2",
+      "reason": "raw: 0 raw → 0 usable",
+      "value": null,
+      "ts": 1778462556810
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p2",
+      "reason": "opencv: 19 blocks",
+      "value": null,
+      "ts": 1778462557158
+    },
+    {
+      "stage": "s3",
+      "decision": "blocks_p1",
+      "reason": "13 blocks detected, 13 OCR'd",
+      "value": null,
+      "ts": 1778462558083
+    },
+    {
+      "stage": "s3",
+      "decision": "doctr_p1",
+      "reason": "0/13 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778462560320
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p3",
+      "reason": "raw: 0 raw → 0 usable",
+      "value": null,
+      "ts": 1778462560889
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p3",
+      "reason": "opencv: 15 blocks",
+      "value": null,
+      "ts": 1778462561218
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p5",
+      "reason": "raw: 0 raw → 0 usable",
+      "value": null,
+      "ts": 1778462561555
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p4",
+      "reason": "raw: 0 raw → 0 usable",
+      "value": null,
+      "ts": 1778462561599
+    },
+    {
+      "stage": "s3",
+      "decision": "blocks_p2",
+      "reason": "19 blocks detected, 19 OCR'd",
+      "value": null,
+      "ts": 1778462561858
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p5",
+      "reason": "opencv: 10 blocks",
+      "value": null,
+      "ts": 1778462561950
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p4",
+      "reason": "opencv: 10 blocks",
+      "value": null,
+      "ts": 1778462562122
+    },
+    {
+      "stage": "s3",
+      "decision": "easyocr_p1",
+      "reason": "0/13 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778462564518
+    },
+    {
+      "stage": "s3",
+      "decision": "blocks_p3",
+      "reason": "15 blocks detected, 15 OCR'd",
+      "value": null,
+      "ts": 1778462567127
+    },
+    {
+      "stage": "s3",
+      "decision": "easyocr_p2",
+      "reason": "3/15 crops (4 skipped clean)",
+      "value": null,
+      "ts": 1778462567575
+    },
+    {
+      "stage": "s3",
+      "decision": "blocks_p5",
+      "reason": "10 blocks detected, 10 OCR'd",
+      "value": null,
+      "ts": 1778462570007
+    },
+    {
+      "stage": "s3",
+      "decision": "blocks_p4",
+      "reason": "10 blocks detected, 10 OCR'd",
+      "value": null,
+      "ts": 1778462570602
+    },
+    {
+      "stage": "s3",
+      "decision": "easyocr_p3",
+      "reason": "3/13 crops (2 skipped clean)",
+      "value": null,
+      "ts": 1778462573846
+    },
+    {
+      "stage": "s3",
+      "decision": "paddle_p2",
+      "reason": "4/15 crops (4 skipped clean)",
+      "value": null,
+      "ts": 1778462576731
+    },
+    {
+      "stage": "s3",
+      "decision": "doctr_p2",
+      "reason": "4/15 crops (4 skipped clean)",
+      "value": null,
+      "ts": 1778462584751
+    },
+    {
+      "stage": "s3",
+      "decision": "doctr_p3",
+      "reason": "3/13 crops (2 skipped clean)",
+      "value": null,
+      "ts": 1778462587301
+    },
+    {
+      "stage": "s3",
+      "decision": "doctr_p5",
+      "reason": "6/10 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778462593155
+    },
+    {
+      "stage": "s3",
+      "decision": "paddle_p3",
+      "reason": "0/13 crops (2 skipped clean)",
+      "value": null,
+      "ts": 1778462601605
+    },
+    {
+      "stage": "s3",
+      "decision": "doctr_p4",
+      "reason": "5/10 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778462602583
+    },
+    {
+      "stage": "s3",
+      "decision": "easyocr_p5",
+      "reason": "6/10 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778462606080
+    },
+    {
+      "stage": "s3",
+      "decision": "easyocr_p4",
+      "reason": "5/10 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778462624968
+    },
+    {
+      "stage": "s3",
+      "decision": "paddle_p1",
+      "reason": "0/13 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778462734602
+    },
+    {
+      "stage": "s3",
+      "decision": "paddle_p5",
+      "reason": "6/10 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778462907092
+    },
+    {
+      "stage": "s3",
+      "decision": "paddle_p4",
+      "reason": "5/10 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778462908629
+    },
+    {
+      "stage": "s3",
+      "decision": "routing_summary",
+      "reason": "{\"eng\":5}",
+      "value": null,
+      "ts": 1778462908635
+    },
+    {
+      "stage": "s4",
+      "decision": "page_1",
+      "reason": "needs-full-vision",
+      "value": 0,
+      "ts": 1778463028649
+    },
+    {
+      "stage": "s4",
+      "decision": "page_2",
+      "reason": "kept-original",
+      "value": 4.706976005085011,
+      "ts": 1778463028650
+    },
+    {
+      "stage": "s4",
+      "decision": "page_3",
+      "reason": "kept-original",
+      "value": -2.961497082072299,
+      "ts": 1778463028650
+    },
+    {
+      "stage": "s4",
+      "decision": "page_4",
+      "reason": "kept-original",
+      "value": 1.8102737242817,
+      "ts": 1778463028651
+    },
+    {
+      "stage": "s4",
+      "decision": "page_5",
+      "reason": "kept-original",
+      "value": 0.13764883951081686,
+      "ts": 1778463028651
+    },
+    {
+      "stage": "s5",
+      "decision": "engines",
+      "reason": "surya, easyocr, paddle, doctr",
+      "value": null,
+      "ts": 1778463042972
+    },
+    {
+      "stage": "s5",
+      "decision": "doctr_batch",
+      "reason": "0/5 pages",
+      "value": null,
+      "ts": 1778463043462
+    },
+    {
+      "stage": "s5",
+      "decision": "paddle_batch",
+      "reason": "5/5 pages",
+      "value": null,
+      "ts": 1778463062987
+    },
+    {
+      "stage": "s5",
+      "decision": "easyocr_batch",
+      "reason": "5/5 pages",
+      "value": null,
+      "ts": 1778463085173
+    },
+    {
+      "stage": "s5",
+      "decision": "page_1",
+      "reason": "engine_direct",
+      "value": 192,
+      "ts": 1778463085174
+    },
+    {
+      "stage": "s5",
+      "decision": "page_2",
+      "reason": "engine_direct",
+      "value": 845,
+      "ts": 1778463085175
+    },
+    {
+      "stage": "s5",
+      "decision": "page_3",
+      "reason": "engine_direct",
+      "value": 3565,
+      "ts": 1778463085175
+    },
+    {
+      "stage": "s5",
+      "decision": "page_4",
+      "reason": "engine_direct",
+      "value": 4089,
+      "ts": 1778463085176
+    },
+    {
+      "stage": "s5",
+      "decision": "page_5",
+      "reason": "engine_direct",
+      "value": 4174,
+      "ts": 1778463085176
+    },
+    {
+      "stage": "s7",
+      "decision": "rebuilt",
+      "reason": "method=ocrmypdf-pdfa3",
+      "value": "/tank/site2rag/app/tmp/test-pdfs/vasaya_02_archival.pdf",
+      "ts": 1778463100560
+    },
+    {
+      "stage": "s8",
+      "decision": "wrote_md",
+      "reason": "bbox_words",
+      "value": "/tank/site2rag/app/tmp/test-pdfs/vasaya_02_archival.md",
+      "ts": 1778463100561
+    }
+  ],
+  "totals": {
+    "cost_usd": 0,
+    "tokens_in": 0,
+    "tokens_out": 0,
+    "duration_ms": 579442
+  },
+  "outputs": {
+    "archivalPdfPath": "/tank/site2rag/app/tmp/test-pdfs/vasaya_02_archival.pdf",
+    "mdPath": "/tank/site2rag/app/tmp/test-pdfs/vasaya_02_archival.md",
+    "receiptPath": null
+  },
+  "assessment": {
+    "doc_type": "image_pdf",
+    "correction_summary": "normalize → OCR → escalate → vision → archive → export",
+    "domain_context": "religious-texts",
+    "quality_gain_pct": 100,
+    "gs_normalized": false
+  },
+  "suggestions": []
+}

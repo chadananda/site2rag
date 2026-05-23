@@ -49,7 +49,7 @@ export const DEFAULT_CONFIG = {
     paddleocr: 1,         // PaddleOCR for Arabic/Persian
     localVision: 1,       // boss vision model
     suryaVision: 2,       // surya OCR service (free, good for Arabic/CJK)
-    cloudVision: 3,       // Azure / Google / Claude (paid)
+    cloudVision: 99,      // Cloud vision disabled by default — treat as failure, not fallback
     multiModel: 4,        // run all models + consensus
     domainRag: 3,         // match against known corpus
     humanReview: 5,       // flag for Transkribus / human HTR

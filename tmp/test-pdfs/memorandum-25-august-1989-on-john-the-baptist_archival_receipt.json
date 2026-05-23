@@ -1,0 +1,416 @@
+{
+  "doc_id": "46eb7c35-f188-427e-8897-abffce2d02b7",
+  "source_url": null,
+  "processed_at": "2026-05-10T04:03:03.090Z",
+  "pipeline_version": "1.0.0",
+  "importance": 1,
+  "page_count": 2,
+  "quality": {
+    "baseline": {
+      "composite_score": 0,
+      "readable_pages_pct": 0,
+      "word_quality": 0,
+      "has_text_layer": 0,
+      "avg_chars_per_page": 2,
+      "language": "unknown",
+      "excerpt": "",
+      "processing_difficulty": 0.3
+    },
+    "per_stage": {
+      "s0": 0,
+      "s3": 0.764,
+      "s5": 1,
+      "s8": 1
+    },
+    "final": 1,
+    "gain": 1,
+    "cost_per_quality_point": 0.0161632
+  },
+  "stages": [
+    {
+      "stage": "s0",
+      "version": null,
+      "duration_ms": 7367,
+      "pages_affected": 2,
+      "tokens_in": 337,
+      "tokens_out": 47,
+      "cost_usd": 0.00045759999999999996,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s1",
+      "version": null,
+      "duration_ms": 6086,
+      "pages_affected": 2,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s2",
+      "version": null,
+      "duration_ms": 1644,
+      "pages_affected": 2,
+      "tokens_in": 2768,
+      "tokens_out": 106,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s3",
+      "version": null,
+      "duration_ms": 321553,
+      "pages_affected": 2,
+      "tokens_in": 3400,
+      "tokens_out": 552,
+      "cost_usd": 0.004928,
+      "approach": null,
+      "notes": "eng"
+    },
+    {
+      "stage": "s4",
+      "version": null,
+      "duration_ms": 37467,
+      "pages_affected": 2,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s5",
+      "version": null,
+      "duration_ms": 109896,
+      "pages_affected": 2,
+      "tokens_in": 5992,
+      "tokens_out": 1496,
+      "cost_usd": 0.0107776,
+      "approach": null,
+      "notes": null
+    },
+    {
+      "stage": "s7",
+      "version": null,
+      "duration_ms": 17641,
+      "pages_affected": 2,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": "method:ocrmypdf-pdfa3"
+    },
+    {
+      "stage": "s8",
+      "version": null,
+      "duration_ms": 1,
+      "pages_affected": 2,
+      "tokens_in": 0,
+      "tokens_out": 0,
+      "cost_usd": 0,
+      "approach": null,
+      "notes": "bbox_words:2p"
+    }
+  ],
+  "errors": [
+    {
+      "stage": "s3",
+      "error": "surya batch chunk 0: Command failed: /tank/site2rag/surya-venv/bin/surya_ocr /tank/site2rag/tmp/site2rag-s3-48af98a7c3c70745/surya-p2-in-0 --results_dir /tank/site2rag/tmp/site2rag-s3-48af98a7c3c70745/surya-p2-out-0\n2026-05-09 20:58:12.285213: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered\nWARNING: All log messages before absl::InitializeLog() is called are written to STDERR\nE0000 00:00:1778385492.312682 1620016 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered\nE0000 00:00:1778385492.321441 1620016 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered\nW0000 00:00:1778385492.345493 1620016 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778385492.345530 1620016 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778385492.345534 1620016 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778385492.345537 1620016 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\n2026-05-09 20:58:12.351910: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.\nTo enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.\n/tank/site2rag/surya-venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884\n  warnings.warn(\n\rDetecting bboxes:   0%|          | 0/2 [00:00<?, ?it/s]\rDetecting bboxes:  50%|█████     | 1/2 [00:42<00:42, 42.32s/it]",
+      "recoverable": true
+    },
+    {
+      "stage": "s3",
+      "error": "surya batch chunk 0: Command failed: /tank/site2rag/surya-venv/bin/surya_ocr /tank/site2rag/tmp/site2rag-s3-48af98a7c3c70745/surya-p1-in-0 --results_dir /tank/site2rag/tmp/site2rag-s3-48af98a7c3c70745/surya-p1-out-0\n2026-05-09 20:58:12.343828: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered\nWARNING: All log messages before absl::InitializeLog() is called are written to STDERR\nE0000 00:00:1778385492.373137 1619949 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered\nE0000 00:00:1778385492.382561 1619949 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered\nW0000 00:00:1778385492.406888 1619949 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778385492.406924 1619949 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778385492.406928 1619949 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778385492.406931 1619949 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\n2026-05-09 20:58:12.413541: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.\nTo enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.\n/tank/site2rag/surya-venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884\n  warnings.warn(\n\rDetecting bboxes:   0%|          | 0/2 [00:00<?, ?it/s]\rDetecting bboxes:  50%|█████     | 1/2 [00:38<00:38, 38.07s/it]",
+      "recoverable": true
+    },
+    {
+      "stage": "s5",
+      "error": "surya: Command failed: /tank/site2rag/surya-venv/bin/surya_ocr /tank/site2rag/tmp/site2rag-surya-48af98a7c3c7-chunk0 --results_dir /tank/site2rag/tmp/site2rag-surya-48af98a7c3c7-chunk0-out\n2026-05-09 21:01:43.999609: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered\nWARNING: All log messages before absl::InitializeLog() is called are written to STDERR\nE0000 00:00:1778385704.432415 1645356 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered\nE0000 00:00:1778385704.611932 1645356 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered\nW0000 00:00:1778385705.706345 1645356 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778385705.706434 1645356 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778385705.706442 1645356 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\nW0000 00:00:1778385705.706448 1645356 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.\n2026-05-09 21:01:45.797309: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.\nTo enable the following instructions: AVX2 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.\n/tank/site2rag/surya-venv/lib/python3.12/site-packages/transformers/tokenization_utils_base.py:1601: FutureWarning: `clean_up_tokenization_spaces` was not set. It will be set to `True` by default. This behavior will be depracted in transformers v4.45, and will be then set to `False` by default. For more details check this issue: https://github.com/huggingface/transformers/issues/31884\n  warnings.warn(\n\rDetecting bboxes:   0%|          | 0/1 [00:00<?, ?it/s]\rDetecting bboxes: 100%|██████████| 1/1 [00:14<00:00, 14.06s/it]\rDetecting bboxes: 100%|██████████| 1/1 [00:14<00:00, 14.06s/it]\n\rRecognizing Text:   0%|          | 0/4 [00:00<?, ?it/s]\rRecognizing Text:  25%|██▌       | 1/4 [00:16<00:50, 16.73s/it]",
+      "recoverable": true
+    }
+  ],
+  "decisions": [
+    {
+      "stage": "s0",
+      "decision": "baseline_computed",
+      "reason": "composite=0.000 readable=0.00 lang=unknown pages=2",
+      "value": 0,
+      "ts": 1778385281460
+    },
+    {
+      "stage": "s0",
+      "decision": "scan_profile",
+      "reason": "lang=eng conf=0.95 issues=faded,low_contrast",
+      "value": null,
+      "ts": 1778385288756
+    },
+    {
+      "stage": "s0",
+      "decision": "domain_detected",
+      "reason": "pattern_match_fallback confidence=0.00",
+      "value": 0,
+      "ts": 1778385288758
+    },
+    {
+      "stage": "s1",
+      "decision": "pdf_ok",
+      "reason": "no normalization needed",
+      "value": 1,
+      "ts": 1778385288841
+    },
+    {
+      "stage": "s1",
+      "decision": "preprocess",
+      "reason": "unpaper: 2/2 pages",
+      "value": null,
+      "ts": 1778385294845
+    },
+    {
+      "stage": "s2",
+      "decision": "page_1",
+      "reason": "haiku:printed_latin",
+      "value": null,
+      "ts": 1778385296464
+    },
+    {
+      "stage": "s2",
+      "decision": "page_2",
+      "reason": "haiku:printed_latin",
+      "value": null,
+      "ts": 1778385296490
+    },
+    {
+      "stage": "s3",
+      "decision": "engines_available",
+      "reason": "surya, easyocr, paddle, doctr",
+      "value": null,
+      "ts": 1778385319925
+    },
+    {
+      "stage": "s3",
+      "decision": "script_p1",
+      "reason": "OSD confirms: Latin (eng) conf=6.28",
+      "value": null,
+      "ts": 1778385392965
+    },
+    {
+      "stage": "s3",
+      "decision": "script_p2",
+      "reason": "OSD confirms: Latin (eng) conf=6.13",
+      "value": null,
+      "ts": 1778385399880
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p1",
+      "reason": "raw: 0 raw → 0 usable",
+      "value": null,
+      "ts": 1778385417025
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p2",
+      "reason": "raw: 0 raw → 0 usable",
+      "value": null,
+      "ts": 1778385419407
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p1",
+      "reason": "vision suggested: [otsu, sharpen]",
+      "value": null,
+      "ts": 1778385473787
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p2",
+      "reason": "vision suggested: [otsu, sharpen]",
+      "value": null,
+      "ts": 1778385473959
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p1",
+      "reason": "opencv: 17 blocks",
+      "value": null,
+      "ts": 1778385480969
+    },
+    {
+      "stage": "s3",
+      "decision": "layout_p2",
+      "reason": "opencv: 12 blocks",
+      "value": null,
+      "ts": 1778385481696
+    },
+    {
+      "stage": "s3",
+      "decision": "blocks_p1",
+      "reason": "17 blocks detected, 17 OCR'd",
+      "value": null,
+      "ts": 1778385487091
+    },
+    {
+      "stage": "s3",
+      "decision": "blocks_p2",
+      "reason": "12 blocks detected, 12 OCR'd",
+      "value": null,
+      "ts": 1778385487169
+    },
+    {
+      "stage": "s3",
+      "decision": "doctr_p2",
+      "reason": "4/11 crops (1 skipped clean)",
+      "value": null,
+      "ts": 1778385497758
+    },
+    {
+      "stage": "s3",
+      "decision": "paddle_p2",
+      "reason": "4/11 crops (1 skipped clean)",
+      "value": null,
+      "ts": 1778385557501
+    },
+    {
+      "stage": "s3",
+      "decision": "doctr_p1",
+      "reason": "7/17 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778385567120
+    },
+    {
+      "stage": "s3",
+      "decision": "paddle_p1",
+      "reason": "6/17 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778385567546
+    },
+    {
+      "stage": "s3",
+      "decision": "easyocr_p2",
+      "reason": "4/11 crops (1 skipped clean)",
+      "value": null,
+      "ts": 1778385596289
+    },
+    {
+      "stage": "s3",
+      "decision": "synth_p2",
+      "reason": "2/12 blocks synthesized",
+      "value": null,
+      "ts": 1778385598373
+    },
+    {
+      "stage": "s3",
+      "decision": "easyocr_p1",
+      "reason": "6/17 crops (0 skipped clean)",
+      "value": null,
+      "ts": 1778385610136
+    },
+    {
+      "stage": "s3",
+      "decision": "synth_p1",
+      "reason": "4/17 blocks synthesized",
+      "value": null,
+      "ts": 1778385618044
+    },
+    {
+      "stage": "s3",
+      "decision": "routing_summary",
+      "reason": "{\"eng\":2}",
+      "value": null,
+      "ts": 1778385618044
+    },
+    {
+      "stage": "s4",
+      "decision": "page_1",
+      "reason": "replaced-600dpi",
+      "value": 11.104300719753809,
+      "ts": 1778385653707
+    },
+    {
+      "stage": "s4",
+      "decision": "page_2",
+      "reason": "replaced-600dpi",
+      "value": 6.450198696550629,
+      "ts": 1778385655536
+    },
+    {
+      "stage": "s5",
+      "decision": "engines",
+      "reason": "surya, easyocr, paddle, doctr",
+      "value": null,
+      "ts": 1778385690202
+    },
+    {
+      "stage": "s5",
+      "decision": "doctr_batch",
+      "reason": "0/2 pages",
+      "value": null,
+      "ts": 1778385690275
+    },
+    {
+      "stage": "s5",
+      "decision": "paddle_batch",
+      "reason": "2/2 pages",
+      "value": null,
+      "ts": 1778385696394
+    },
+    {
+      "stage": "s5",
+      "decision": "easyocr_batch",
+      "reason": "2/2 pages",
+      "value": null,
+      "ts": 1778385729601
+    },
+    {
+      "stage": "s5",
+      "decision": "page_1",
+      "reason": "haiku+[paddle+easyocr]",
+      "value": 2595,
+      "ts": 1778385759353
+    },
+    {
+      "stage": "s5",
+      "decision": "page_2",
+      "reason": "haiku+[paddle+easyocr]",
+      "value": 2952,
+      "ts": 1778385760416
+    },
+    {
+      "stage": "s7",
+      "decision": "rebuilt",
+      "reason": "method=ocrmypdf-pdfa3",
+      "value": "/tank/site2rag/app/tmp/test-pdfs/memorandum-25-august-1989-on-john-the-baptist_archival.pdf",
+      "ts": 1778385783087
+    },
+    {
+      "stage": "s8",
+      "decision": "wrote_md",
+      "reason": "bbox_words",
+      "value": "/tank/site2rag/app/tmp/test-pdfs/memorandum-25-august-1989-on-john-the-baptist_archival.md",
+      "ts": 1778385783089
+    }
+  ],
+  "totals": {
+    "cost_usd": 0.0161632,
+    "tokens_in": 12497,
+    "tokens_out": 2201,
+    "duration_ms": 501655
+  },
+  "outputs": {
+    "archivalPdfPath": "/tank/site2rag/app/tmp/test-pdfs/memorandum-25-august-1989-on-john-the-baptist_archival.pdf",
+    "mdPath": "/tank/site2rag/app/tmp/test-pdfs/memorandum-25-august-1989-on-john-the-baptist_archival.md",
+    "receiptPath": null
+  },
+  "assessment": {
+    "doc_type": "image_pdf",
+    "correction_summary": "normalize → OCR → escalate → vision → archive → export",
+    "domain_context": "religious-texts",
+    "quality_gain_pct": 100,
+    "gs_normalized": false
+  },
+  "suggestions": []
+}
