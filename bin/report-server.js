@@ -323,18 +323,33 @@ createServer(async (req, res) => {
       const upgradeMethod = url.searchParams.get('method') || 'ocr'; // 'spell-fix' | 'ocr'
       const importanceParam = url.searchParams.get('importance');
       const importance = importanceParam ? Math.max(1, Math.min(5, parseInt(importanceParam, 10))) : null;
-      const existing = db.prepare('SELECT status FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
-      if (existing?.status === 'processing' || existing?.status === 'submitted') return json(res, { ok: true, status: existing.status, message: 'Already in pipeline' });
+      const existing = db.prepare('SELECT status, id FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
       const now = new Date().toISOString();
       const imp = importance ?? 1;
+
+      // Cancel any in-flight pipeline job for this URL
+      const pipelineDb = process.env.PIPELINE_DB;
+      if (pipelineDb && existsSync(pipelineDb)) {
+        try {
+          const pdb = new Database(pipelineDb);
+          const job = pdb.prepare(`SELECT id FROM jobs WHERE source_url=? AND status IN ('processing','pending') ORDER BY id DESC LIMIT 1`).get(docUrl);
+          if (job) {
+            pdb.prepare(`UPDATE jobs SET status='failed', error='Cancelled — re-queued by user' WHERE id=?`).run(job.id);
+          }
+          pdb.close();
+        } catch {}
+      }
+
       if (existing) {
-        db.prepare(`UPDATE pdf_upgrade_queue SET status='pending', priority=999, pass=1, started_at=NULL, finished_at=NULL, error=NULL, requested_method=?, importance=?, queued_at=? WHERE url=?`)
-          .run(upgradeMethod, imp, now, docUrl);
+        db.prepare(`UPDATE pdf_upgrade_queue SET status='pending', priority=999, pass=1,
+          started_at=NULL, finished_at=NULL, error=NULL, requested_method=?, importance=?, queued_at=?,
+          upgraded_pdf_path=NULL, after_score=NULL, score_improvement=NULL, pages_processed=NULL, method=NULL, receipt_json=NULL
+          WHERE url=?`).run(upgradeMethod, imp, now, docUrl);
       } else {
         db.prepare(`INSERT INTO pdf_upgrade_queue (url, content_hash, priority, status, requested_method, importance, queued_at) VALUES (?,?,999,'pending',?,?,?)`)
           .run(docUrl, quality.content_hash || null, upgradeMethod, imp, now);
       }
-      return json(res, { ok: true, status: 'pending', queued: !existing, method: upgradeMethod, importance: imp, message: existing ? 'Boosted to front of queue' : 'Added to front of queue' });
+      return json(res, { ok: true, status: 'pending', queued: !existing, method: upgradeMethod, importance: imp, message: existing ? 'Restarted from scratch' : 'Added to front of queue' });
     } finally { db.close(); }
   }
 

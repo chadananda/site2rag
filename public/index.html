@@ -513,7 +513,7 @@ if ('serviceWorker' in navigator) {
                     <template x-if="activityLabel(doc.url)">
                       <span class="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
                         <span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 processing-pulse shrink-0"></span>
-                        <span x-text="activityLabel(doc.url)"></span>
+                        <span x-text="activityLabel(doc.url) + ' ' + overallPct(processingActivity[doc.url]) + '%'"></span>
                       </span>
                     </template>
                     <template x-if="activeTab==='upgraded' && doc.status==='failed' && !activityLabel(doc.url)">
@@ -543,6 +543,16 @@ if ('serviceWorker' in navigator) {
                       <div class="flex items-center justify-between px-3 py-1.5 border-b border-blue-100/80">
                         <span class="text-xs font-semibold text-blue-700 tracking-wide uppercase" style="letter-spacing:0.04em">Pipeline Progress</span>
                         <span class="text-xs text-blue-500 font-mono" x-text="processingTimingText(processingActivity[doc.url])"></span>
+                      </div>
+                      <!-- Overall progress bar -->
+                      <div class="px-3 pt-2 pb-1">
+                        <div class="flex items-center gap-2">
+                          <div class="flex-1 bg-blue-100 rounded-full h-2">
+                            <div class="bg-blue-500 h-2 rounded-full transition-all duration-700"
+                                 :style="'width:' + overallPct(processingActivity[doc.url]) + '%'"></div>
+                          </div>
+                          <span class="text-xs font-mono text-blue-600 shrink-0 w-8 text-right" x-text="overallPct(processingActivity[doc.url]) + '%'"></span>
+                        </div>
                       </div>
                       <!-- Stage rows -->
                       <div class="px-3 py-2 space-y-1.5">
@@ -1485,6 +1495,14 @@ function app() {
       if (a?.elapsed_ms > 0) parts.push(this.fmtDuration(a.elapsed_ms) + ' elapsed');
       if (a?.estimated_remaining_ms > 0) parts.push('~' + this.fmtDuration(a.estimated_remaining_ms) + ' remaining');
       return parts.join(' · ');
+    },
+
+    overallPct(a) {
+      if (!a) return 0;
+      const TOTAL_STAGES = 8;
+      const done = (a.completed || []).length;
+      const stageFraction = (a.total_pages > 0 && a.pages_done > 0) ? a.pages_done / a.total_pages : (a.stage ? 0.1 : 0);
+      return Math.min(99, Math.round((done + stageFraction) / TOTAL_STAGES * 100));
     },
 
     async refreshTabCounts() {
