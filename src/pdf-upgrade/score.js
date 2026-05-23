@@ -1,6 +1,6 @@
 // PDF quality scoring -- heuristics only, no AI. Exports: scorePdf, saveQualityScore, maybeQueue, extractBadSample, ocrNoiseRatio. Re-exports: detectLanguage, LANG_COST, LANG_PRIORITY. Deps: pdf-parse, language
 import pdfParse from 'pdf-parse';
-import { readFileSync } from 'fs';
+import { readFileSync, existsSync } from 'fs';
 import { detectLanguage, detectLanguageFromUrl, LANG_COST, LANG_PRIORITY, LANG_WORDS } from '../language.js';
 export { detectLanguage, LANG_COST, LANG_PRIORITY };
 // Common English function words for word quality estimation (baseline when lang unknown)
@@ -184,6 +184,8 @@ export const saveQualityScore = (db, url, contentHash, metrics) => {
 /** Queue a PDF for upgrade if below score threshold. Text-layer PDFs are top priority (fast pipeline pass). */
 export const maybeQueue = (db, url, contentHash, score, threshold = 0.7, language = null, hasTextLayer = null) => {
   if (score >= threshold) return false;
+  const localPath = db.prepare('SELECT local_path FROM pages WHERE url=?').get(url)?.local_path;
+  if (!localPath || !existsSync(localPath)) return false;
   const existing = db.prepare('SELECT status FROM pdf_upgrade_queue WHERE url=?').get(url);
   if (existing && existing.status !== 'pending') return false; // already processed or in progress
   // Prefer the DB-stored language (corrected by detectLanguageForImagePdfs) over the
