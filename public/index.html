@@ -503,11 +503,17 @@ if ('serviceWorker' in navigator) {
                     <a :href="pdfSrc(doc)" target="_blank" rel="noopener" @click.stop
                        class="font-semibold text-sm text-gray-900 hover:text-blue-600 leading-snug line-clamp-2 flex-1"
                        x-text="docTitle(doc)"></a>
-                    <!-- Status badges: only on upgraded tab -->
-                    <template x-if="activeTab==='upgraded' && activityLabel(doc.url)">
+                    <!-- Status badges: visible on any tab -->
+                    <template x-if="doc.status==='pending' && !activityLabel(doc.url)">
+                      <span class="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+                        <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 processing-pulse shrink-0"></span>
+                        <span>queued</span>
+                      </span>
+                    </template>
+                    <template x-if="activityLabel(doc.url)">
                       <span class="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
                         <span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 processing-pulse shrink-0"></span>
-                        <span x-text="'processing'"></span>
+                        <span x-text="activityLabel(doc.url)"></span>
                       </span>
                     </template>
                     <template x-if="activeTab==='upgraded' && doc.status==='failed' && !activityLabel(doc.url)">
@@ -531,7 +537,7 @@ if ('serviceWorker' in navigator) {
                   </template>
 
                   <!-- Rich pipeline progress card (upgraded tab only) -->
-                  <template x-if="activeTab==='upgraded' && processingActivity[doc.url]?.stage && processingActivity[doc.url]?.stage !== 'queued'">
+                  <template x-if="processingActivity[doc.url]?.stage && processingActivity[doc.url]?.stage !== 'queued'">
                     <div class="mt-2 rounded-lg border border-blue-100 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 overflow-hidden">
                       <!-- Header -->
                       <div class="flex items-center justify-between px-3 py-1.5 border-b border-blue-100/80">
@@ -735,9 +741,9 @@ if ('serviceWorker' in navigator) {
                         <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending' && (activeTab==='original' || doc.readable_pages_pct == null || doc.readable_pages_pct < 0.9)">
                           <button @click.stop="queueUpgrade(doc, 'ocr')" :disabled="doc._upgrading"
                                   class="px-2 py-0.5 rounded border text-xs font-semibold transition-colors"
-                                  :class="doc.status==='failed' ? 'border-red-300 text-red-700 bg-red-50 hover:bg-red-100' : 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'"
+                                  :class="doc._upgrading ? 'border-indigo-200 text-indigo-400 bg-indigo-50 opacity-70' : doc.status==='failed' ? 'border-red-300 text-red-700 bg-red-50 hover:bg-red-100' : 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'"
                                   :title="'Boss vision OCR' + (doc.vision_cost_usd > 0 ? ' ~$' + doc.vision_cost_usd.toFixed(2) : '')"
-                                  x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ re-OCR' : '⬆ OCR'"></button>
+                                  x-text="doc._upgrading ? '⟳ queuing…' : doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ re-OCR' : '⬆ OCR'"></button>
                         </template>
                         <!-- Skip toggle -->
                         <button @click.stop="toggleSkip(doc)"
