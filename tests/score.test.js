@@ -150,6 +150,13 @@ describe('saveQualityScore', () => {
 
 describe('maybeQueue', () => {
   let db;
+  // maybeQueue skips if PDF not downloaded — seed pages table with a real local_path
+  function seedPage(url) {
+    const fname = url.split('/').pop().replace(/[^a-z0-9.]/gi, '_');
+    const localPath = join(testRoot, 'pdfs', fname);
+    writeFileSync(localPath, 'dummy');
+    db.prepare('INSERT OR IGNORE INTO pages (url, local_path) VALUES (?,?)').run(url, localPath);
+  }
   beforeEach(() => {
     mkdirSync(join(testRoot, 'pdfs'), { recursive: true });
     db = openDb(DOMAIN);
@@ -157,6 +164,7 @@ describe('maybeQueue', () => {
   afterEach(() => { db.close(); rmSync(testRoot, { recursive: true, force: true }); });
 
   it('queues a low-score PDF', () => {
+    seedPage('https://score.example.com/low.pdf');
     const result = maybeQueue(db, 'https://score.example.com/low.pdf', 'sha256:low', 0.3, 0.7, 'english');
     expect(result).toBe(true);
     const row = db.prepare("SELECT * FROM pdf_upgrade_queue WHERE url=?").get('https://score.example.com/low.pdf');
@@ -179,6 +187,8 @@ describe('maybeQueue', () => {
   });
 
   it('priority is higher for english than arabic at same score', () => {
+    seedPage('https://score.example.com/en.pdf');
+    seedPage('https://score.example.com/ar.pdf');
     maybeQueue(db, 'https://score.example.com/en.pdf', 'sha256:en', 0.3, 0.7, 'english');
     maybeQueue(db, 'https://score.example.com/ar.pdf', 'sha256:ar', 0.3, 0.7, 'arabic');
     const en = db.prepare("SELECT priority FROM pdf_upgrade_queue WHERE url=?").get('https://score.example.com/en.pdf');
@@ -187,6 +197,8 @@ describe('maybeQueue', () => {
   });
 
   it('text-layer PDFs get 100x boost in priority', () => {
+    seedPage('https://score.example.com/text.pdf');
+    seedPage('https://score.example.com/image.pdf');
     maybeQueue(db, 'https://score.example.com/text.pdf', 'sha256:text', 0.3, 0.7, 'english', 1);
     maybeQueue(db, 'https://score.example.com/image.pdf', 'sha256:img', 0.3, 0.7, 'english', 0);
     const textRow = db.prepare("SELECT priority FROM pdf_upgrade_queue WHERE url=?").get('https://score.example.com/text.pdf');
@@ -195,6 +207,7 @@ describe('maybeQueue', () => {
   });
 
   it('re-queues a pending doc with new priority (INSERT OR REPLACE)', () => {
+    seedPage('https://score.example.com/requeue.pdf');
     maybeQueue(db, 'https://score.example.com/requeue.pdf', 'sha256:v1', 0.3, 0.7, 'english');
     const first = db.prepare("SELECT priority FROM pdf_upgrade_queue WHERE url=?").get('https://score.example.com/requeue.pdf');
     // Re-queue with higher score still below threshold
@@ -210,6 +223,7 @@ describe('maybeQueue', () => {
     db.prepare(`INSERT INTO pdf_quality (url, content_hash, scored_at, ai_language, composite_score, has_text_layer, pages)
       VALUES (?,?,?,?,?,?,?)`).run(url, 'sha256:x', new Date().toISOString(), 'arabic', 0.3, 0, 2);
     // Pass language='english' — DB 'arabic' should win
+    seedPage(url);
     maybeQueue(db, url, 'sha256:x', 0.3, 0.7, 'english');
     const row = db.prepare("SELECT priority FROM pdf_upgrade_queue WHERE url=?").get(url);
     // arabic has LANG_PRIORITY=0.02, english=1.0 → arabic priority much lower
@@ -221,6 +235,8 @@ describe('maybeQueue', () => {
     // Arabic URL → detectLanguageFromUrl returns 'arabic' → deeply deprioritized
     const arabicUrl = 'https://score.example.com/%D9%85%D8%B1%D8%AD%D8%A8%D8%A7/doc.pdf';
     const englishUrl = 'https://score.example.com/english-doc.pdf';
+    seedPage(arabicUrl);
+    seedPage(englishUrl);
     maybeQueue(db, arabicUrl, 'sha256:arabic', 0.3, 0.7, 'english');
     maybeQueue(db, englishUrl, 'sha256:english', 0.3, 0.7, 'english');
     const arabicRow = db.prepare("SELECT priority FROM pdf_upgrade_queue WHERE url=?").get(arabicUrl);

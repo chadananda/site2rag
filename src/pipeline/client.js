@@ -19,7 +19,7 @@ export class PipelineClient {
    * @param {number} [opts.pollInterval] - ms between status polls (default 3000)
    * @param {number} [opts.timeout]      - ms before waitForJob gives up (default 600000 = 10 min)
    */
-  constructor({ baseUrl = 'http://localhost:4000', apiKey = null, pollInterval = 3000, timeout = 600_000 } = {}) {
+  constructor({ baseUrl = 'http://localhost:49900', apiKey = null, pollInterval = 3000, timeout = 600_000 } = {}) {
     this.baseUrl      = baseUrl.replace(/\/$/, '');
     this.apiKey       = apiKey;
     this.pollInterval = pollInterval;
@@ -38,9 +38,9 @@ export class PipelineClient {
    * @param {object} [opts.config]   - pipeline config overrides
    * @param {number} [opts.importance=1]
    */
-  async submitJob({ sourceUrl, meta, config, importance = 1 }) {
-    if (!sourceUrl) throw new Error('sourceUrl is required');
-    const { jobId } = await this._post('/jobs', { sourceUrl, meta, config, importance });
+  async submitJob({ sourceUrl, pdfPath, meta, config, importance = 1 }) {
+    if (!sourceUrl && !pdfPath) throw new Error('sourceUrl or pdfPath is required');
+    const { jobId } = await this._post('/jobs', { sourceUrl, pdfPath, meta, config, importance });
     return jobId;
   }
 
