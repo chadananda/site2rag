@@ -98,7 +98,7 @@ export const mapDoc = (d, domain) => {
       : (quality.gain != null ? Math.round(quality.gain * 100) : null);
     const stageOrder = ['s3', 's4', 's5', 's6', 's7'];
     const label = {
-      s3: s => { const l = s.notes?.match(/^[a-z+]+$/i)?.[0]; return l ? `OCR (${l})` : 'Tesseract OCR'; },
+      s3: s => { const l = s.notes?.match(/^[a-z+]+$/i)?.[0]; return l ? `OCR (${l})` : 'Multi-engine OCR'; },
       s4: () => 'Vision Escalate',
       s5: s => { const a = s.approach ?? ''; return a.includes('claude') ? 'Claude Vision' : a.includes('boss') ? 'Boss Vision' : 'Vision'; },
       s6: () => 'Spell Fix',

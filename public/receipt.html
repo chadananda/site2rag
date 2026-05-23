@@ -126,9 +126,9 @@
       <div class="bg-slate-800/40 rounded-xl border border-white/5 px-4" id="doc-profile"></div>
     </div>
 
-    <!-- Strategic assessment -->
+    <!-- Forensic assessment -->
     <div id="assessment-block" class="fade-up hidden" style="animation-delay:0.15s">
-      <div class="section-heading">Assessment &amp; Strategy</div>
+      <div class="section-heading">Forensic Analysis</div>
       <div class="bg-slate-800/40 rounded-xl border border-white/5 p-4">
         <div id="assessment-text" class="text-sm text-slate-300 leading-relaxed"></div>
       </div>
@@ -147,6 +147,12 @@
     <div id="errors-block" class="hidden fade-up" style="animation-delay:0.25s">
       <div class="section-heading text-red-400" style="color:#f87171;border-color:rgba(239,68,68,0.3)">Errors Encountered</div>
       <div id="errors-list" class="space-y-2"></div>
+    </div>
+
+    <!-- Output files -->
+    <div id="outputs-block" class="fade-up hidden" style="animation-delay:0.28s">
+      <div class="section-heading">Output Files</div>
+      <div class="grid grid-cols-3 gap-3" id="outputs-grid"></div>
     </div>
 
     <!-- Cost & performance -->
@@ -185,7 +191,7 @@ const STAGE_META = {
   s0: { icon: '🔬', label: 'Baseline Assessment', desc: 'Measures original document quality: character density, text layer integrity, word recognition rate, and language detection. Establishes the benchmark all subsequent stages are measured against.' },
   s1: { icon: '🖼', label: 'Image Preprocessing', desc: 'Normalizes page orientation, removes skew from scanned pages, reduces noise artifacts, and binarizes images for optimal OCR input.' },
   s2: { icon: '🗂', label: 'Region Classification', desc: 'Analyzes low-resolution page thumbnails to classify content regions: text blocks, figures, tables, and margins. Routes each region to the appropriate processing strategy.' },
-  s3: { icon: '📝', label: 'Tesseract OCR', desc: 'Applies language-aware optical character recognition using Tesseract, producing word-level bounding boxes with confidence scores. Words are bucketed into clean (≥90%), fuzzy (60–90%), and dirty (<60%) tiers.' },
+  s3: { icon: '📝', label: 'Multi-engine OCR', desc: 'Runs Tesseract + EasyOCR + PaddleOCR + DocTR in parallel on every block crop. A Haiku synthesis step resolves conflicts and selects the best reading per word. Words are bucketed into clean (≥90%), fuzzy (60–90%), and dirty (<60%) confidence tiers.' },
   s4: { icon: '🔍', label: 'Quality Escalation', desc: 'Evaluates OCR confidence across all regions. Dirty or low-confidence regions are flagged for escalation to higher-fidelity processing strategies.' },
   s5: { icon: '👁', label: 'Vision OCR', desc: 'Sends low-confidence regions to a multimodal vision model for precision character recognition. Particularly effective for damaged documents, unusual typefaces, historical scripts, and mixed-language content.' },
   s6: { icon: '✏️', label: 'Linguistic Spell Fix', desc: 'Applies Claude Haiku to correct fuzzy-confidence words using document context. Preserves bounding box geometry while correcting OCR artifacts, improving downstream search and indexing quality.' },
@@ -193,26 +199,86 @@ const STAGE_META = {
   s8: { icon: '📄', label: 'Markdown Export', desc: 'Exports the corrected text as structured Markdown with page anchors, preserving document hierarchy for downstream RAG indexing and semantic search.' },
 };
 
-const DECISION_LABELS = {
-  baseline_computed: { type: 'info', label: 'Baseline computed' },
-  domain_detected: { type: 'success', label: 'Domain identified' },
-  routing_summary: { type: 'info', label: 'OCR language routing' },
-  skip: { type: 'info', label: 'Stage skipped' },
-  budget_stop: { type: 'alert', label: 'Budget stop' },
-  boss_failed: { type: 'alert', label: 'Boss vision failed' },
-  claude_failed: { type: 'alert', label: 'Claude vision failed' },
-  rebuilt: { type: 'success', label: 'PDF rebuilt' },
-  wrote_md: { type: 'success', label: 'Markdown written' },
-  kept_original: { type: 'info', label: 'Original kept' },
-  completed: { type: 'success', label: 'Completed' },
-};
+const ENGINE_NAMES = { easyocr: 'EasyOCR', paddle: 'PaddleOCR', doctr: 'DocTR', tesseract: 'Tesseract', surya: 'Surya' };
 
-function renderDecision(d) {
-  const meta = Object.entries(DECISION_LABELS).find(([k]) => d.decision?.includes(k));
-  const chipClass = meta?.[1]?.type === 'alert' ? 'alert' : meta?.[1]?.type === 'success' ? 'success' : '';
-  const chipLabel = meta?.[1]?.label ?? d.decision;
-  const reason = d.reason ? `<span class="text-slate-500 ml-1">${d.reason}</span>` : '';
-  return `<div class="flex items-start gap-2 text-xs"><span class="decision-chip ${chipClass} mt-0.5">${chipLabel}</span>${reason}</div>`;
+function parseDecisionKey(key) {
+  let m;
+  if ((m = key.match(/^(easyocr|paddle|doctr|tesseract|surya)_p(\d+)$/)))
+    return { type: 'engine_page', engine: m[1], page: +m[2] };
+  if ((m = key.match(/^blocks_p(\d+)$/)))
+    return { type: 'blocks', page: +m[1] };
+  if ((m = key.match(/^consensus_p(\d+)_b(\d+)$/)))
+    return { type: 'consensus', page: +m[1], block: +m[2] };
+  if ((m = key.match(/^synth_p(\d+)$/)))
+    return { type: 'synth', page: +m[1] };
+  if ((m = key.match(/^page_(\d+)$/)))
+    return { type: 'page_method', page: +m[1] };
+  return { type: 'named', key };
+}
+
+function renderForensicDecision(d) {
+  const parsed = parseDecisionKey(d.decision ?? '');
+  const reason = d.reason ?? '';
+  const value = d.value;
+  let icon = '·', text = '', cls = 'text-slate-400';
+
+  if (parsed.type === 'engine_page') {
+    const name = ENGINE_NAMES[parsed.engine] ?? parsed.engine;
+    icon = '🔬';
+    text = `${name} — page ${parsed.page}${reason ? ': ' + reason : ''}`;
+  } else if (parsed.type === 'blocks') {
+    icon = '⊞';
+    text = `Page ${parsed.page}: ${reason || 'content blocks segmented for parallel OCR'}`;
+  } else if (parsed.type === 'consensus') {
+    const isEscalation = /re-ran|re-run|escalat/.test(reason);
+    icon = '⚖';
+    cls = isEscalation ? 'text-amber-300' : 'text-green-300';
+    text = `Consensus — page ${parsed.page}, block ${parsed.block}: ${reason}`;
+  } else if (parsed.type === 'synth') {
+    icon = '✦';
+    cls = 'text-indigo-300';
+    text = `Haiku synthesis — page ${parsed.page}: ${reason}`;
+  } else if (parsed.type === 'page_method') {
+    const method = typeof value === 'string' ? value : reason;
+    icon = '📋';
+    text = `Page ${parsed.page} method: ${method}`;
+  } else {
+    const k = parsed.key;
+    if (k === 'routing_summary') {
+      const routes = value && typeof value === 'object'
+        ? Object.entries(value).map(([l, n]) => `${l.toUpperCase()}×${n}`).join(', ')
+        : reason;
+      icon = '🗺'; text = `Script routing: ${routes}`;
+    } else if (k === 'engines') {
+      icon = '👁'; cls = 'text-amber-300'; text = `Vision models deployed: ${typeof value === 'string' ? value : reason}`;
+    } else if (k === 'rebuilt') {
+      const method = value?.method ?? (typeof value === 'string' ? value : reason);
+      icon = '📦'; cls = 'text-green-300'; text = `Archival PDF rebuilt: ${method}`;
+    } else if (k === 'wrote_md') {
+      icon = '📄'; cls = 'text-green-300'; text = 'Structured Markdown export written';
+    } else if (k === 'baseline_computed') {
+      icon = '📊'; text = `Baseline scored${reason ? ': ' + reason : ''}`;
+    } else if (k === 'domain_detected') {
+      icon = '🏷'; cls = 'text-green-300'; text = `Domain identified: ${reason || value}`;
+    } else if (k === 'budget_stop') {
+      icon = '⚠'; cls = 'text-red-300'; text = 'Processing halted: budget ceiling reached';
+    } else if (k === 'boss_failed' || k === 'claude_failed') {
+      icon = '⚠'; cls = 'text-red-300'; text = `Vision model failed${reason ? ': ' + reason : ''}`;
+    } else if (k === 'kept_original') {
+      icon = 'ℹ'; text = `Original retained${reason ? ': ' + reason : ''}`;
+    } else if (k === 'skip') {
+      icon = '⏭'; text = `Skipped${reason ? ': ' + reason : ''}`;
+    } else if (k === 'completed') {
+      icon = '✓'; cls = 'text-green-300'; text = `Completed${reason ? ': ' + reason : ''}`;
+    } else {
+      text = `${d.decision}${reason ? ' — ' + reason : ''}`;
+    }
+  }
+
+  return `<div class="flex items-start gap-2 text-xs py-0.5">
+    <span class="text-slate-600 w-4 text-center flex-shrink-0 mt-px">${icon}</span>
+    <span class="${cls} leading-snug">${text}</span>
+  </div>`;
 }
 
 function renderStage(stage, perStage, prevScore, decisions) {
@@ -242,7 +308,7 @@ function renderStage(stage, perStage, prevScore, decisions) {
   ].filter(Boolean).join('<span class="text-slate-700 mx-1">·</span>');
 
   const decisionHtml = decisions.length
-    ? `<div class="mt-2 space-y-1">${decisions.map(renderDecision).join('')}</div>` : '';
+    ? `<div class="mt-2 space-y-1">${decisions.map(renderForensicDecision).join('')}</div>` : '';
 
   return `
     <div class="flex gap-3 pl-2">
@@ -280,37 +346,137 @@ function metaRow(label, value) {
   </div>`;
 }
 
-function buildAssessment(r, beforeScore, afterScore, gainPct) {
+function buildForensicAssessment(r, beforeScore, afterScore, gainPct) {
   const baseline = r.quality?.baseline ?? {};
-  const lang = baseline.language ?? 'unknown';
-  const type = baseline.has_text_layer ? 'text-layer PDF' : 'image-only PDF';
+  const decisions = r.decisions ?? [];
+  const stages = r.stages ?? [];
+  const activeStages = stages.filter(s => s.pages_affected > 0).map(s => s.stage);
+
+  const lang = baseline.language ?? null;
+  const hasTextLayer = baseline.has_text_layer;
   const pages = r.page_count ?? 1;
   const difficulty = baseline.processing_difficulty ?? 0;
-  const stages = (r.stages ?? []).filter(s => s.pages_affected > 0).map(s => STAGE_META[s.stage]?.label).filter(Boolean);
 
-  let parts = [];
-  parts.push(`This ${pages}-page ${lang} ${type} was analyzed and processed through ${stages.length} active pipeline stage${stages.length !== 1 ? 's' : ''}.`);
+  // Mine decisions for forensic data
+  const enginePages = {};
+  let totalBlocks = 0;
+  const consensusItems = [];
+  let synthBlocks = 0;
+  let routingSummary = null;
+  let visionEngines = null;
+  const pageMethodMap = {};
+  let rebuildMethod = null;
 
-  if (beforeScore < 0.3) {
-    parts.push(`The original document had very poor text quality (${pct(beforeScore)}), indicating a heavily degraded scan with minimal recoverable text layer.`);
+  for (const d of decisions) {
+    const k = d.decision ?? '';
+    let m;
+    if ((m = k.match(/^(easyocr|paddle|doctr|tesseract|surya)_p(\d+)$/))) {
+      if (!enginePages[m[1]]) enginePages[m[1]] = [];
+      enginePages[m[1]].push(+m[2]);
+    }
+    if ((m = k.match(/^blocks_p(\d+)$/))) {
+      const n = parseInt(d.reason) || 0;
+      totalBlocks += n;
+    }
+    if ((m = k.match(/^consensus_p(\d+)_b(\d+)$/))) {
+      consensusItems.push({ page: +m[1], block: +m[2], detail: d.reason ?? '' });
+    }
+    if ((m = k.match(/^synth_p(\d+)$/))) {
+      const match = (d.reason ?? '').match(/^(\d+)/);
+      if (match) synthBlocks += +match[1];
+    }
+    if (k === 'routing_summary' && d.value && typeof d.value === 'object') routingSummary = d.value;
+    if (k === 'engines') visionEngines = typeof d.value === 'string' ? d.value : d.reason;
+    if ((m = k.match(/^page_(\d+)$/))) pageMethodMap[+m[1]] = typeof d.value === 'string' ? d.value : d.reason;
+    if (k === 'rebuilt') rebuildMethod = d.value?.method ?? (typeof d.value === 'string' ? d.value : d.reason);
+  }
+
+  const enginesUsed = Object.keys(enginePages);
+  const reEscalated = consensusItems.filter(c => /re-ran|re-run|escalat/i.test(c.detail)).length;
+
+  const diffDesc = difficulty > 0.7 ? 'high extraction difficulty'
+                 : difficulty > 0.4 ? 'moderate extraction difficulty'
+                 : 'standard extraction difficulty';
+  const typeDesc = hasTextLayer === false ? 'image-only (scanned) PDF — no embedded text layer present'
+                 : hasTextLayer === true ? 'PDF with existing text layer'
+                 : 'PDF';
+  const langDesc = lang ? lang.charAt(0).toUpperCase() + lang.slice(1) : null;
+
+  const parts = [];
+
+  // Opening
+  parts.push([
+    `Examination of this ${pages}-page`,
+    langDesc,
+    typeDesc,
+  ].filter(Boolean).join(' ') + (diffDesc ? ` reveals a document of ${diffDesc}.` : '.'));
+
+  // Baseline condition
+  if (hasTextLayer === false && beforeScore < 0.05) {
+    parts.push(`Baseline analysis returned ${pct(beforeScore)} native text yield — effectively zero — confirming a complete OCR reconstruction case: all text must be extracted entirely from the raster image layer.`);
+  } else if (beforeScore < 0.3) {
+    parts.push(`Baseline scoring returned ${pct(beforeScore)}, indicating severe text layer degradation with minimal recoverable content. Full OCR reconstruction was required across all pages.`);
   } else if (beforeScore < 0.7) {
-    parts.push(`The original document had moderate text quality (${pct(beforeScore)}), with significant portions requiring correction.`);
+    parts.push(`Baseline scoring returned ${pct(beforeScore)}, indicating a partially degraded text layer. Substantial regions required OCR correction to restore full fidelity.`);
   } else {
-    parts.push(`The original document had good baseline quality (${pct(beforeScore)}), with targeted corrections applied to improve precision.`);
+    parts.push(`Baseline scoring returned ${pct(beforeScore)}, indicating a largely intact text layer. Targeted refinements were applied to residual low-confidence regions.`);
   }
 
-  if (stages.includes('Vision OCR')) {
-    parts.push(`Low-confidence regions were escalated to vision-based OCR for precision character recognition.`);
+  // Script routing
+  if (routingSummary) {
+    const routes = Object.entries(routingSummary)
+      .map(([l, n]) => `${l.toUpperCase()} (${n} page${n !== 1 ? 's' : ''})`)
+      .join('; ');
+    parts.push(`Script detection identified the following language distribution: ${routes}. Engine routing and confidence thresholds were adjusted per-script accordingly.`);
   }
-  if (stages.includes('Linguistic Spell Fix')) {
-    parts.push(`Fuzzy-confidence words were corrected using context-aware language modeling.`);
+
+  // Multi-engine OCR
+  if (enginesUsed.length > 0) {
+    const nameList = enginesUsed.map(e => ENGINE_NAMES[e] ?? e).join(', ');
+    let para = `Multi-engine OCR deployed ${enginesUsed.length} engine${enginesUsed.length !== 1 ? 's' : ''}`;
+    if (totalBlocks > 0) para += ` across ${totalBlocks} independently segmented block${totalBlocks !== 1 ? 's' : ''}`;
+    para += `: ${nameList}. Each block crop was submitted to all engines in parallel.`;
+
+    if (consensusItems.length > 0) {
+      para += ` Consensus arbitration evaluated ${consensusItems.length} block${consensusItems.length !== 1 ? 's' : ''} for inter-engine agreement.`;
+      if (reEscalated > 0) {
+        para += ` ${reEscalated} block${reEscalated !== 1 ? 's' : ''} triggered a Tesseract re-pass at full raster resolution after the consensus stage detected script ambiguity or insufficient agreement.`;
+      }
+    }
+    if (synthBlocks > 0) {
+      para += ` Claude Haiku resolved remaining conflicts via LLM synthesis on ${synthBlocks} block${synthBlocks !== 1 ? 's' : ''}, selecting the highest-fidelity reading per word through linguistic context scoring.`;
+    }
+    parts.push(para);
   }
+
+  // Vision escalation
+  if (activeStages.includes('s5')) {
+    const pgCount = Object.keys(pageMethodMap).length;
+    const engDesc = visionEngines ? `using ${visionEngines}` : 'via multimodal vision models';
+    parts.push(`${pgCount > 0 ? pgCount + ' page' + (pgCount !== 1 ? 's were' : ' was') : 'Select pages were'} escalated to vision OCR ${engDesc} — applied where multi-engine consensus fell below the per-script confidence threshold.`);
+  }
+
+  // Spell fix
+  if (activeStages.includes('s6')) {
+    parts.push(`Fuzzy-confidence words underwent context-aware linguistic correction via Claude Haiku, improving character-level precision without altering bounding box geometry or layout coordinates.`);
+  }
+
+  // Rebuild
+  if (rebuildMethod) {
+    parts.push(`The corrected text layer was embedded into an archival PDF/A-3 via ${rebuildMethod}, preserving the original scan as the visual substrate while enabling full-text search and accessibility compliance.`);
+  } else if (activeStages.includes('s7')) {
+    parts.push(`The document was reconstructed as a PDF/A-3 archival file with the corrected text layer embedded and the original scan preserved as the visual substrate.`);
+  }
+
+  // Outcome
   if (gainPct > 20) {
-    parts.push(`The upgrade achieved a substantial ${gainPct}% quality gain, significantly improving searchability and downstream processing fidelity.`);
+    parts.push(`Net outcome: ${pct(beforeScore)} → ${pct(afterScore)} — a ${gainPct}-point quality gain, substantially increasing OCR fidelity, full-text searchability, and downstream RAG indexing yield.`);
   } else if (gainPct > 5) {
-    parts.push(`The upgrade achieved a ${gainPct}% quality improvement, refining text accuracy for better indexing and retrieval.`);
+    parts.push(`Net outcome: ${pct(beforeScore)} → ${pct(afterScore)} — a ${gainPct}-point improvement in composite text quality score.`);
   } else if (gainPct > 0) {
-    parts.push(`The document was already high quality; the pipeline applied minor corrections and produced an archival PDF/A-3 output.`);
+    parts.push(`Net outcome: ${pct(beforeScore)} → ${pct(afterScore)}. Document quality was already high; corrections targeted residual noise and low-confidence regions.`);
+  } else if (gainPct === 0) {
+    parts.push(`Net outcome: quality unchanged at ${pct(afterScore)}. The pipeline confirmed existing text layer fidelity with no structural changes warranted.`);
   }
 
   return parts.join(' ');
@@ -375,7 +541,7 @@ load().then(r => {
   ].join('');
 
   // Assessment
-  const assessText = buildAssessment(r, beforeScore, afterScore, gainPct);
+  const assessText = buildForensicAssessment(r, beforeScore, afterScore, gainPct);
   if (assessText) {
     document.getElementById('assessment-text').textContent = assessText;
     document.getElementById('assessment-block').classList.remove('hidden');
@@ -412,6 +578,26 @@ load().then(r => {
     totals.tokens_in ? perfCard('Tokens used', `${(totals.tokens_in + (totals.tokens_out ?? 0)).toLocaleString()}`, `${totals.tokens_in.toLocaleString()} in · ${(totals.tokens_out ?? 0).toLocaleString()} out`) : '',
     q.cost_per_quality_point != null && q.cost_per_quality_point > 0 ? perfCard('Cost per quality point', '$' + q.cost_per_quality_point.toFixed(4), 'efficiency ratio') : '',
   ].filter(Boolean).join('');
+
+  // Output files
+  const isDone = r.status === 'done' || (r.quality?.final != null);
+  if (isDone) {
+    const siteParam = `site=${encodeURIComponent(site)}&url=${encodeURIComponent(url)}`;
+    const outputsEl = document.getElementById('outputs-grid');
+    const dlCard = (icon, label, ext, apiPath, mime) => `
+      <a href="${API_BASE}${apiPath}?${siteParam}" download
+         class="bg-slate-800/40 rounded-xl border border-white/8 p-4 flex flex-col items-center gap-2 hover:border-indigo-500/40 hover:bg-indigo-950/20 transition-colors group text-center">
+        <span class="text-3xl">${icon}</span>
+        <span class="text-xs font-semibold text-slate-300 group-hover:text-white">${label}</span>
+        <span class="decision-chip mono">${ext}</span>
+      </a>`;
+    outputsEl.innerHTML = [
+      dlCard('📦', 'Archival PDF', '.pdf', '/api/docs/download', 'application/pdf'),
+      dlCard('📄', 'Markdown Text', '.md', '/api/docs/download-md', 'text/markdown'),
+      dlCard('🧾', 'Analysis Receipt', '.json', '/api/docs/receipt', 'application/json'),
+    ].join('');
+    document.getElementById('outputs-block').classList.remove('hidden');
+  }
 
   // Footer
   document.getElementById('footer-line').textContent =
