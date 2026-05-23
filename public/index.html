@@ -26,12 +26,21 @@ if ('serviceWorker' in navigator) {
   body{font-family:ui-sans-serif,system-ui,sans-serif}
   .mono{font-family:ui-monospace,monospace}
 
-  /* Thumbnail */
-  .thumb{width:112px;height:100%;min-height:120px;object-fit:cover;object-position:top;background:#f3f4f6;flex-shrink:0;border-radius:3px;
-    box-shadow:0 1px 3px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06);}
-  .thumb-placeholder{display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:1.5rem;
-    width:112px;min-height:120px;flex-shrink:0;border-radius:3px;background:#f3f4f6;
-    box-shadow:0 1px 3px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06);}
+  /* Thumbnail — letter/A4 ratio (8.5:11 ≈ 0.773) */
+  .thumb-wrap{position:relative;width:160px;flex-shrink:0;border-radius:3px;
+    box-shadow:0 1px 3px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06);
+    aspect-ratio:8.5/11;overflow:hidden;cursor:pointer;}
+  .thumb{width:100%;height:100%;object-fit:cover;object-position:top;background:#f3f4f6;display:block;}
+  .thumb-placeholder{display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:2rem;
+    width:100%;height:100%;background:#f3f4f6;}
+  /* OCR scan-line animation */
+  @keyframes scanline{0%{top:0%}100%{top:100%}}
+  .thumb-scanning::after{content:'';position:absolute;left:0;right:0;height:3px;pointer-events:none;
+    background:linear-gradient(180deg,rgba(59,130,246,0) 0%,rgba(59,130,246,.7) 50%,rgba(59,130,246,0) 100%);
+    box-shadow:0 0 10px 2px rgba(59,130,246,.35);
+    animation:scanline 2s ease-in-out infinite;}
+  .thumb-scanning::before{content:'';position:absolute;inset:0;pointer-events:none;
+    background:rgba(59,130,246,.04);}
 
   /* Score block */
   .score-block{display:flex;flex-direction:column;align-items:center;justify-content:center;
@@ -447,31 +456,48 @@ if ('serviceWorker' in navigator) {
           <!-- Doc rows -->
           <div class="space-y-2 mb-4">
             <template x-for="doc in docs" :key="doc.url">
-              <div class="border rounded-xl p-3 flex gap-3 shadow-sm hover:shadow-md transition-shadow cursor-pointer"
-                   @click="openDetail(doc)"
+              <div class="border rounded-xl p-3 flex gap-3 shadow-sm hover:shadow-md transition-shadow"
                    :class="[
                      doc.skip ? 'opacity-40' : '',
-                     activeTab==='upgraded' && doc.status==='processing' ? 'bg-green-50 border-green-200 ring-1 ring-green-300' :
-                     activeTab==='upgraded'                               ? 'bg-green-50 border-green-200' :
-                     activeTab!=='upgraded' && doc.status==='failed'     ? 'bg-red-50 border-red-200' :
-                                                                           'bg-white border-gray-200'
+                     doc.status==='processing'                       ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-300' :
+                     doc.status==='pending'                          ? 'bg-amber-50 border-amber-200' :
+                     doc.status==='failed' && activeTab!=='upgraded' ? 'bg-red-50 border-red-200' :
+                     activeTab==='upgraded'                          ? 'bg-green-50 border-green-200' :
+                                                                       'bg-white border-gray-200'
                    ]">
 
                 <!-- Thumbnail -->
-                <div class="shrink-0 self-stretch flex flex-col">
-                  <img :src="thumbSrc(doc)" :alt="docTitle(doc)"
-                       class="thumb hover:opacity-80 transition-opacity"
+                <div class="thumb-wrap hover:opacity-90 transition-opacity"
+                     :class="['s3','s4'].includes(processingActivity[doc.url]?.stage) ? 'thumb-scanning' : ''"
+                     @click="openDetail(doc)" title="View details">
+                  <img :src="thumbSrc(doc, 200)" :alt="docTitle(doc)"
+                       class="thumb"
                        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
                   <div class="thumb-placeholder" style="display:none">📄</div>
                 </div>
 
                 <!-- Score block(s) -->
                 <div class="shrink-0 self-stretch flex flex-col gap-1.5 mt-0.5">
-                  <!-- Upgraded tab: show after score with 'from X%' label -->
+                  <!-- Upgraded tab: three vertical numbers — before / +gain / after -->
                   <template x-if="activeTab==='upgraded' && doc.effective_after != null">
-                    <div class="score-block" :class="scoreBlockCls({composite_score: doc.effective_after})">
-                      <div class="score-num" x-text="Math.round(doc.effective_after*100)+'%'"></div>
-                      <div class="score-sub" x-text="doc.effective_before != null ? 'from '+Math.round(doc.effective_before*100)+'%' : scoreLabel(doc).label"></div>
+                    <div class="flex flex-col gap-1.5">
+                      <!-- Before -->
+                      <div class="score-block" :class="scoreBlockCls({composite_score: doc.effective_before})">
+                        <div class="score-num" x-text="doc.effective_before != null ? Math.round(doc.effective_before*100)+'%' : '—'"></div>
+                        <div class="score-sub">original</div>
+                      </div>
+                      <!-- Gain -->
+                      <div class="score-block bg-green-100 border border-green-300">
+                        <div class="score-num text-green-700" x-text="doc.effective_improvement > 0 ? '+'+Math.round(doc.effective_improvement*100)+'%' : '±0%'"></div>
+                        <div class="score-sub text-green-600">gain</div>
+                      </div>
+                      <!-- After -->
+                      <button @click.stop="receiptUrl=`/receipt.html?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
+                              class="score-block hover:bg-indigo-50 hover:border-indigo-300 transition-colors cursor-pointer"
+                              :class="scoreBlockCls({composite_score: doc.effective_after})">
+                        <div class="score-num" x-text="Math.round(doc.effective_after*100)+'%'"></div>
+                        <div class="score-sub">final ↗</div>
+                      </button>
                     </div>
                   </template>
                   <!-- Other tabs: show composite_score -->
@@ -486,14 +512,6 @@ if ('serviceWorker' in navigator) {
                       <div class="score-sub" x-text="scoreLabel(doc).label"></div>
                     </div>
                   </template>
-                  <!-- Improvement box: upgraded tab only -->
-                  <template x-if="activeTab==='upgraded' && doc.effective_improvement > 0.005">
-                    <button @click.stop="receiptUrl=`/receipt.html?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
-                            class="score-block bg-green-100 border border-green-300 hover:bg-green-200 hover:border-green-400 transition-colors cursor-pointer">
-                      <div class="score-num text-green-700" x-text="'+'+Math.round(doc.effective_improvement*100)+'%'"></div>
-                      <div class="score-sub text-green-600">View report</div>
-                    </button>
-                  </template>
                 </div>
 
                 <!-- Main content -->
@@ -503,11 +521,17 @@ if ('serviceWorker' in navigator) {
                     <a :href="pdfSrc(doc)" target="_blank" rel="noopener" @click.stop
                        class="font-semibold text-sm text-gray-900 hover:text-blue-600 leading-snug line-clamp-2 flex-1"
                        x-text="docTitle(doc)"></a>
-                    <!-- Status badges: only on upgraded tab -->
-                    <template x-if="activeTab==='upgraded' && activityLabel(doc.url)">
+                    <!-- Status badges: visible on any tab -->
+                    <template x-if="doc.status==='pending' && !activityLabel(doc.url)">
+                      <span class="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
+                        <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 processing-pulse shrink-0"></span>
+                        <span>queued</span>
+                      </span>
+                    </template>
+                    <template x-if="activityLabel(doc.url)">
                       <span class="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-0.5 rounded-full">
                         <span class="inline-block w-1.5 h-1.5 rounded-full bg-blue-500 processing-pulse shrink-0"></span>
-                        <span x-text="'processing'"></span>
+                        <span x-text="activityLabel(doc.url) + ' ' + overallPct(processingActivity[doc.url]) + '%'"></span>
                       </span>
                     </template>
                     <template x-if="activeTab==='upgraded' && doc.status==='failed' && !activityLabel(doc.url)">
@@ -530,25 +554,58 @@ if ('serviceWorker' in navigator) {
                        x-text="doc.ai_summary"></p>
                   </template>
 
-                  <!-- Rich pipeline progress card (upgraded tab only) -->
-                  <template x-if="activeTab==='upgraded' && processingActivity[doc.url]?.stage && processingActivity[doc.url]?.stage !== 'queued'">
+                  <!-- Rich pipeline progress card -->
+                  <template x-if="processingActivity[doc.url]?.stage">
                     <div class="mt-2 rounded-lg border border-blue-100 bg-gradient-to-br from-blue-50/50 to-indigo-50/30 overflow-hidden">
                       <!-- Header -->
                       <div class="flex items-center justify-between px-3 py-1.5 border-b border-blue-100/80">
                         <span class="text-xs font-semibold text-blue-700 tracking-wide uppercase" style="letter-spacing:0.04em">Pipeline Progress</span>
-                        <span class="text-xs text-blue-500 font-mono" x-text="processingTimingText(processingActivity[doc.url])"></span>
+                        <span class="text-xs text-blue-500 font-mono">
+                          <template x-if="processingActivity[doc.url].stage === 'queued'">
+                            <span>waiting in queue…</span>
+                          </template>
+                          <template x-if="processingActivity[doc.url].stage !== 'queued' && processingActivity[doc.url].estimated_remaining_ms > 0">
+                            <span>~<span x-text="fmtDuration(processingActivity[doc.url].estimated_remaining_ms)"></span> left</span>
+                          </template>
+                          <template x-if="processingActivity[doc.url].stage !== 'queued' && !(processingActivity[doc.url].estimated_remaining_ms > 0)">
+                            <span x-text="processingTimingText(processingActivity[doc.url])"></span>
+                          </template>
+                        </span>
+                      </div>
+                      <!-- Queued placeholder -->
+                      <template x-if="processingActivity[doc.url].stage === 'queued'">
+                        <div class="px-3 py-3 flex items-center gap-2 text-xs text-blue-400">
+                          <span class="inline-block w-2 h-2 rounded-full bg-amber-400 processing-pulse shrink-0"></span>
+                          <span>Queued — waiting for a worker to pick this up…</span>
+                        </div>
+                      </template>
+                      <template x-if="processingActivity[doc.url].stage !== 'queued'">
+                        <div>
+                      <!-- Overall progress bar -->
+                      <div class="px-3 pt-2 pb-1">
+                        <div class="flex items-center gap-2">
+                          <div class="flex-1 bg-blue-100 rounded-full h-2">
+                            <div class="bg-blue-500 h-2 rounded-full transition-all duration-700"
+                                 :style="'width:' + overallPct(processingActivity[doc.url]) + '%'"></div>
+                          </div>
+                          <span class="text-xs font-mono text-blue-600 shrink-0 w-8 text-right" x-text="overallPct(processingActivity[doc.url]) + '%'"></span>
+                        </div>
                       </div>
                       <!-- Stage rows -->
                       <div class="px-3 py-2 space-y-1.5">
                         <template x-for="row in stageRows(processingActivity[doc.url])" :key="row.stage">
-                          <div class="flex items-center gap-2 text-xs" :class="row.status === 'pending' ? 'opacity-30' : ''">
-                            <!-- Status icon -->
+                          <div class="flex items-center gap-2 text-xs" :class="row.status === 'pending' ? 'opacity-25' : ''">
+                            <!-- Status check / spinner -->
                             <span class="w-3.5 text-center shrink-0 font-mono leading-none text-sm"
                                   :class="{'text-green-500': row.status==='done', 'text-blue-500 processing-pulse': row.status==='active', 'text-gray-300': row.status==='pending'}"
                                   x-text="row.status==='done' ? '✓' : row.status==='active' ? '⟳' : '○'"></span>
+                            <!-- Stage icon -->
+                            <span class="w-5 text-center shrink-0 font-mono text-xs leading-none"
+                                  :class="{'text-gray-400': row.status==='done', 'text-blue-600 font-bold': row.status==='active', 'text-gray-300': row.status==='pending'}"
+                                  x-text="row.icon"></span>
                             <!-- Stage label -->
-                            <span class="w-36 shrink-0 font-medium leading-none"
-                                  :class="{'text-gray-700': row.status==='done', 'text-blue-700': row.status==='active', 'text-gray-400': row.status==='pending'}"
+                            <span class="w-32 shrink-0 font-medium leading-none"
+                                  :class="{'text-gray-600': row.status==='done', 'text-blue-700 font-semibold': row.status==='active', 'text-gray-400': row.status==='pending'}"
                                   x-text="row.label"></span>
                             <!-- Done: pages · duration -->
                             <template x-if="row.status === 'done'">
@@ -578,18 +635,14 @@ if ('serviceWorker' in navigator) {
                       <!-- Footer: remaining / % complete -->
                       <template x-if="(processingActivity[doc.url]?.elapsed_ms||0) + (processingActivity[doc.url]?.estimated_remaining_ms||0) > 0">
                         <div class="flex items-center justify-between px-3 py-1.5 border-t border-blue-100/70 bg-blue-50/50">
-                          <span class="text-xs text-blue-400 font-mono">
-                            <template x-if="processingActivity[doc.url]?.estimated_remaining_ms > 0">
-                              <span>~<span x-text="fmtDuration(processingActivity[doc.url].estimated_remaining_ms)"></span> remaining</span>
-                            </template>
-                            <template x-if="!processingActivity[doc.url]?.estimated_remaining_ms">
-                              <span x-text="fmtDuration(processingActivity[doc.url]?.elapsed_ms) + ' elapsed'"></span>
-                            </template>
-                          </span>
+                          <span class="text-xs text-blue-400 font-mono"
+                                x-text="fmtDuration(processingActivity[doc.url]?.elapsed_ms) + ' elapsed'"></span>
                           <template x-if="processingActivity[doc.url]?.estimated_remaining_ms > 0">
                             <span class="text-xs text-blue-300 font-mono"
                                   x-text="Math.round((processingActivity[doc.url].elapsed_ms||0) / ((processingActivity[doc.url].elapsed_ms||0) + (processingActivity[doc.url].estimated_remaining_ms||1)) * 100) + '% complete'"></span>
                           </template>
+                        </div>
+                      </template>
                         </div>
                       </template>
                     </div>
@@ -640,7 +693,10 @@ if ('serviceWorker' in navigator) {
                             </template>
                           </span>
                         </template>
-                        <template x-if="!doc.method_steps && doc.method">
+                        <template x-if="!doc.method_steps && doc.method_summary">
+                          <span><span class="font-semibold text-gray-700" x-text="doc.method_summary"></span></span>
+                        </template>
+                        <template x-if="!doc.method_steps && !doc.method_summary && doc.method">
                           <span><span class="text-gray-400">method</span> <span class="font-semibold text-gray-700" x-text="methodLabel(doc.method)"></span></span>
                         </template>
                         <template x-if="doc.pages_processed">
@@ -717,35 +773,42 @@ if ('serviceWorker' in navigator) {
                     <a x-show="doc.source_url" :href="doc.source_url" target="_blank" rel="noopener" @click.stop
                        class="hover:text-blue-500 truncate max-w-xs"
                        x-text="'↗ '+(doc.source_url||'').replace(/^https?:\/\//,'').split('/')[0]"></a>
-                    <!-- Card action buttons (admin only) -->
-                    <template x-if="adminToken && (activeTab==='original' || activeTab==='all' || activeTab==='adequate' || activeTab==='upgraded')">
-                      <div class="ml-auto flex gap-1.5 items-center flex-shrink-0">
-                        <!-- Processing / queued state -->
-                        <template x-if="!doc.skip && doc.status==='pending'">
-                          <button @click.stop="queueUpgrade(doc)" :disabled="doc._upgrading"
-                                  class="px-2 py-0.5 rounded border border-indigo-300 text-indigo-600 bg-indigo-50 hover:bg-indigo-100 text-xs font-semibold">↑ boost</button>
-                        </template>
-                        <!-- Spell-fix: mostly-readable doc with minor OCR errors (≥80% text extractable) -->
-                        <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending' && doc.composite_score >= 0.55 && doc.composite_score < 0.95 && activeTab !== 'failed' && (doc.readable_pages_pct == null || doc.readable_pages_pct >= 0.8)">
-                          <button @click.stop="queueUpgrade(doc, 'spell-fix')" :disabled="doc._upgrading"
-                                  class="px-2 py-0.5 rounded border border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-100 text-xs font-semibold"
-                                  :title="'AI text correction (hyphen-breaks, OCR errors)' + (doc.spell_fix_cost_usd > 0 ? ' ~$' + doc.spell_fix_cost_usd.toFixed(3) : '')">✦ spell-fix</button>
-                        </template>
-                        <!-- Re-OCR: image-heavy docs, failed, or below 90% readable -->
-                        <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending' && (activeTab==='original' || doc.readable_pages_pct == null || doc.readable_pages_pct < 0.9)">
-                          <button @click.stop="queueUpgrade(doc, 'ocr')" :disabled="doc._upgrading"
-                                  class="px-2 py-0.5 rounded border text-xs font-semibold transition-colors"
-                                  :class="doc.status==='failed' ? 'border-red-300 text-red-700 bg-red-50 hover:bg-red-100' : 'border-indigo-200 text-indigo-600 hover:bg-indigo-50'"
-                                  :title="'Boss vision OCR' + (doc.vision_cost_usd > 0 ? ' ~$' + doc.vision_cost_usd.toFixed(2) : '')"
-                                  x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ re-OCR' : '⬆ OCR'"></button>
-                        </template>
-                        <!-- Skip toggle -->
-                        <button @click.stop="toggleSkip(doc)"
-                                class="px-2 py-0.5 rounded border text-xs transition-colors"
-                                :class="doc.skip ? 'border-amber-300 text-amber-700 bg-amber-50' : 'border-gray-200 text-gray-300 hover:text-amber-600 hover:border-amber-300'"
-                                x-text="doc.skip ? '⊘' : 'skip'"></button>
-                      </div>
-                    </template>
+                    <!-- Card action buttons -->
+                    <div class="ml-auto flex gap-1.5 items-center flex-shrink-0">
+                      <!-- View detail button (always visible) -->
+                      <button @click.stop="openDetail(doc)"
+                              class="px-2 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 active:scale-95 text-xs font-semibold cursor-pointer transition-all"
+                              title="View document details">ℹ</button>
+                      <!-- Admin-only action buttons -->
+                      <template x-if="adminToken && (activeTab==='original' || activeTab==='all' || activeTab==='adequate' || activeTab==='upgraded')">
+                        <div class="flex gap-1.5 items-center">
+                          <!-- Processing / queued state -->
+                          <template x-if="!doc.skip && doc.status==='pending'">
+                            <button @click.stop="queueUpgrade(doc)" :disabled="upgradingUrls[doc.url]"
+                                    class="px-2 py-0.5 rounded border border-indigo-300 text-indigo-600 bg-indigo-50 hover:bg-indigo-200 hover:border-indigo-400 active:scale-95 text-xs font-semibold cursor-pointer transition-all">↑ boost</button>
+                          </template>
+                          <!-- Spell-fix: mostly-readable doc with minor OCR errors (≥80% text extractable) -->
+                          <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending' && doc.composite_score >= 0.55 && doc.composite_score < 0.95 && activeTab !== 'failed' && (doc.readable_pages_pct == null || doc.readable_pages_pct >= 0.8)">
+                            <button @click.stop="queueUpgrade(doc, 'spell-fix')" :disabled="upgradingUrls[doc.url]"
+                                    class="px-2 py-0.5 rounded border border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-200 hover:border-violet-400 active:scale-95 text-xs font-semibold cursor-pointer transition-all"
+                                    :title="'AI text correction (hyphen-breaks, OCR errors)' + (doc.spell_fix_cost_usd > 0 ? ' ~$' + doc.spell_fix_cost_usd.toFixed(3) : '')">✦ spell-fix</button>
+                          </template>
+                          <!-- Re-OCR / OCR button -->
+                          <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending' && (doc.status === 'done' || activeTab==='original' || doc.readable_pages_pct == null || doc.readable_pages_pct < 0.9)">
+                            <button @click.stop="queueUpgrade(doc, 'ocr')" :disabled="upgradingUrls[doc.url]"
+                                    class="px-2 py-0.5 rounded border text-xs font-semibold transition-all cursor-pointer active:scale-95"
+                                    :class="upgradingUrls[doc.url] ? 'border-indigo-200 text-indigo-400 bg-indigo-50 opacity-70' : doc.status==='failed' ? 'border-red-300 text-red-700 bg-red-50 hover:bg-red-100 hover:border-red-400' : 'border-indigo-200 text-indigo-600 bg-white hover:bg-indigo-100 hover:border-indigo-400'"
+                                    title="Run full OCR pipeline to produce searchable text"
+                                    x-text="upgradingUrls[doc.url] ? '⟳ queuing…' : doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ reprocess' : '⬆ OCR'"></button>
+                          </template>
+                          <!-- Skip toggle -->
+                          <button @click.stop="toggleSkip(doc)"
+                                  class="px-2 py-0.5 rounded border text-xs transition-all cursor-pointer active:scale-95"
+                                  :class="doc.skip ? 'border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 hover:border-amber-400' : 'border-gray-200 text-gray-400 bg-white hover:text-amber-600 hover:border-amber-300 hover:bg-amber-50'"
+                                  x-text="doc.skip ? '⊘' : 'skip'"></button>
+                        </div>
+                      </template>
+                    </div>
                   </div>
 
                   <!-- Error (failed docs) -->
@@ -977,7 +1040,7 @@ if ('serviceWorker' in navigator) {
 <script>
 const API_BASE = ['localhost','127.0.0.1'].includes(location.hostname)
   ? 'http://127.0.0.1:7840'
-  : 'https://api.lnker.com';
+  : ''; // same-origin on CF Pages — requests proxy through functions/api/[[route]].js
 
 const PER_PAGE = 50;
 
@@ -997,7 +1060,7 @@ function fmtBytes(b) {
 }
 
 function methodLabel(m) {
-  const labels = { 'pipeline-v2': 'Pipeline OCR v2', 'pipeline': 'Pipeline OCR', 'tesseract': 'Tesseract OCR', 'boss': 'Boss Vision', 'spell-fix': 'Spell-fix', 'spell_fix': 'Spell-fix' };
+  const labels = { 'pipeline-v2': 'Multi-engine OCR', 'pipeline': 'Multi-engine OCR', 'tesseract': 'Multi-engine OCR', 'boss': 'Boss Vision', 'spell-fix': 'Spell-fix', 'spell_fix': 'Spell-fix', 'ocrmypdf-pdfa3': 'PDF/A Archive', 'pdf-lib-overlay': 'PDF text overlay' };
   return labels[m] || m || '—';
 }
 
@@ -1104,6 +1167,7 @@ function app() {
     showLoginModal: false, loginPassword: '', loginError: '',
     receiptUrl: null,
     focusDomain: null,
+    upgradingUrls: {},
     fmt, scorePillCls, scoreBlockCls, scoreLabel, effortEstimate, cannotUpgrade, langBadgeCls,
 
     fmtUptime(s) {
@@ -1198,21 +1262,31 @@ function app() {
     },
 
     async queueUpgrade(doc, upgradeMethod = 'ocr', importance = null) {
-      if (doc._upgrading) return;
-      doc._upgrading = true;
-      if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...doc };
+      if (this.upgradingUrls[doc.url]) return;
+      this.upgradingUrls = { ...this.upgradingUrls, [doc.url]: true };
+
+      // Immediately clear prior upgrade display fields (but keep status so button stays visible showing "⟳ queuing…")
+      const clearFields = { error: null,
+        effective_after: null, effective_before: null, effective_improvement: null,
+        upgraded_pdf_path: null, after_score: null, score_improvement: null,
+        pages_processed: null, method: null };
+      const idx = this.docs.findIndex(d => d.url === doc.url);
+      if (idx >= 0) this.docs[idx] = { ...this.docs[idx], ...clearFields };
+      if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...this.expandedDoc, ...clearFields };
+      this.processingActivity = { ...this.processingActivity, [doc.url]: { stage: 'queued' } };
+
       let upgradeUrl = `${API_BASE}/api/docs/upgrade?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}&method=${upgradeMethod}`;
       if (importance !== null) upgradeUrl += `&importance=${importance}`;
       const r = await this.adminFetch(upgradeUrl, { method: 'POST' }).catch(() => null);
+      this.upgradingUrls = { ...this.upgradingUrls, [doc.url]: false };
       if (r?.ok) {
-        const data = await r.json().catch(() => ({}));
-        const newStatus = data.status || 'pending';
-        const idx = this.docs.findIndex(d => d.url === doc.url);
-        if (idx >= 0) this.docs[idx] = { ...this.docs[idx], status: newStatus, error: null, _upgrading: false };
-        if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...this.expandedDoc, status: newStatus, error: null };
-      } else {
-        const idx = this.docs.findIndex(d => d.url === doc.url);
-        if (idx >= 0) this.docs[idx] = { ...this.docs[idx], _upgrading: false };
+        // Now update status so the card shifts to pending/amber state
+        const idx2 = this.docs.findIndex(d => d.url === doc.url);
+        if (idx2 >= 0) this.docs[idx2] = { ...this.docs[idx2], status: 'pending' };
+        if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...this.expandedDoc, status: 'pending' };
+        this.pollActivity();
+      } else if (r) {
+        this.apiError = `Upgrade failed: HTTP ${r.status}`;
       }
     },
 
@@ -1259,7 +1333,12 @@ function app() {
         this.focusDomain = f.domain || null;
       } catch {}
       setInterval(() => this.refresh(), 30000);
-      setInterval(() => this.pollActivity(), 5000);
+      // Fast poll when processing, slow when idle
+      setInterval(() => {
+        const hasActive = Object.values(this.processingActivity).some(a => a?.stage);
+        this._slowPollTick = (this._slowPollTick || 0) + 1;
+        if (hasActive || this._slowPollTick % 3 === 0) this.pollActivity();
+      }, 2000);
       // Smooth interpolation ticker: advance sumDisplay at measured rate between refreshes
       setInterval(() => {
         const now = Date.now();
@@ -1450,20 +1529,21 @@ function app() {
     stageRows(a) {
       const allStages = ['s0','s1','s2','s3','s4','s5','s6','s7','s8'];
       const labels = { s0:'Baseline score', s1:'Preprocess', s2:'Classify regions', s3:'OCR', s4:'Re-OCR 600dpi', s5:'Vision AI', s6:'Spell-fix', s7:'Rebuild PDF', s8:'Export markdown' };
+      const icons  = { s0:'◎', s1:'⚙', s2:'⊞', s3:'T', s4:'T⁺', s5:'👁', s6:'✦', s7:'⬡', s8:'↗' };
       const completed = a?.completed || [];
       const completedSet = new Set(completed.map(c => c.stage));
       const active = a?.stage;
       return allStages.map(s => {
         if (completedSet.has(s)) {
           const c = completed.find(c => c.stage === s);
-          return { stage: s, label: labels[s], status: 'done', pages: c.pages || 0, ms: c.ms || 0 };
+          return { stage: s, icon: icons[s], label: labels[s], status: 'done', pages: c.pages || 0, ms: c.ms || 0 };
         }
         if (s === active) {
-          return { stage: s, label: labels[s], status: 'active',
+          return { stage: s, icon: icons[s], label: labels[s], status: 'active',
                    pages: a.pages_done || 0, total_pages: a.total_pages || 0,
                    elapsed_ms: a.elapsed_ms || 0 };
         }
-        return { stage: s, label: labels[s], status: 'pending', pages: 0, ms: 0 };
+        return { stage: s, icon: icons[s], label: labels[s], status: 'pending', pages: 0, ms: 0 };
       });
     },
 
@@ -1479,6 +1559,14 @@ function app() {
       if (a?.elapsed_ms > 0) parts.push(this.fmtDuration(a.elapsed_ms) + ' elapsed');
       if (a?.estimated_remaining_ms > 0) parts.push('~' + this.fmtDuration(a.estimated_remaining_ms) + ' remaining');
       return parts.join(' · ');
+    },
+
+    overallPct(a) {
+      if (!a) return 0;
+      const TOTAL_STAGES = 8;
+      const done = (a.completed || []).length;
+      const stageFraction = (a.total_pages > 0 && a.pages_done > 0) ? a.pages_done / a.total_pages : (a.stage ? 0.1 : 0);
+      return Math.min(99, Math.round((done + stageFraction) / TOTAL_STAGES * 100));
     },
 
     async refreshTabCounts() {

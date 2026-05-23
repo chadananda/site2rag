@@ -126,7 +126,7 @@ async function pickWorker() {
 
 // Dispatch a job to a remote worker via multipart PDF upload.
 // Returns { md, receipt } when done, or throws on failure.
-async function dispatchToWorker(workerUrl, jobId, pdfPath) {
+async function dispatchToWorker(workerUrl, jobId, pdfPath, onProgress = null) {
   const { readFileSync } = await import('fs');
   const pdfData = readFileSync(pdfPath);
   const boundary = '----SLPBoundary' + Date.now();
@@ -161,6 +161,7 @@ async function dispatchToWorker(workerUrl, jobId, pdfPath) {
     await new Promise(r => setTimeout(r, 5000));
     try {
       const d = await (await fetch(workerUrl + '/jobs/' + jobId, { signal: AbortSignal.timeout(15_000) })).json();
+      if (onProgress && d.stage) onProgress({ stage: d.stage, pages: d.metrics?.find(m => m.stage === d.stage)?.pages_affected ?? null });
       if (d.status === 'done') {
         const mdRes = await fetch(workerUrl + '/jobs/' + jobId + '/md', { signal: AbortSignal.timeout(30_000) });
         const md = mdRes.ok ? await mdRes.text() : null;
@@ -339,7 +340,7 @@ export async function startPipelineServer({
       const worker = await pickWorker();
       if (worker) {
         log(`dispatch job=${job.id} → ${worker.hostname ?? worker.url}`);
-        const { md, receipt } = await dispatchToWorker(worker.url, job.id, job.pdf_path);
+        const { md, receipt } = await dispatchToWorker(worker.url, job.id, job.pdf_path, p => { if (!jobs.isClosed()) jobs.setProgress(job.id, p); });
         // Write output markdown to the expected location
         if (md && job.pdf_path) {
           const { writeFileSync, mkdirSync } = await import('fs');
@@ -354,37 +355,9 @@ export async function startPipelineServer({
         }
         log(`done job=${job.id} via ${worker.hostname ?? worker.url}`);
       } else {
-        // No GPU worker — run locally
-        log(`no worker available, running job=${job.id} locally`);
-        let stageStartedAt = null;
-        const completedStages = [];
-        const ctx = await runPipeline({
-          docId:      job.id,
-          sourcePath: job.pdf_path,
-          sourceUrl:  job.source_url ?? null,
-          importance: job.importance ?? 1,
-          meta:       job.meta ?? {},
-          config:     { ...baseConfig, ...job.config },
-          onStageStart: (stage) => {
-            stageStartedAt = Date.now();
-            if (jobs.isClosed()) return;
-            const prev = jobs.getProgress(job.id) || {};
-            jobs.setProgress(job.id, { stage, stage_started_at: new Date().toISOString(),
-              total_pages: prev.total_pages || 0, pages_done: 0, completed: completedStages });
-          },
-          onProgress: (stage, pagesAffected, totalPages) => {
-            completedStages.push({ stage, pages: pagesAffected, ms: stageStartedAt ? Date.now() - stageStartedAt : 0 });
-            if (jobs.isClosed()) return;
-            jobs.setProgress(job.id, { stage: null, stage_started_at: null,
-              total_pages: totalPages, pages_done: pagesAffected, completed: completedStages });
-          },
-        });
-        if (!jobs.isClosed()) jobs.setDone(job.id, {
-          mdPath: ctx.outputs.mdPath ?? null,
-          pdfOutPath: ctx.outputs.archivalPdfPath ?? null,
-          receipt: ctx.toReceipt(),
-        });
-        log(`done job=${job.id} locally`);
+        // No GPU worker available — requeue and wait for one
+        log(`no worker available for job=${job.id} — requeueing`);
+        if (!jobs.isClosed()) jobs.requeue(job.id);
       }
     } catch (err) {
       if (!jobs.isClosed()) jobs.setFailed(job.id, err.message);
