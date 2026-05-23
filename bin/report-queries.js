@@ -114,7 +114,7 @@ export const siteDocs = (domain, params) => {
     const tab = params.get('tab') || 'queue';
     const offset = (page - 1) * PER_PAGE;
 
-    const wheres = ["p.gone=0", "p.mime_type='application/pdf'", "LOWER(p.url) LIKE '%.pdf'"];
+    const wheres = ["p.gone=0", "p.mime_type='application/pdf'"];
     const vals = [];
 
     if (tab === 'upgraded') {
@@ -166,7 +166,7 @@ export const siteTabCounts = (domain) => {
         SUM(CASE WHEN u.status IN ('done','processing') THEN 1 ELSE 0 END) as upgraded
       FROM pages p
       LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
-      WHERE p.gone=0 AND p.mime_type='application/pdf' AND LOWER(p.url) LIKE '%.pdf'
+      WHERE p.gone=0 AND p.mime_type='application/pdf'
     `).get();
     return { original: row.original || 0, upgraded: row.upgraded || 0 };
   } finally { db.close(); }

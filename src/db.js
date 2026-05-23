@@ -144,6 +144,7 @@ CREATE TABLE IF NOT EXISTS pdf_upgrade_queue (
   emailed INT DEFAULT 0,
   error TEXT
 );
+CREATE INDEX IF NOT EXISTS idx_pdf_upgrade_queue_status ON pdf_upgrade_queue(status, finished_at);
 CREATE TABLE IF NOT EXISTS asset_refs (
   asset_hash TEXT NOT NULL,
   referencing_url TEXT NOT NULL,
