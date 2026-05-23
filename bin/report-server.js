@@ -323,7 +323,7 @@ createServer(async (req, res) => {
       const upgradeMethod = url.searchParams.get('method') || 'ocr'; // 'spell-fix' | 'ocr'
       const importanceParam = url.searchParams.get('importance');
       const importance = importanceParam ? Math.max(1, Math.min(5, parseInt(importanceParam, 10))) : null;
-      const existing = db.prepare('SELECT status, id FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
+      const existing = db.prepare('SELECT status FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
       const now = new Date().toISOString();
       const imp = importance ?? 1;
 

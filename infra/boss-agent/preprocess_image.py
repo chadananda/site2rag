@@ -101,7 +101,10 @@ def _gauss_kernel(sigma, device):
 def _gauss_blur(t, sigma):
     """Gaussian blur on GPU tensor [1,1,H,W]."""
     kernel, ks = _gauss_kernel(sigma, _DEVICE)
-    return _F.conv2d(_F.pad(t, [ks//2]*4, mode='reflect'), kernel)
+    pad = min(ks // 2, t.shape[2] - 1, t.shape[3] - 1)  # clamp to avoid padding > input size
+    if pad <= 0:
+        return t
+    return _F.conv2d(_F.pad(t, [pad]*4, mode='reflect'), kernel)
 
 def _autocontrast(t, cutoff_pct=2.0):
     """Percentile-based stretch to [0,255]."""
@@ -148,6 +151,9 @@ def _gpu_variants(img, issues):
     Compute all differentiable variants as GPU tensor ops.
     Returns [(label, tensor[1,1,H,W])]. Runs entirely on GPU — no CPU round-trips.
     """
+    # Skip GPU path for tiny images — padding constraints make ops invalid below ~10px
+    if img.width < 10 or img.height < 10:
+        return []
     t = _to_gpu(img)
     variants = []
 
@@ -573,6 +579,142 @@ def vision_pick_best(candidates, api_key):
 def _cmd_exists(cmd):
     import shutil; return shutil.which(cmd) is not None
 
+# ── Core processing API (callable from server or CLI) ────────────────────────
+
+def process_image(in_path, out_path, force=False, issues=(), method=None,
+                  api_key=None, verbose=False):
+    """
+    Enhance in_path → out_path. Returns result dict (same JSON as CLI stdout).
+    Importable by preprocess_server.py for warm persistent processing.
+    out_path is only written if enhancement improves quality by >5%.
+    """
+    if not os.path.exists(in_path):
+        return {"error": f"input not found: {in_path}"}
+    try:
+        img = Image.open(in_path).convert('RGB')
+    except Exception as e:
+        return {"error": str(e)}
+
+    issues = list(issues)
+    contrast_range, bleed_score = analyze(img)
+    g_score       = grain_score(img)
+    needs_contrast = contrast_range < 0.6
+    needs_bleed    = bleed_score > 0.3 or 'bleed_through' in issues
+    needs_denoise  = g_score > 15.0  or 'grainy'        in issues
+
+    if needs_bleed   and 'bleed_through' not in issues: issues.append('bleed_through')
+    if (needs_contrast or needs_denoise) and 'low_contrast' not in issues and contrast_range < 0.7:
+        issues.append('low_contrast')
+
+    result = {
+        "contrast_range": round(contrast_range, 3),
+        "bleed_score":    round(bleed_score,    3),
+        "grain_score":    round(g_score,        1),
+        "bleed_detected": bleed_score > 0.3,
+        "gpu":            _has_gpu(),
+        "applied": [],
+        "enhanced": False,
+    }
+
+    if not force and not needs_contrast and not needs_bleed and not needs_denoise:
+        return result
+
+    if _has_gpu():
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            cpu_cv2_fut  = pool.submit(_cpu_cv2_variants, img, issues)
+            cli_fut      = pool.submit(_cli_variants,     img, issues)
+            gpu_vars     = _gpu_variants(img, issues)
+            cpu_cv2_vars = cpu_cv2_fut.result()
+            cli_vars     = cli_fut.result()
+
+        if method:
+            gpu_vars     = [(l, t) for l, t in gpu_vars     if method in l] or gpu_vars
+            cpu_cv2_vars = [(l, v) for l, v in cpu_cv2_vars if method in l] or cpu_cv2_vars
+            cli_vars     = [(l, v) for l, v in cli_vars     if method in l] or cli_vars
+
+        cpu_all     = cpu_cv2_vars + cli_vars
+        cpu_tensors = [_to_gpu(v) for _, v in cpu_all]
+        all_labels  = [l for l, _ in gpu_vars]  + [l for l, _ in cpu_all]
+        all_tensors = [t for _, t in gpu_vars]  + cpu_tensors
+
+        if not all_tensors:
+            return result
+
+        scores     = _score_batch_gpu(all_tensors)
+        orig_score = _score_batch_gpu([_to_gpu(img)])[0]
+
+        if verbose:
+            for s, lbl in sorted(zip(scores, all_labels), reverse=True)[:10]:
+                print(f'  {s:.4f}  {lbl}', file=sys.stderr)
+
+        best_idx   = max(range(len(scores)), key=lambda i: scores[i])
+        best_score = scores[best_idx]
+        best_label = all_labels[best_idx]
+
+        if api_key and len(scores) >= 2:
+            top = scores[best_idx]
+            finalist_idxs = [i for i, s in enumerate(scores) if s >= top * 0.97][:5]
+            if len(finalist_idxs) > 1:
+                finalists = [(all_labels[i], _to_pil(all_tensors[i])) for i in finalist_idxs]
+                picked = vision_pick_best(finalists, api_key)
+                if picked:
+                    for i, lbl in enumerate(all_labels):
+                        if lbl == picked: best_idx, best_score, best_label = i, scores[i], lbl; break
+                    result["vision_pick"] = picked
+
+        if best_score > orig_score * 1.05:
+            finalize_for_ocr(_to_pil(all_tensors[best_idx])).save(out_path, 'PNG')
+            result.update(applied=[best_label], enhanced=True,
+                          score_improvement=round(best_score - orig_score, 3),
+                          orig_score=round(orig_score, 4), best_score=round(best_score, 4))
+
+    else:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            cv2_fut  = pool.submit(_cpu_cv2_variants, img, issues)
+            cli_fut  = pool.submit(_cli_variants,     img, issues)
+            pil_vars = _pil_variants_cpu(img, issues)
+            cv2_vars = cv2_fut.result()
+            cli_vars = cli_fut.result()
+        all_vars = pil_vars + cv2_vars + cli_vars
+        if method:
+            all_vars = [(l, v) for l, v in all_vars if method in l] or all_vars
+
+        scored = []
+        for label, v_img in all_vars:
+            try: scored.append((_score_cpu(v_img), label, v_img))
+            except Exception: pass
+
+        if not scored:
+            return result
+
+        scored.sort(key=lambda x: -x[0])
+        orig_score = _score_cpu(img)
+
+        if verbose:
+            for s, lbl, _ in scored[:10]:
+                print(f'  {s:.4f}  {lbl}', file=sys.stderr)
+
+        best_score, best_label, best_img = scored[0]
+
+        if api_key and len(scored) >= 2:
+            top       = scored[0][0]
+            finalists = [(l, v) for s, l, v in scored if s >= top * 0.97][:5]
+            if len(finalists) > 1:
+                picked = vision_pick_best(finalists, api_key)
+                if picked:
+                    for s, l, v in scored:
+                        if l == picked: best_score, best_label, best_img = s, l, v; break
+                    result["vision_pick"] = picked
+
+        if best_score > orig_score * 1.05:
+            finalize_for_ocr(best_img).save(out_path, 'PNG')
+            result.update(applied=[best_label], enhanced=True,
+                          score_improvement=round(best_score - orig_score, 3),
+                          orig_score=round(orig_score, 4), best_score=round(best_score, 4))
+
+    return result
+
+
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -603,149 +745,8 @@ def main():
         print(json.dumps({"error": "usage: preprocess_image.py [--force] [--issues i1,i2] <input.png> <output.png>"}))
         sys.exit(1)
 
-    in_path, out_path = args[0], args[1]
-    if not os.path.exists(in_path):
-        print(json.dumps({"error": f"input not found: {in_path}"})); sys.exit(0)
-
-    try:
-        img = Image.open(in_path).convert('RGB')
-    except Exception as e:
-        print(json.dumps({"error": str(e)})); sys.exit(0)
-
-    contrast_range, bleed_score = analyze(img)
-    g_score       = grain_score(img)
-    needs_contrast = contrast_range < 0.6
-    needs_bleed    = bleed_score > 0.3 or 'bleed_through' in issues
-    needs_denoise  = g_score > 15.0  or 'grainy'        in issues
-
-    if needs_bleed   and 'bleed_through' not in issues: issues = list(issues) + ['bleed_through']
-    if (needs_contrast or needs_denoise) and 'low_contrast' not in issues and contrast_range < 0.7:
-        issues = list(issues) + ['low_contrast']
-
-    result = {
-        "contrast_range": round(contrast_range, 3),
-        "bleed_score":    round(bleed_score,    3),
-        "grain_score":    round(g_score,        1),
-        "bleed_detected": bleed_score > 0.3,
-        "gpu":            _has_gpu(),
-        "applied": [],
-        "enhanced": False,
-    }
-
-    if not force and not needs_contrast and not needs_bleed and not needs_denoise:
-        print(json.dumps(result)); return
-
-    if _has_gpu():
-        # ── GPU path: tensor variants + CPU variants in parallel ──────────────
-        # Launch CPU-only ops (NLM, CLAHE, CLI) in a thread while GPU computes.
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            cpu_cv2_fut = pool.submit(_cpu_cv2_variants, img, issues)
-            cli_fut     = pool.submit(_cli_variants,     img, issues)
-            gpu_vars    = _gpu_variants(img, issues)      # runs while threads work
-            cpu_cv2_vars = cpu_cv2_fut.result()
-            cli_vars     = cli_fut.result()
-
-        if method:
-            gpu_vars    = [(l, t) for l, t in gpu_vars    if method in l] or gpu_vars
-            cpu_cv2_vars = [(l, v) for l, v in cpu_cv2_vars if method in l] or cpu_cv2_vars
-            cli_vars    = [(l, v) for l, v in cli_vars    if method in l] or cli_vars
-
-        # Convert all CPU PIL variants to GPU tensors for unified batch scoring
-        cpu_all = cpu_cv2_vars + cli_vars
-        cpu_tensors = [_to_gpu(v) for _, v in cpu_all]
-
-        all_labels  = [l for l, _ in gpu_vars]   + [l for l, _ in cpu_all]
-        all_tensors = [t for _, t in gpu_vars]   + cpu_tensors
-
-        if not all_tensors:
-            print(json.dumps(result)); return
-
-        scores = _score_batch_gpu(all_tensors)
-
-        # orig score on GPU too
-        orig_t     = _to_gpu(img)
-        orig_score = _score_batch_gpu([orig_t])[0]
-
-        if verbose:
-            ranked = sorted(zip(scores, all_labels), reverse=True)
-            for s, lbl in ranked[:10]:
-                print(f'  {s:.4f}  {lbl}', file=sys.stderr)
-
-        best_idx   = max(range(len(scores)), key=lambda i: scores[i])
-        best_score = scores[best_idx]
-        best_label = all_labels[best_idx]
-
-        # Vision tiebreaker
-        if api_key and len(scores) >= 2:
-            top = scores[best_idx]
-            finalist_idxs = [i for i, s in enumerate(scores) if s >= top * 0.97][:5]
-            if len(finalist_idxs) > 1:
-                finalists = [(all_labels[i], _to_pil(all_tensors[i])) for i in finalist_idxs]
-                picked = vision_pick_best(finalists, api_key)
-                if picked:
-                    for i, lbl in enumerate(all_labels):
-                        if lbl == picked: best_idx, best_score, best_label = i, scores[i], lbl; break
-                    result["vision_pick"] = picked
-
-        if best_score > orig_score * 1.05:
-            best_pil   = _to_pil(all_tensors[best_idx])
-            final_img  = finalize_for_ocr(best_pil)
-            final_img.save(out_path, 'PNG')
-            result["applied"]           = [best_label]
-            result["enhanced"]          = True
-            result["score_improvement"] = round(best_score - orig_score, 3)
-            result["orig_score"]        = round(orig_score, 4)
-            result["best_score"]        = round(best_score, 4)
-        # else: no improvement, don't write output
-
-    else:
-        # ── CPU path: PIL variants in main thread + cv2/CLI in parallel threads
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            cv2_fut = pool.submit(_cpu_cv2_variants, img, issues)
-            cli_fut = pool.submit(_cli_variants,     img, issues)
-            pil_vars = _pil_variants_cpu(img, issues)    # runs while threads work
-            cv2_vars = cv2_fut.result()
-            cli_vars = cli_fut.result()
-        all_vars = pil_vars + cv2_vars + cli_vars
-        if method:
-            all_vars = [(l, v) for l, v in all_vars if method in l] or all_vars
-
-        scored = []
-        for label, v_img in all_vars:
-            try: scored.append((_score_cpu(v_img), label, v_img))
-            except Exception: pass
-
-        if not scored:
-            print(json.dumps(result)); return
-
-        scored.sort(key=lambda x: -x[0])
-        orig_score = _score_cpu(img)
-
-        if verbose:
-            for s, lbl, _ in scored[:10]:
-                print(f'  {s:.4f}  {lbl}', file=sys.stderr)
-
-        best_score, best_label, best_img = scored[0]
-
-        if api_key and len(scored) >= 2:
-            top       = scored[0][0]
-            finalists = [(l, v) for s, l, v in scored if s >= top * 0.97][:5]
-            if len(finalists) > 1:
-                picked = vision_pick_best(finalists, api_key)
-                if picked:
-                    for s, l, v in scored:
-                        if l == picked: best_score, best_label, best_img = s, l, v; break
-                    result["vision_pick"] = picked
-
-        if best_score > orig_score * 1.05:
-            final_img = finalize_for_ocr(best_img)
-            final_img.save(out_path, 'PNG')
-            result["applied"]           = [best_label]
-            result["enhanced"]          = True
-            result["score_improvement"] = round(best_score - orig_score, 3)
-            result["orig_score"]        = round(orig_score,   4)
-            result["best_score"]        = round(best_score,   4)
-
+    result = process_image(args[0], args[1], force=force, issues=issues,
+                           method=method, api_key=api_key, verbose=verbose)
     print(json.dumps(result))
 
 if __name__ == '__main__':

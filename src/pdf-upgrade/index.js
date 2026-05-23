@@ -148,7 +148,6 @@ const submitViaPipeline = async (db, domain, row, page, siteConfig, openDbs = []
   const importance = Math.max(1, Math.round((1 - difficulty) * 200));
   try {
     const jobId = await pipelineClient.submitJob({
-      pdfPath:    page.local_path,
       sourceUrl:  row.url,
       importance,
       meta: {
@@ -171,7 +170,7 @@ const submitViaPipeline = async (db, domain, row, page, siteConfig, openDbs = []
 };
 
 /** Poll all in-flight pipeline jobs and update site DB when done/failed. */
-const checkPipelineJobs = async (db, openDbs = []) => {
+const checkPipelineJobs = async (db, domain, openDbs = []) => {
   // Include any status with a pipeline_job_id — catches rows where status was
   // accidentally left at 'pending' but the job is actually running in the pipeline.
   const running = db.prepare(
@@ -181,13 +180,38 @@ const checkPipelineJobs = async (db, openDbs = []) => {
     try {
       const job = await pipelineClient.getJob(jobId);
       if (job.status === 'done') {
-        const receipt = job.receipt ?? {};
+        // Fetch full receipt (decisions, per_stage quality, assessment) — richer than job.receipt
+        let receipt = job.receipt ?? {};
+        try {
+          const fullReceipt = await pipelineClient._get(`/jobs/${jobId}/receipt`);
+          if (fullReceipt?.quality) receipt = fullReceipt;
+        } catch { /* fall back to short receipt */ }
         const afterScore = receipt.quality?.final ?? null;
+
+        // Download PDF and MD from Tower, save locally so copyFileSync works
+        const upgradedDir = join(mirrorDir(domain), '.upgraded');
+        mkdirSync(upgradedDir, { recursive: true });
+        const hash = sha256(url).slice(0, 16);
+        const localPdfPath = join(upgradedDir, `x${hash}.pdf`);
+        const localMdPath  = join(upgradedDir, `x${hash}.md`);
+        let savedPdfPath = null;
+        try {
+          const pdfBuf = await pipelineClient.getPdf(jobId);
+          writeFileSync(localPdfPath, pdfBuf);
+          savedPdfPath = localPdfPath;
+        } catch (dlErr) {
+          log(`Pipeline PDF download failed for ${jobId}: ${dlErr.message}`);
+        }
+        try {
+          const md = await pipelineClient.getMarkdown(jobId);
+          if (md?.trim()) writeFileSync(localMdPath, md);
+        } catch { /* markdown download failure is non-fatal */ }
+
         db.prepare(`UPDATE pdf_upgrade_queue
           SET status='done', finished_at=?, upgraded_pdf_path=?,
               after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL
           WHERE url=?`)
-          .run(now(), job.pdf_out_path ?? null,
+          .run(now(), savedPdfPath,
             afterScore, receipt.quality?.gain ?? null,
             receipt.page_count ?? null, 'pipeline-v2', JSON.stringify(receipt), url);
         // Do NOT overwrite composite_score — it holds the original pre-upgrade score for comparison
@@ -197,7 +221,7 @@ const checkPipelineJobs = async (db, openDbs = []) => {
 
         // Propagate cached result to all siblings with same content hash (same + other domains)
         if (content_hash) {
-          const donor = { upgraded_pdf_path: job.pdf_out_path ?? null, after_score: afterScore,
+          const donor = { upgraded_pdf_path: savedPdfPath, after_score: afterScore,
             score_improvement: receipt.quality?.gain ?? null, pages_processed: receipt.page_count ?? null,
             method: 'pipeline-v2', receipt_json: JSON.stringify(receipt) };
           const sameSibs = db.prepare(`SELECT url, before_score FROM pdf_upgrade_queue WHERE content_hash=? AND url!=? AND status NOT IN ('done','failed') AND content_hash IS NOT NULL`).all(content_hash, url);
@@ -522,7 +546,7 @@ const tick = async () => {
       let pipelineReachable = true;
       try {
         await pipelineClient.health();
-        await Promise.all(openDbs.map(({ db }) => checkPipelineJobs(db, openDbs)));
+        await Promise.all(openDbs.map(({ db, domain }) => checkPipelineJobs(db, domain, openDbs)));
       } catch (err) {
         pipelineReachable = false;
         log(`ERROR: Pipeline service unreachable (${err.message}) — skipping pass-1 this tick. Fix PIPELINE_URL or start pipeline-server.`);

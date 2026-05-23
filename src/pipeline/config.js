@@ -88,8 +88,8 @@ export const DEFAULT_CONFIG = {
   bossUrl: process.env.LOCAL_LLM ?? 'http://boss.taile945b3.ts.net:49800/v1',
   markerUrl: process.env.MARKER_URL ?? 'http://localhost:7842',
 
-  // Worker pool registry — pipeline-server URL for /workers endpoint
-  registryUrl: process.env.PIPELINE_URL ?? 'http://localhost:49900',
+  // Worker pool registry — SearchLayerPDF boss exposes /workers endpoint
+  registryUrl: process.env.PIPELINE_URL ?? process.env.SLP_WORKER_URL ?? 'http://boss:49910',
 
   // Tool routing: 'workerPool' picks least-loaded worker via /tools/run API; falls back to local.
   // Workers expose all tools through their HTTP API — paths must be reachable (NFS or same host).

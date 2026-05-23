@@ -187,16 +187,49 @@ async function handleArgsRequest(tool, args, inputFiles, outputPaths) {
 
   // preprocess_image: args = [...flags, inputKey, outputKey] with file contents in inputFiles
   if (tool === 'preprocess_image') {
-    const __serverDir = path.dirname(new URL(import.meta.url).pathname);
-    const PREPROCESS_PY = path.join(__serverDir, 'tools', 'preprocess_image.py');
-    
-    // torch venv for GPU preprocessing (ROCm env scoped to subprocess only)
-    const PREPROCESS_PYTHON = process.env.PREPROCESS_PYTHON || '/home/chad/slp/engines/torch/venv/bin/python3';
-    const PREPROCESS_ENV = { ...process.env, HSA_OVERRIDE_GFX_VERSION: '11.5.1', ROCBLAS_TENSILE_LIBPATH: '/usr/lib/x86_64-linux-gnu/rocblas/5.1.0/library' };
     const inKey  = args.find(a => a.startsWith('__in_'));
     const outKey = args.find(a => a.startsWith('__out_')) || (outputPaths && outputPaths[0]);
     const imgB64 = inKey && (inputFiles || {})[inKey];
     if (!imgB64) return null;
+
+    // Prefer warm persistent server (no per-call torch import overhead)
+    const PREPROCESS_URL = process.env.PREPROCESS_SERVER_URL || 'http://localhost:8094';
+    try {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 5000);
+      const hRes = await fetch(`${PREPROCESS_URL}/health`, { signal: ctrl.signal }).finally(() => clearTimeout(timer));
+      if (hRes.ok) {
+        // Server is warm — send base64 image, get result + output_b64 back
+        const body = { input_b64: imgB64 };
+        // Forward any flag args (--force, --issues X, --method X)
+        const flagArgs = args.filter(a => !a.startsWith('__'));
+        if (flagArgs.includes('--force')) body.force = true;
+        const issIdx = flagArgs.indexOf('--issues');
+        if (issIdx !== -1 && flagArgs[issIdx+1]) body.issues = flagArgs[issIdx+1].split(',').filter(Boolean);
+        const mIdx = flagArgs.indexOf('--method');
+        if (mIdx !== -1 && flagArgs[mIdx+1]) body.method = flagArgs[mIdx+1];
+        const pRes = await fetch(`${PREPROCESS_URL}/preprocess`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(120_000),
+        });
+        if (!pRes.ok) throw new Error(`preprocess-server ${pRes.status}`);
+        const data = await pRes.json();
+        const result = { stdout: JSON.stringify(data.result ?? {}), stderr: '', exitCode: 0 };
+        if (data.output_b64) result.outputFiles = { [outKey || '__out_0.png']: data.output_b64 };
+        return result;
+      }
+    } catch (e) {
+      // Server not available — fall through to subprocess
+      console.warn(`[server] preprocess-server unavailable (${e.message}), using subprocess`);
+    }
+
+    // Subprocess fallback (torch import costs ~2-3s per call)
+    const __serverDir = path.dirname(new URL(import.meta.url).pathname);
+    const PREPROCESS_PY = path.join(__serverDir, 'tools', 'preprocess_image.py');
+    const PREPROCESS_PYTHON = process.env.PREPROCESS_PYTHON || '/home/chad/slp/engines/torch/venv/bin/python3';
+    const PREPROCESS_ENV = { ...process.env, HSA_OVERRIDE_GFX_VERSION: '11.5.1', ROCBLAS_TENSILE_LIBPATH: '/usr/lib/x86_64-linux-gnu/rocblas/5.1.0/library' };
     const { mkdtempSync } = await import('node:fs');
     const { rmSync } = await import('node:fs');
     const { tmpdir } = await import('node:os');
@@ -387,10 +420,27 @@ app.post('/page-task', async (req, res) => {
   }
 });
 
-app.listen(PORT, '0.0.0.0', () => {
+app.listen(PORT, '0.0.0.0', async () => {
   const available = Object.entries(_tools)
     .filter(([k, v]) => !k.startsWith('_') && v).map(([k]) => k);
   console.log(`[node-agent] ${hostname()} listening on :${PORT}`);
   console.log(`[node-agent] tools: ${available.join(', ') || '(none detected)'}`);
   console.log(`[node-agent] vram: ${_vramGb}GB`);
+
+  // Self-register with orchestrator on every startup so restarts don't orphan this worker
+  const pipelineUrl = process.env.PIPELINE_SERVER_URL;
+  if (pipelineUrl) {
+    try {
+      const myUrl = `http://${hostname()}:${PORT}`;
+      const r = await fetch(`${pipelineUrl}/workers/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: myUrl, hostname: hostname(), platform: 'linux-amd64-rocm' }),
+        signal: AbortSignal.timeout(10000),
+      });
+      console.log(`[node-agent] registered with ${pipelineUrl} → ${r.status}`);
+    } catch (e) {
+      console.warn(`[node-agent] orchestrator registration failed: ${e.message}`);
+    }
+  }
 });

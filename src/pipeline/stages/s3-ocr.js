@@ -38,6 +38,8 @@ const D_SYNTH_CONC   = 8;     // max concurrent Haiku synthesis calls
 const LAYOUT_ENH_METHODS = ['otsu', 'sharpen', 'otsu+sharpen', 'autocontrast'];
 // Layout DPIs to evaluate. Higher DPI = better detail but slower. Scored by block count.
 const LAYOUT_DPI_CANDIDATES = [150, 100, 200];
+// Alt DPIs for multi-DPI search — excludes D_LAYOUT_DPI (150) since the standard pass already tried it.
+const LAYOUT_DPI_ALT = LAYOUT_DPI_CANDIDATES.filter(d => d !== D_LAYOUT_DPI);
 
 const execFileAsync = promisify(execFile);
 const __pyDir       = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -66,7 +68,7 @@ const BATCH_ENGINES = [
   // doctr: Latin + CJK; skip for Arabic/Persian/Hebrew (produces garbage)
   { label: 'doctr',   script: DOCTR_PY,   tool: 'doctr_ocr',   langs: (lang) => !RTL_LANGS_S3.has(lang) },
   // kraken: Latin script only; skip for CJK and RTL (produces 0 crops on Arabic/Persian)
-  { label: 'kraken',  script: KRAKEN_PY,  tool: 'kraken_ocr',  langs: (lang) => !CJK_LANGS.has(lang) && !RTL_LANGS_S3.has(lang) },
+  { label: 'kraken',  script: KRAKEN_PY,  tool: 'kraken_ocr',  langs: (lang) => RTL_LANGS_S3.has(lang) },
 ];
 
 const TESS_TO_SURYA = { ara: 'ar', fas: 'fa', heb: 'he', chi_sim: 'zh', 'chi_sim+chi_tra': 'zh', jpn: 'ja', kor: 'ko', rus: 'ru', fra: 'fr', deu: 'de', spa: 'es', ita: 'it', por: 'pt', nld: 'nl', pol: 'pl', tur: 'tr', eng: 'en' };
@@ -74,10 +76,21 @@ const TESS_LANG = { arabic: 'ara', persian: 'fas', hebrew: 'heb', chinese: 'chi_
 const ISO_TESS = { fr: 'fra', de: 'deu', es: 'spa', it: 'ita', pt: 'por', nl: 'nld', pl: 'pol', tr: 'tur', ru: 'rus', ar: 'ara', fa: 'fas', he: 'heb', ja: 'jpn', zh: 'chi_sim', ko: 'kor' };
 const VALID_TESS = new Set(['eng', 'fra', 'deu', 'spa', 'ita', 'por', 'nld', 'pol', 'tur', 'rus', 'ara', 'fas', 'heb', 'jpn', 'chi_sim', 'chi_tra', 'kor', 'chi_sim+jpn', 'chi_sim+chi_tra']);
 
+// Latin-script tesseract language codes — used to validate metaLang for printed_latin pages.
+const LATIN_TESS = new Set(['eng','fra','deu','spa','ita','por','nld','pol','ces','slk','hun','ron','lat','dan','fin','nor','swe','cat','vie','hrv','slv','est','lav','lit']);
+
 export function resolveLang(regionType, metaLang) {
   if (regionType === 'printed_arabic') return 'ara';
   if (regionType === 'printed_persian') return 'fas';
   if (regionType === 'printed_cjk') return 'chi_sim+jpn';
+  if (regionType === 'printed_latin') {
+    if (metaLang) {
+      const key = metaLang.toLowerCase();
+      const tessCode = TESS_LANG[key] ?? ISO_TESS[key] ?? (VALID_TESS.has(key) ? key : null);
+      if (tessCode && LATIN_TESS.has(tessCode)) return tessCode;
+    }
+    return 'eng';
+  }
   if (metaLang) {
     const key = metaLang.toLowerCase();
     if (VALID_TESS.has(key)) return key;
@@ -155,17 +168,19 @@ function detectScriptFromText(text) {
   return (best && best[1] / total >= 0.3) ? best[0] : null;
 }
 
-async function tryEnhance(pngPath, enhancedPath, extraArgs = []) {
+// Route via ctx.run() so preprocess_image dispatches to the worker pool (boss GPU),
+// not the orchestrator. tool-runner inlines pngPath as base64, writes enhancedPath back.
+async function tryEnhance(pngPath, enhancedPath, extraArgs = [], ctx) {
   try {
-    const { stdout } = await execFileAsync('python3', [PREPROCESS_PY, ...extraArgs, pngPath, enhancedPath], { timeout: 30000 });
+    const { stdout } = await ctx.run('preprocess_image', [...extraArgs, pngPath, enhancedPath], { timeout: 60000 });
     const result = JSON.parse(stdout.trim());
     return result.enhanced ? { path: enhancedPath, ...result } : null;
   } catch { return null; }
 }
 
-async function tryEnhanceForced(pngPath, enhancedPath, extraArgs = []) {
+async function tryEnhanceForced(pngPath, enhancedPath, extraArgs = [], ctx) {
   try {
-    const { stdout } = await execFileAsync('python3', [PREPROCESS_PY, '--force', ...extraArgs, pngPath, enhancedPath], { timeout: 30000 });
+    const { stdout } = await ctx.run('preprocess_image', ['--force', ...extraArgs, pngPath, enhancedPath], { timeout: 60000 });
     const result = JSON.parse(stdout.trim());
     return result.enhanced ? { path: enhancedPath, ...result } : null;
   } catch { return null; }
@@ -287,10 +302,10 @@ async function consultVisionForPreprocessing(layoutPng, apiKey, ctx) {
 }
 
 // Try all LAYOUT_DPI_CANDIDATES when block count is 0, returning the best {dpi, layoutPng, dpiScale}.
-// Rasterizes at each DPI then runs findBestLayoutForSegmentation.
-async function findBestLayoutDpi(sourcePath, pageNo, lang, tmpDir, ctx) {
+// DPIs run sequentially (stops early on success); methods within each DPI run in parallel.
+async function findBestLayoutDpi(sourcePath, pageNo, lang, tmpDir, ctx, dpis = LAYOUT_DPI_CANDIDATES) {
   let best = null;
-  for (const dpi of LAYOUT_DPI_CANDIDATES) {
+  for (const dpi of dpis) {
     const layoutBase = join(tmpDir, `p${pageNo}_layout_${dpi}dpi`);
     const layoutPng = `${layoutBase}.png`;
     try {
@@ -301,7 +316,7 @@ async function findBestLayoutDpi(sourcePath, pageNo, lang, tmpDir, ctx) {
       if (!best || candidate.blocks.length > best.result.blocks.length) {
         best = { dpi, layoutPng, dpiScale: (ctx.config.rasterDpi ?? D_RASTER_DPI) / dpi, result: candidate };
       }
-      if (best.result.blocks.length >= 2) break; // good enough — stop early
+      if (best.result.blocks.length >= 2) break; // good enough
     } catch { /* skip this DPI */ }
   }
   return best;
@@ -310,40 +325,43 @@ async function findBestLayoutDpi(sourcePath, pageNo, lang, tmpDir, ctx) {
 // Try several layout-safe enhancement methods (scored by block count, not image quality).
 // Returns { label, path, blocks, rawCount, filteredSizes } for the best candidate.
 // Pass methods=[] to override which enhancement methods to try (defaults to LAYOUT_ENH_METHODS).
+// Paths scoped by layoutPng stem to avoid collisions when called concurrently for different DPIs.
 async function findBestLayoutForSegmentation(layoutPng, lang, tmpDir, pageNo, ctx, methods = null) {
-  const candidates = [];
-
-  // Baseline: raw unenhanced image
-  try {
-    const rawHocr = await runTesseractLayout(layoutPng, lang, ctx);
-    const parsed = parseHocrBlocks(rawHocr);
-    candidates.push({ label: 'raw', path: layoutPng, ...parsed });
-  } catch {
-    candidates.push({ label: 'raw', path: layoutPng, blocks: [], rawCount: 0, filteredSizes: [] });
-  }
-
-  // Try each layout-safe enhancement; --force bypasses the "needs_contrast" gate
+  const stem = basename(layoutPng, '.png');
   const methodsToTry = methods ?? LAYOUT_ENH_METHODS;
-  for (const method of methodsToTry) {
-    const enhPath = join(tmpDir, `p${pageNo}_layout_${method}.png`);
-    try {
-      const { stdout } = await execFileAsync('python3',
-        [PREPROCESS_PY, '--force', '--method', method, layoutPng, enhPath],
-        { timeout: 30000 });
-      const enhResult = JSON.parse(stdout.trim() || '{}');
-      if (enhResult.enhanced && existsSync(enhPath)) {
-        try {
-          const enhHocr = await runTesseractLayout(enhPath, lang, ctx);
-          const parsed = parseHocrBlocks(enhHocr);
-          candidates.push({ label: method, path: enhPath, ...parsed });
-        } catch {
-          candidates.push({ label: method, path: enhPath, blocks: [], rawCount: 0, filteredSizes: [] });
-        }
+
+  // Run raw tesseract and all enhancement methods in parallel
+  const all = await Promise.all([
+    (async () => {
+      try {
+        const rawHocr = await runTesseractLayout(layoutPng, lang, ctx);
+        return { label: 'raw', path: layoutPng, ...parseHocrBlocks(rawHocr) };
+      } catch {
+        return { label: 'raw', path: layoutPng, blocks: [], rawCount: 0, filteredSizes: [] };
       }
-    } catch { /* skip this method */ }
-  }
+    })(),
+    ...methodsToTry.map(async (method) => {
+      const enhPath = join(tmpDir, `${stem}_${method}.png`);
+      try {
+        const { stdout } = await ctx.run('preprocess_image',
+          ['--force', '--method', method, layoutPng, enhPath],
+          { timeout: 60000 });
+        const enhResult = JSON.parse(stdout.trim() || '{}');
+        if (enhResult.enhanced && existsSync(enhPath)) {
+          try {
+            const enhHocr = await runTesseractLayout(enhPath, lang, ctx);
+            return { label: method, path: enhPath, ...parseHocrBlocks(enhHocr) };
+          } catch {
+            return { label: method, path: enhPath, blocks: [], rawCount: 0, filteredSizes: [] };
+          }
+        }
+      } catch { /* skip */ }
+      return null;
+    }),
+  ]);
 
   // Winner = most usable blocks; tie-break by raw count
+  const candidates = all.filter(Boolean);
   candidates.sort((a, b) => b.blocks.length - a.blocks.length || b.rawCount - a.rawCount);
   return candidates[0];
 }
@@ -419,7 +437,7 @@ async function runSuryaChunked(cropRegistry, langs, tmpDir, ctx, pageScope = '')
       mkdirSync(chunkOutDir, { recursive: true });
       const { flag, getResultsPath } = _suryaCliCache ?? { flag: '--output_dir',
         getResultsPath: (o, i) => join(o, basename(i), 'results.json') };
-      await ctx.run('surya_ocr', [chunkInDir, flag, chunkOutDir], { timeout: 60000 });
+      await ctx.run('surya_ocr', [chunkInDir, flag, chunkOutDir], { timeout: 20000 });
       const resultsPath = getResultsPath(chunkOutDir, chunkInDir);
       if (existsSync(resultsPath)) {
         const results = JSON.parse(readFileSync(resultsPath, 'utf8'));
@@ -588,9 +606,11 @@ export async function s3Ocr(ctx) {
   const dpiScale = dpi / D_LAYOUT_DPI;
   const prepCfg = ctx.config.preprocessing ?? {};
   const forceContrast = prepCfg.forceContrast ?? false;
+  // Block-level enhancement: default to 'otsu' for scan PDFs — skips NLM/CLAHE (slow on
+  // large 300dpi crops). Haiku synthesis corrects OCR errors regardless of enhancement.
   const extraArgs = [
     ...(ctx._scanIssues?.length ? ['--issues', ctx._scanIssues.join(',')] : []),
-    ...(prepCfg.method ? ['--method', prepCfg.method] : []),
+    ...(prepCfg.method ? ['--method', prepCfg.method] : ctx._scanIssues?.length ? ['--method', 'otsu'] : []),
   ];
 
   const docHash = createHash('sha256').update(ctx.docId).digest('hex').slice(0, 16);
@@ -618,6 +638,9 @@ export async function s3Ocr(ctx) {
     ctx.endStage('s3', { pages_affected: 0, notes: 'no_engines' });
     return ctx;
   }
+  if (availableEngines.length === 0 && !hasTextLayer) {
+    ctx.addDecision('s3', 'engines_mode', `no batch engines — surya+tesseract only (${suryaOk ? 'surya available' : 'tesseract only'})`);
+  }
 
   // Calibration page: page 2 (first real text page after cover).
   // Winning {method, dpi} is shared via ctx._layoutCalibration before pages 3+ start.
@@ -628,7 +651,7 @@ export async function s3Ocr(ctx) {
 
   try {
     // ── Pre-calibration: find best layout settings from page 2 ──────────────────────────────
-    if (ctx._scanIssues?.length > 0) {
+    if (ctx._scanIssues?.length > 0 && ctx.pages.some(p => p.pageNo > calibPageNo)) {
       const calibSrcPage = ctx.pages.find(p => p.pageNo === calibPageNo);
       if (calibSrcPage) {
         const calibLang = ctx.config.s3Lang ??
@@ -743,7 +766,7 @@ export async function s3Ocr(ctx) {
           // Not gated on _scanIssues — 0 blocks is itself a signal that something is wrong.
           if (blocks.length < D_MIN_BLOCKS) {
             try {
-              const dpiSearch = await findBestLayoutDpi(ctx.sourcePath, page.pageNo, lang, tmpDir, ctx);
+              const dpiSearch = await findBestLayoutDpi(ctx.sourcePath, page.pageNo, lang, tmpDir, ctx, LAYOUT_DPI_ALT);
               if (dpiSearch && dpiSearch.result.blocks.length > blocks.length) {
                 bestLayout = dpiSearch.result; blocks = dpiSearch.result.blocks;
                 page._layoutDpiScale = dpiSearch.dpiScale;
@@ -862,7 +885,7 @@ export async function s3Ocr(ctx) {
             await ctx.run('convert', [pngPath, '-crop', `${bx2-bx1}x${by2-by1}+${bx1}+${by1}`, '+repage', cropPath], { timeout: 15000 });
             if (!existsSync(cropPath)) return;
             const cropEnh = join(tmpDir, `${cropStem}_enh.png`);
-            const enh = forceContrast ? await tryEnhanceForced(cropPath, cropEnh, extraArgs) : await tryEnhance(cropPath, cropEnh, extraArgs);
+            const enh = forceContrast ? await tryEnhanceForced(cropPath, cropEnh, extraArgs, ctx) : await tryEnhance(cropPath, cropEnh, extraArgs, ctx);
             // INVARIANT: store ocrPath (enhanced), not raw cropPath — all engines must see the enhanced image.
             const ocrPath = enh?.path ?? cropPath;
 

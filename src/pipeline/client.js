@@ -2,10 +2,11 @@
 // Exports: PipelineClient. Deps: node:http, node:https
 //
 // Usage:
-//   const client = new PipelineClient({ baseUrl: process.env.PIPELINE_URL ?? 'http://localhost:49900' });
-//   const jobId = await client.submitJob({ pdfPath, sourceUrl, meta, importance });
+//   const client = new PipelineClient({ baseUrl: process.env.PIPELINE_URL ?? 'http://localhost:4000' });
+//   const jobId = await client.submitJob({ sourceUrl, meta, importance });
 //   const job   = await client.waitForJob(jobId);   // polls until done
 //   const md    = await client.getMarkdown(jobId);
+// Tower fetches the PDF from sourceUrl — no file I/O in the client.
 
 import { request as httpRequest }  from 'http';
 import { request as httpsRequest } from 'https';
@@ -18,7 +19,7 @@ export class PipelineClient {
    * @param {number} [opts.pollInterval] - ms between status polls (default 3000)
    * @param {number} [opts.timeout]      - ms before waitForJob gives up (default 600000 = 10 min)
    */
-  constructor({ baseUrl = 'http://localhost:49900', apiKey = null, pollInterval = 3000, timeout = 600_000 } = {}) {
+  constructor({ baseUrl = 'http://localhost:4000', apiKey = null, pollInterval = 3000, timeout = 600_000 } = {}) {
     this.baseUrl      = baseUrl.replace(/\/$/, '');
     this.apiKey       = apiKey;
     this.pollInterval = pollInterval;
@@ -29,16 +30,17 @@ export class PipelineClient {
   health() { return this._get('/health', { allowStatus: [200, 503] }); }
 
   /**
-   * Submit a job. Returns jobId string.
+   * Submit a job by URL. Tower fetches the PDF — no file I/O here.
+   * Returns jobId string.
    * @param {object} opts
-   * @param {string} opts.pdfPath    - absolute path the server can read (same machine or shared fs)
-   * @param {string} [opts.sourceUrl]
+   * @param {string} opts.sourceUrl  - publicly (or internally) reachable PDF URL
    * @param {object} [opts.meta]     - { title, author, language, anchorText, ... }
    * @param {object} [opts.config]   - pipeline config overrides
    * @param {number} [opts.importance=1]
    */
-  async submitJob({ pdfPath, sourceUrl, meta, config, importance = 1 }) {
-    const { jobId } = await this._post('/jobs', { pdfPath, sourceUrl, meta, config, importance });
+  async submitJob({ sourceUrl, meta, config, importance = 1 }) {
+    if (!sourceUrl) throw new Error('sourceUrl is required');
+    const { jobId } = await this._post('/jobs', { sourceUrl, meta, config, importance });
     return jobId;
   }
 

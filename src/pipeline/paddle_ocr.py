@@ -19,10 +19,27 @@ def _gpu_works():
     except Exception:
         return False
 
+def _mps_works():
+    """Return True only if MPS (Apple Metal) is available and functional."""
+    try:
+        r = _subprocess.run(
+            [sys.executable, '-c',
+             'import torch; a=torch.ones(32,32,device="mps"); b=torch.matmul(a,a); print("ok")'],
+            capture_output=True, timeout=15,
+        )
+        return r.returncode == 0 and b'ok' in r.stdout
+    except Exception:
+        return False
+
 try:
     import torch as _torch
-    _GPU = _torch.cuda.is_available() and _gpu_works()
+    # PaddleOCR 2.x use_gpu flag: True enables GPU (CUDA). On Apple Silicon, PaddlePaddle
+    # uses CPU by default — Metal/MPS is not supported by PaddlePaddle, only by PyTorch.
+    # Stick with CUDA check only; MPS check is for informational purposes.
+    _MPS = _torch.backends.mps.is_available() and _mps_works()
+    _GPU = not _MPS and _torch.cuda.is_available() and _gpu_works()
 except ImportError:
+    _MPS = False
     _GPU = False
 
 TESS_TO_PADDLE = {
