@@ -693,7 +693,10 @@ if ('serviceWorker' in navigator) {
                             </template>
                           </span>
                         </template>
-                        <template x-if="!doc.method_steps && doc.method">
+                        <template x-if="!doc.method_steps && doc.method_summary">
+                          <span><span class="font-semibold text-gray-700" x-text="doc.method_summary"></span></span>
+                        </template>
+                        <template x-if="!doc.method_steps && !doc.method_summary && doc.method">
                           <span><span class="text-gray-400">method</span> <span class="font-semibold text-gray-700" x-text="methodLabel(doc.method)"></span></span>
                         </template>
                         <template x-if="doc.pages_processed">

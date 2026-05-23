@@ -88,6 +88,7 @@ export const mapDoc = (d, domain) => {
 
   // Parse pipeline receipt for step-by-step method display with per-stage gains
   const _receipt = (() => { try { return JSON.parse(d.receipt_json || 'null'); } catch { return null; } })();
+  const method_summary = _receipt?.method_summary ?? null;
   const method_steps = (() => {
     if (!_receipt) return null;
     const { stages = [], quality = {} } = _receipt;
@@ -140,6 +141,7 @@ export const mapDoc = (d, domain) => {
     effective_after,
     effective_improvement,
     method_steps,
+    method_summary,
     receipt_json: undefined,
     spell_fix_cost_usd,
     vision_cost_usd,
