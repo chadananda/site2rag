@@ -1297,13 +1297,19 @@ function app() {
       const r = await this.adminFetch(upgradeUrl, { method: 'POST' }).catch(() => null);
       this.upgradingUrls = { ...this.upgradingUrls, [doc.url]: false };
       if (r?.ok) {
-        // Now update status so the card shifts to pending/amber state
+        // Update status to pending; switch to 'original' tab so card stays visible during processing
         const idx2 = this.docs.findIndex(d => d.url === doc.url);
         if (idx2 >= 0) this.docs[idx2] = { ...this.docs[idx2], status: 'pending' };
         if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...this.expandedDoc, status: 'pending' };
+        if (this.activeTab === 'upgraded') this.switchTab('original');
         this.pollActivity();
       } else if (r) {
-        this.apiError = `Upgrade failed: HTTP ${r.status}`;
+        const errText = await r.json().catch(() => ({}));
+        this.apiError = `Reprocess failed: ${errText?.error || 'HTTP ' + r.status}`;
+        // Restore card fields on failure
+        const idx3 = this.docs.findIndex(d => d.url === doc.url);
+        if (idx3 >= 0) this.docs[idx3] = { ...this.docs[idx3], ...doc };
+        this.processingActivity = { ...this.processingActivity, [doc.url]: null };
       }
     },
 
