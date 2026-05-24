@@ -5,7 +5,7 @@ import { join, dirname } from 'path';
 import { createHash } from 'crypto';
 import { loadConfig, getMirrorRoot, mirrorDir, mdDir, metaDir } from '../config.js';
 import { openDb } from '../db.js';
-import { ocrAvailableBackend, reocrDocument, bossPrewarm } from './reocr.js';
+import { ocrAvailableBackend, reocrDocument } from './reocr.js';
 import { rebuildPdf } from './rebuild.js';
 import { scorePdf } from './score.js';
 import { backfillHostsFromMirror } from './backfill.js';
@@ -148,6 +148,7 @@ const submitViaPipeline = async (db, domain, row, page, siteConfig, openDbs = []
   const importance = Math.max(1, Math.round((1 - difficulty) * 200));
   try {
     const jobId = await pipelineClient.submitJob({
+      pdfPath:    page.local_path,
       sourceUrl:  row.url,
       importance,
       meta: {
@@ -533,27 +534,17 @@ const tick = async () => {
       for (const row of p2) pass2plus.push({ db, domain, row, siteConfig: sc });
     }
 
-    // Pre-warm boss if pass-2+ work is queued — non-blocking, fire and forget
-    if (pass2plus.length > 0) {
-      bossPrewarm().catch(() => {});
-      log(`Pre-warming boss for ${pass2plus.length} pending OCR job(s)`);
-    }
-
     // Poll pipeline for completed/failed jobs unconditionally — even when no new submissions are needed.
-    // checkPipelineJobs was previously inside runPass1, so it only ran when there were pending items.
-    // With all items submitted (status='submitted'), pass1 would be empty and completions were never detected.
     if (pipelineClient) {
-      let pipelineReachable = true;
       try {
         await pipelineClient.health();
         await Promise.all(openDbs.map(({ db, domain }) => checkPipelineJobs(db, domain, openDbs)));
       } catch (err) {
-        pipelineReachable = false;
-        log(`ERROR: Pipeline service unreachable (${err.message}) — skipping pass-1 this tick. Fix PIPELINE_URL or start pipeline-server.`);
+        log(`ERROR: Pipeline service unreachable (${err.message}) — skipping this tick.`);
       }
     }
 
-    // Pass 1 (Marker) and Pass 2+ (boss/Claude) run concurrently — CPU and GPU are independent
+    // Pass 1 (Marker) and Pass 2+ run concurrently — CPU and GPU are independent
     const [markerOk, ocrBackend] = await Promise.all([markerAvailable(), ocrAvailableBackend()]);
 
     const runPass1 = async () => {
