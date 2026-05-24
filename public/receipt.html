@@ -4,203 +4,349 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Document Analysis Receipt</title>
-<link rel="stylesheet" href="/tailwind.css?v=5">
 <style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
   :root { color-scheme: light; }
-  body { font-family: ui-sans-serif, system-ui, sans-serif; background: #0f172a; min-height: 100vh; }
-  .mono { font-family: ui-monospace, monospace; }
 
-  /* Animated score ring */
-  .ring-track { stroke: rgba(255,255,255,0.1); }
-  .ring-fill { stroke: #22c55e; stroke-linecap: round; transition: stroke-dashoffset 1.2s cubic-bezier(.4,0,.2,1); }
-  .ring-fill.yellow { stroke: #eab308; }
-  .ring-fill.red { stroke: #ef4444; }
+  body {
+    font-family: 'Courier New', Courier, monospace;
+    background: #1a1a1a;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 48px 16px 64px;
+  }
 
-  /* Stage timeline */
-  .timeline-line { position: absolute; left: 19px; top: 24px; bottom: 0; width: 2px; background: rgba(255,255,255,0.08); }
-  .stage-icon { width: 40px; height: 40px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; position: relative; z-index: 1; }
-  .stage-icon.done { background: rgba(99,102,241,0.2); border: 1.5px solid #6366f1; }
-  .stage-icon.skipped { background: rgba(255,255,255,0.04); border: 1.5px solid rgba(255,255,255,0.1); }
-  .stage-icon.error { background: rgba(239,68,68,0.15); border: 1.5px solid #ef4444; }
+  /* Paper sitting on the dark surface */
+  .paper {
+    width: 100%;
+    max-width: 660px;
+    background: #faf8f2;
+    color: #1a1a18;
+    box-shadow: 0 8px 60px rgba(0,0,0,0.7), 0 2px 8px rgba(0,0,0,0.4);
+    position: relative;
+  }
 
-  /* Quality bar */
-  .q-bar-track { height: 6px; background: rgba(255,255,255,0.08); border-radius: 9999px; overflow: hidden; }
-  .q-bar-fill { height: 100%; border-radius: 9999px; transition: width 1s ease; }
-  .q-bar-fill.green { background: linear-gradient(90deg, #22c55e, #4ade80); }
-  .q-bar-fill.yellow { background: linear-gradient(90deg, #eab308, #facc15); }
-  .q-bar-fill.red { background: linear-gradient(90deg, #ef4444, #f87171); }
+  /* Serrated/perforated tear edges */
+  .tear {
+    display: block;
+    height: 14px;
+    background-size: 22px 14px;
+    background-repeat: repeat-x;
+    flex-shrink: 0;
+  }
+  .tear-top {
+    background-image: radial-gradient(circle at 11px 0px, #1a1a1a 7.5px, #faf8f2 7.5px);
+  }
+  .tear-bottom {
+    background-image: radial-gradient(circle at 11px 14px, #1a1a1a 7.5px, #faf8f2 7.5px);
+  }
 
-  /* Delta pill */
-  .delta-pill { font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 9999px; }
-  .delta-pos { background: rgba(34,197,94,0.15); color: #4ade80; border: 1px solid rgba(34,197,94,0.3); }
-  .delta-neg { background: rgba(239,68,68,0.15); color: #f87171; border: 1px solid rgba(239,68,68,0.3); }
-  .delta-zero { background: rgba(255,255,255,0.05); color: #94a3b8; border: 1px solid rgba(255,255,255,0.1); }
+  /* Inner body — subtle ruled-paper lines */
+  .paper-body {
+    padding: 28px 36px 32px;
+    background-image: repeating-linear-gradient(
+      to bottom,
+      transparent 0px, transparent 23px,
+      rgba(0,0,0,0.045) 23px, rgba(0,0,0,0.045) 24px
+    );
+  }
 
-  /* Decision chip */
-  .decision-chip { font-size: 10px; padding: 1px 6px; border-radius: 4px; background: rgba(255,255,255,0.05); color: #94a3b8; border: 1px solid rgba(255,255,255,0.08); font-family: ui-monospace, monospace; }
-  .decision-chip.alert { background: rgba(239,68,68,0.1); color: #fca5a5; border-color: rgba(239,68,68,0.25); }
-  .decision-chip.success { background: rgba(34,197,94,0.1); color: #86efac; border-color: rgba(34,197,94,0.25); }
+  /* ── Letterhead ── */
+  .letterhead {
+    text-align: center;
+    padding-bottom: 14px;
+    margin-bottom: 14px;
+    border-bottom: 2px solid #1a1a18;
+    position: relative;
+  }
+  .org-name {
+    font-size: 18px;
+    font-weight: bold;
+    letter-spacing: 0.3em;
+    text-transform: uppercase;
+  }
+  .doc-type-label {
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    color: #666;
+    margin-top: 3px;
+  }
+  .cert-stamp {
+    position: absolute;
+    top: 4px;
+    right: 0;
+    border: 2.5px solid #1a7a1a;
+    color: #1a7a1a;
+    font-size: 8px;
+    font-weight: bold;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    padding: 4px 8px;
+    transform: rotate(-9deg);
+    opacity: 0.8;
+    line-height: 1.4;
+    text-align: center;
+  }
 
-  /* Score summary cards */
-  .score-card { background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 20px; text-align: center; }
-  .score-card.highlight { background: rgba(99,102,241,0.08); border-color: rgba(99,102,241,0.3); }
+  /* ── Document meta grid ── */
+  .meta-block {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 3px 20px;
+    font-size: 11px;
+    padding-bottom: 12px;
+    margin-bottom: 4px;
+    border-bottom: 1px dashed #c0baa8;
+  }
+  .meta-line { display: flex; flex-direction: column; gap: 0; }
+  .meta-key { font-size: 8px; letter-spacing: 0.12em; text-transform: uppercase; color: #999; }
+  .meta-val { color: #1a1a18; word-break: break-all; line-height: 1.3; }
+  .meta-full { grid-column: 1 / -1; }
 
-  /* Report header */
-  .report-header { background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 60%); border-bottom: 1px solid rgba(99,102,241,0.3); }
-  .certified-badge { background: linear-gradient(135deg, #22c55e, #16a34a); color: white; font-size: 10px; font-weight: 800; letter-spacing: 0.08em; padding: 3px 10px; border-radius: 9999px; text-transform: uppercase; }
-  .section-heading { font-size: 10px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: #6366f1; border-bottom: 1px solid rgba(99,102,241,0.2); padding-bottom: 8px; margin-bottom: 16px; }
+  /* ── Section heading ── */
+  .sec {
+    font-size: 8.5px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: #777;
+    border-bottom: 1px solid #1a1a18;
+    padding-bottom: 3px;
+    margin: 22px 0 10px;
+  }
 
-  /* Metric row */
-  .meta-item { padding: 8px 0; border-bottom: 1px solid rgba(255,255,255,0.05); display: flex; justify-content: space-between; align-items: center; }
-  .meta-item:last-child { border-bottom: none; }
+  /* ── Score row ── */
+  .score-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    border: 1px solid #c0baa8;
+  }
+  .score-cell {
+    padding: 10px 10px 8px;
+    text-align: center;
+    border-right: 1px solid #c0baa8;
+  }
+  .score-cell:last-child { border-right: none; }
+  .score-cell-lbl { font-size: 8px; letter-spacing: 0.14em; text-transform: uppercase; color: #999; margin-bottom: 2px; }
+  .score-big { font-size: 30px; font-weight: bold; line-height: 1; }
+  .score-big.gain { color: #1a7a1a; }
+  .score-big.neg  { color: #8a1a1a; }
+  .score-bar { height: 3px; background: #e0ddd4; margin-top: 6px; }
+  .score-bar-fill { height: 100%; transition: width 1.1s ease; background: #1a1a18; }
+  .score-bar-fill.green  { background: #1a7a1a; }
+  .score-bar-fill.yellow { background: #7a6a00; }
+  .score-bar-fill.red    { background: #8a1a1a; }
 
-  @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-  .fade-up { animation: fadeUp 0.4s ease forwards; }
+  /* ── Forensic narrative ── */
+  .narrative {
+    font-size: 11.5px;
+    line-height: 1.75;
+    color: #2a2a28;
+    text-align: justify;
+  }
+
+  /* ── Pipeline table ── */
+  .pipeline { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .pipeline tr.stage-row { border-bottom: 1px dashed #d4cfc0; }
+  .pipeline tr.stage-row:last-of-type { border-bottom: none; }
+  .pipeline td { padding: 5px 4px; vertical-align: top; }
+  .s-id   { color: #aaa; font-size: 9px; width: 30px; padding-top: 7px; white-space: nowrap; }
+  .s-name { font-weight: bold; }
+  .s-skip { font-weight: normal; color: #aaa; font-style: italic; }
+  .s-desc { font-size: 9.5px; color: #888; margin-top: 1px; line-height: 1.4; }
+  .s-stats{ font-size: 9px; color: #aaa; margin-top: 2px; }
+  .s-score{ text-align: right; font-size: 13px; font-weight: bold; white-space: nowrap; padding-left: 8px; width: 48px; }
+  .s-delta{ text-align: right; font-size: 10px; color: #1a7a1a; white-space: nowrap; width: 44px; padding-top: 6px; }
+  .s-score.hi { color: #1a7a1a; }
+  .s-score.md { color: #7a6a00; }
+  .s-score.lo { color: #8a1a1a; }
+  .s-err  { color: #8a1a1a; font-size: 9px; }
+
+  /* Decision lines under a stage */
+  tr.decisions-row td { padding: 0 4px 6px 34px; }
+  .d-line { font-size: 9.5px; color: #666; line-height: 1.55; display: flex; gap: 5px; }
+  .d-line .d-icon { flex-shrink: 0; width: 12px; }
+  .d-line.escalation { color: #8a6a00; }
+  .d-line.ok  { color: #1a6a1a; }
+  .d-line.err { color: #8a1a1a; }
+
+  /* ── Output files ── */
+  .outputs { border: 1px solid #c0baa8; }
+  .out-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 12px; border-bottom: 1px dashed #d4cfc0;
+    font-size: 11px; text-decoration: none; color: #1a1a18;
+  }
+  .out-row:last-child { border-bottom: none; }
+  .out-row:hover { background: #f0ece0; }
+  .out-icon { font-size: 15px; width: 20px; text-align: center; }
+  .out-lbl  { flex: 1; }
+  .out-ext  { font-size: 8px; letter-spacing: 0.1em; text-transform: uppercase; background: #e8e4d8; padding: 2px 5px; color: #777; }
+  .out-arr  { color: #aaa; font-size: 11px; }
+
+  /* ── Performance table ── */
+  .perf { width: 100%; border-collapse: collapse; font-size: 11px; }
+  .perf td { padding: 4px 0; border-bottom: 1px dashed #d4cfc0; }
+  .perf tr:last-child td { border-bottom: none; }
+  .perf-key { color: #888; text-transform: uppercase; font-size: 8.5px; letter-spacing: 0.1em; }
+  .perf-val { text-align: right; font-weight: bold; }
+  .perf-sub { text-align: right; font-size: 9px; color: #aaa; }
+
+  /* ── Errors ── */
+  .err-block { font-size: 10px; color: #8a1a1a; border: 1px solid #c0a0a0; padding: 8px 10px; margin-bottom: 4px; }
+
+  /* ── Footer ── */
+  .receipt-foot {
+    margin-top: 20px;
+    padding-top: 10px;
+    border-top: 2px solid #1a1a18;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    font-size: 9px;
+    color: #888;
+    letter-spacing: 0.04em;
+    line-height: 1.6;
+  }
+  .foot-link { color: #1a1a18; font-size: 10px; text-decoration: none; }
+  .foot-link:hover { text-decoration: underline; }
+
+  /* ── Loading / Error overlays ── */
+  #loading, #error-view {
+    position: fixed; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #1a1a1a;
+    font-family: 'Courier New', Courier, monospace;
+    color: #888;
+    font-size: 13px;
+  }
+  .hidden { display: none !important; }
+
+  @media print {
+    body { background: white; padding: 0; }
+    .paper { box-shadow: none; max-width: none; }
+    .tear { display: none; }
+  }
 </style>
 </head>
 <body>
 
-<div id="loading" class="flex items-center justify-center min-h-screen">
-  <div class="text-center">
-    <div class="text-indigo-400 text-4xl mb-4">⟳</div>
-    <div class="text-slate-400 text-sm">Loading analysis receipt…</div>
-  </div>
+<div id="loading">[ loading receipt… ]</div>
+
+<div id="error-view" class="hidden" style="flex-direction:column;gap:8px;text-align:center">
+  <div>[ error ]</div>
+  <div id="error-msg" style="color:#c04040;font-size:12px;max-width:400px"></div>
 </div>
 
-<div id="error-view" class="hidden flex items-center justify-center min-h-screen">
-  <div class="text-center text-red-400">
-    <div class="text-4xl mb-3">⚠</div>
-    <div id="error-msg" class="text-sm"></div>
-  </div>
-</div>
+<div id="content" class="paper hidden">
+  <span class="tear tear-top"></span>
 
-<div id="content" class="hidden">
+  <div class="paper-body">
 
-  <!-- REPORT HEADER -->
-  <div class="report-header px-6 py-6">
-    <div class="max-w-3xl mx-auto">
-      <div class="flex items-start justify-between gap-4">
-        <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-3 mb-2">
-            <span class="text-slate-500 text-xs font-medium">site2rag</span>
-            <span class="text-slate-600">·</span>
-            <span class="text-slate-500 text-xs">Document Analysis Receipt</span>
-            <span id="cert-badge" class="certified-badge hidden">Certified</span>
-          </div>
-          <h1 id="doc-title" class="text-xl font-bold text-white break-all leading-snug"></h1>
-          <div id="doc-url" class="text-xs text-slate-500 mt-1 break-all"></div>
-        </div>
-        <div class="text-right shrink-0">
-          <div id="header-score" class="text-4xl font-black text-white"></div>
-          <div class="text-xs text-slate-500 mt-1">final quality</div>
-        </div>
-      </div>
+    <!-- LETTERHEAD -->
+    <div class="letterhead">
+      <div id="cert-stamp" class="cert-stamp hidden">Certified<br>✓ OCR</div>
+      <div class="org-name">site2rag</div>
+      <div class="doc-type-label">Document Analysis Receipt</div>
     </div>
-  </div>
 
-  <!-- BODY -->
-  <div class="max-w-3xl mx-auto px-4 py-6 space-y-6">
+    <!-- DOCUMENT META -->
+    <div class="meta-block" id="doc-meta"></div>
 
-    <!-- Score overview cards -->
-    <div class="grid grid-cols-3 gap-3 fade-up">
-      <div class="score-card">
-        <div class="text-xs text-slate-500 mb-1">Original quality</div>
-        <div id="score-before" class="text-3xl font-black text-slate-300"></div>
-        <div class="q-bar-track mt-2"><div id="bar-before" class="q-bar-fill" style="width:0%"></div></div>
+    <!-- QUALITY SCORES -->
+    <div class="sec">Quality Assessment</div>
+    <div class="score-row">
+      <div class="score-cell">
+        <div class="score-cell-lbl">Original</div>
+        <div id="score-before" class="score-big"></div>
+        <div class="score-bar"><div id="bar-before" class="score-bar-fill" style="width:0%"></div></div>
       </div>
-      <div class="score-card highlight">
-        <div class="text-xs text-indigo-400 mb-1">After upgrade</div>
-        <div id="score-after" class="text-3xl font-black text-white"></div>
-        <div class="q-bar-track mt-2"><div id="bar-after" class="q-bar-fill" style="width:0%"></div></div>
+      <div class="score-cell">
+        <div class="score-cell-lbl">Gain</div>
+        <div id="score-gain" class="score-big gain"></div>
       </div>
-      <div class="score-card">
-        <div class="text-xs text-slate-500 mb-1">Improvement</div>
-        <div id="score-gain" class="text-3xl font-black"></div>
-        <div class="text-xs text-slate-600 mt-2" id="gain-sub"></div>
+      <div class="score-cell">
+        <div class="score-cell-lbl">Final</div>
+        <div id="score-after" class="score-big"></div>
+        <div class="score-bar"><div id="bar-after" class="score-bar-fill" style="width:0%"></div></div>
       </div>
     </div>
 
-    <!-- Document fingerprint -->
-    <div class="fade-up" style="animation-delay:0.1s">
-      <div class="section-heading">Document Profile</div>
-      <div class="bg-slate-800/40 rounded-xl border border-white/5 px-4" id="doc-profile"></div>
+    <!-- FORENSIC ANALYSIS -->
+    <div id="assessment-block" class="hidden">
+      <div class="sec">Forensic Analysis</div>
+      <div class="narrative" id="assessment-text"></div>
     </div>
 
-    <!-- Forensic assessment -->
-    <div id="assessment-block" class="fade-up hidden" style="animation-delay:0.15s">
-      <div class="section-heading">Forensic Analysis</div>
-      <div class="bg-slate-800/40 rounded-xl border border-white/5 p-4">
-        <div id="assessment-text" class="text-sm text-slate-300 leading-relaxed"></div>
-      </div>
+    <!-- PROCESSING PIPELINE -->
+    <div class="sec">Processing Pipeline</div>
+    <table class="pipeline" id="pipeline-table"></table>
+
+    <!-- ERRORS -->
+    <div id="errors-block" class="hidden">
+      <div class="sec" style="color:#8a1a1a;border-color:#8a1a1a;">Errors</div>
+      <div id="errors-list"></div>
     </div>
 
-    <!-- Pipeline stages timeline -->
-    <div class="fade-up" style="animation-delay:0.2s">
-      <div class="section-heading">Processing Pipeline</div>
-      <div class="relative pl-2">
-        <div class="timeline-line"></div>
-        <div id="stages-list" class="space-y-3"></div>
-      </div>
+    <!-- OUTPUT FILES -->
+    <div id="outputs-block" class="hidden">
+      <div class="sec">Output Files</div>
+      <div class="outputs" id="outputs-list"></div>
     </div>
 
-    <!-- Errors if any -->
-    <div id="errors-block" class="hidden fade-up" style="animation-delay:0.25s">
-      <div class="section-heading text-red-400" style="color:#f87171;border-color:rgba(239,68,68,0.3)">Errors Encountered</div>
-      <div id="errors-list" class="space-y-2"></div>
+    <!-- COST & PERFORMANCE -->
+    <div id="perf-block">
+      <div class="sec">Cost &amp; Performance</div>
+      <table class="perf" id="perf-table"></table>
     </div>
 
-    <!-- Output files -->
-    <div id="outputs-block" class="fade-up hidden" style="animation-delay:0.28s">
-      <div class="section-heading">Output Files</div>
-      <div class="grid grid-cols-3 gap-3" id="outputs-grid"></div>
-    </div>
-
-    <!-- Cost & performance -->
-    <div class="fade-up" style="animation-delay:0.3s">
-      <div class="section-heading">Cost &amp; Performance</div>
-      <div class="grid grid-cols-2 gap-3" id="perf-grid"></div>
-    </div>
-
-    <!-- Footer -->
-    <div class="text-center text-xs text-slate-600 py-4 border-t border-white/5 fade-up">
-      <div id="footer-line"></div>
-      <div class="mt-1">Processed by site2rag pipeline · <a href="/" class="text-indigo-500 hover:underline">← Return to dashboard</a></div>
+    <!-- FOOTER -->
+    <div class="receipt-foot">
+      <div id="footer-left"></div>
+      <a href="/" class="foot-link">← dashboard</a>
     </div>
 
   </div>
+
+  <span class="tear tear-bottom"></span>
 </div>
 
 <script>
 const params = new URLSearchParams(location.search);
 const site = params.get('site');
-const url = params.get('url');
+const url  = params.get('url');
 const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
   ? `http://${location.hostname}:4242` : '';
 
-const pct = n => n == null ? '—' : Math.round(n * 100) + '%';
-const fmtMs = ms => {
+const pct    = n  => n == null ? '—' : Math.round(n * 100) + '%';
+const barClr = s  => s >= 0.8 ? 'green' : s >= 0.5 ? 'yellow' : 'red';
+const scoreClr = s => s >= 0.8 ? 'hi' : s >= 0.5 ? 'md' : 'lo';
+const fmtMs  = ms => {
   if (!ms) return null;
-  if (ms >= 60000) return (ms/60000).toFixed(1) + ' min';
-  if (ms >= 1000) return (ms/1000).toFixed(1) + 's';
+  if (ms >= 60000) return (ms / 60000).toFixed(1) + ' min';
+  if (ms >= 1000)  return (ms / 1000).toFixed(1) + 's';
   return ms + 'ms';
 };
 const fmtCost = c => c > 0 ? '$' + c.toFixed(4) : null;
-const barColor = s => s >= 0.8 ? 'green' : s >= 0.5 ? 'yellow' : 'red';
+const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 const STAGE_META = {
-  s0: { icon: '🔬', label: 'Baseline Assessment', desc: 'Measures original document quality: character density, text layer integrity, word recognition rate, and language detection. Establishes the benchmark all subsequent stages are measured against.' },
-  s1: { icon: '🖼', label: 'Image Preprocessing', desc: 'Normalizes page orientation, removes skew from scanned pages, reduces noise artifacts, and binarizes images for optimal OCR input.' },
-  s2: { icon: '🗂', label: 'Region Classification', desc: 'Analyzes low-resolution page thumbnails to classify content regions: text blocks, figures, tables, and margins. Routes each region to the appropriate processing strategy.' },
-  s3: { icon: '📝', label: 'Multi-engine OCR', desc: 'Runs Tesseract + EasyOCR + PaddleOCR + DocTR in parallel on every block crop. A Haiku synthesis step resolves conflicts and selects the best reading per word. Words are bucketed into clean (≥90%), fuzzy (60–90%), and dirty (<60%) confidence tiers.' },
-  s4: { icon: '🔍', label: 'Quality Escalation', desc: 'Evaluates OCR confidence across all regions. Dirty or low-confidence regions are flagged for escalation to higher-fidelity processing strategies.' },
-  s5: { icon: '👁', label: 'Vision OCR', desc: 'Sends low-confidence regions to a multimodal vision model for precision character recognition. Particularly effective for damaged documents, unusual typefaces, historical scripts, and mixed-language content.' },
-  s6: { icon: '✏️', label: 'Linguistic Spell Fix', desc: 'Applies Claude Haiku to correct fuzzy-confidence words using document context. Preserves bounding box geometry while correcting OCR artifacts, improving downstream search and indexing quality.' },
-  s7: { icon: '📦', label: 'Archival PDF Rebuild', desc: 'Reconstructs the document as a PDF/A-3 archival file with the corrected text layer embedded. The original scan is preserved as the visual layer; the improved text layer enables full-text search and accessibility.' },
-  s8: { icon: '📄', label: 'Markdown Export', desc: 'Exports the corrected text as structured Markdown with page anchors, preserving document hierarchy for downstream RAG indexing and semantic search.' },
+  s0: { label: 'Baseline Assessment',   desc: 'Measures original document quality: character density, text layer integrity, word recognition rate, language detection.' },
+  s1: { label: 'Image Preprocessing',   desc: 'Normalizes page orientation, removes scan skew, reduces noise artifacts, binarizes for OCR input.' },
+  s2: { label: 'Region Classification', desc: 'Classifies content regions into text blocks, figures, tables, margins and routes each to the appropriate strategy.' },
+  s3: { label: 'Multi-engine OCR',      desc: 'Runs Tesseract + EasyOCR + PaddleOCR + DocTR in parallel per block. Haiku synthesis resolves conflicts and selects the best reading per word.' },
+  s4: { label: 'Quality Escalation',    desc: 'Evaluates per-block OCR confidence; flags dirty regions for vision-model escalation.' },
+  s5: { label: 'Vision OCR',            desc: 'Sends low-confidence regions to multimodal vision models. Effective for damaged scans, historical scripts, and mixed-language content.' },
+  s6: { label: 'Linguistic Spell Fix',  desc: 'Context-aware correction of fuzzy-confidence words via Claude Haiku. Preserves bounding-box geometry.' },
+  s7: { label: 'Archival PDF Rebuild',  desc: 'Reconstructs document as PDF/A-3 with corrected text layer embedded; original scan preserved as visual substrate.' },
+  s8: { label: 'Markdown Export',       desc: 'Exports corrected text as structured Markdown with page anchors for RAG indexing and semantic search.' },
 };
 
 const ENGINE_NAMES = { easyocr: 'EasyOCR', paddle: 'PaddleOCR', doctr: 'DocTR', tesseract: 'Tesseract', surya: 'Surya' };
 
+// ── Decision key parser ──────────────────────────────────────────────────────
 function parseDecisionKey(key) {
   let m;
   if ((m = key.match(/^(easyocr|paddle|doctr|tesseract|surya)_p(\d+)$/)))
@@ -216,156 +362,123 @@ function parseDecisionKey(key) {
   return { type: 'named', key };
 }
 
-function renderForensicDecision(d) {
+function renderDecisionLine(d) {
   const parsed = parseDecisionKey(d.decision ?? '');
   const reason = d.reason ?? '';
-  const value = d.value;
-  let icon = '·', text = '', cls = 'text-slate-400';
+  const value  = d.value;
+  let icon = '·', text = '', cls = '';
 
   if (parsed.type === 'engine_page') {
-    const name = ENGINE_NAMES[parsed.engine] ?? parsed.engine;
-    icon = '🔬';
-    text = `${name} — page ${parsed.page}${reason ? ': ' + reason : ''}`;
+    icon = '·'; text = `${ENGINE_NAMES[parsed.engine] ?? parsed.engine} — pg ${parsed.page}${reason ? ': ' + reason : ''}`;
   } else if (parsed.type === 'blocks') {
-    icon = '⊞';
-    text = `Page ${parsed.page}: ${reason || 'content blocks segmented for parallel OCR'}`;
+    icon = '·'; text = `pg ${parsed.page}: ${reason || 'blocks segmented'}`;
   } else if (parsed.type === 'consensus') {
-    const isEscalation = /re-ran|re-run|escalat/.test(reason);
-    icon = '⚖';
-    cls = isEscalation ? 'text-amber-300' : 'text-green-300';
-    text = `Consensus — page ${parsed.page}, block ${parsed.block}: ${reason}`;
+    const isEsc = /re-ran|re-run|escalat/i.test(reason);
+    icon = '⚖'; cls = isEsc ? 'escalation' : 'ok';
+    text = `consensus pg ${parsed.page} blk ${parsed.block}: ${reason}`;
   } else if (parsed.type === 'synth') {
-    icon = '✦';
-    cls = 'text-indigo-300';
-    text = `Haiku synthesis — page ${parsed.page}: ${reason}`;
+    icon = '✦'; cls = 'ok';
+    text = `Haiku synthesis pg ${parsed.page}: ${reason}`;
   } else if (parsed.type === 'page_method') {
-    const method = typeof value === 'string' ? value : reason;
-    icon = '📋';
-    text = `Page ${parsed.page} method: ${method}`;
+    icon = '·'; text = `pg ${parsed.page}: ${typeof value === 'string' ? value : reason}`;
   } else {
     const k = parsed.key;
     if (k === 'routing_summary') {
       const routes = value && typeof value === 'object'
-        ? Object.entries(value).map(([l, n]) => `${l.toUpperCase()}×${n}`).join(', ')
-        : reason;
-      icon = '🗺'; text = `Script routing: ${routes}`;
+        ? Object.entries(value).map(([l, n]) => `${l.toUpperCase()}×${n}`).join(', ') : reason;
+      icon = '→'; text = `script routing: ${routes}`;
     } else if (k === 'engines') {
-      icon = '👁'; cls = 'text-amber-300'; text = `Vision models deployed: ${typeof value === 'string' ? value : reason}`;
+      icon = '·'; cls = 'escalation'; text = `vision engines: ${typeof value === 'string' ? value : reason}`;
     } else if (k === 'rebuilt') {
       const method = value?.method ?? (typeof value === 'string' ? value : reason);
-      icon = '📦'; cls = 'text-green-300'; text = `Archival PDF rebuilt: ${method}`;
+      icon = '✓'; cls = 'ok'; text = `rebuilt: ${method}`;
     } else if (k === 'wrote_md') {
-      icon = '📄'; cls = 'text-green-300'; text = 'Structured Markdown export written';
+      icon = '✓'; cls = 'ok'; text = 'markdown export written';
     } else if (k === 'baseline_computed') {
-      icon = '📊'; text = `Baseline scored${reason ? ': ' + reason : ''}`;
+      icon = '·'; text = `baseline: ${reason}`;
     } else if (k === 'domain_detected') {
-      icon = '🏷'; cls = 'text-green-300'; text = `Domain identified: ${reason || value}`;
+      icon = '·'; cls = 'ok'; text = `domain: ${reason || value}`;
     } else if (k === 'budget_stop') {
-      icon = '⚠'; cls = 'text-red-300'; text = 'Processing halted: budget ceiling reached';
+      icon = '!'; cls = 'err'; text = 'halted: budget ceiling reached';
     } else if (k === 'boss_failed' || k === 'claude_failed') {
-      icon = '⚠'; cls = 'text-red-300'; text = `Vision model failed${reason ? ': ' + reason : ''}`;
+      icon = '!'; cls = 'err'; text = `vision failed${reason ? ': ' + reason : ''}`;
     } else if (k === 'kept_original') {
-      icon = 'ℹ'; text = `Original retained${reason ? ': ' + reason : ''}`;
+      icon = '·'; text = `kept original${reason ? ': ' + reason : ''}`;
     } else if (k === 'skip') {
-      icon = '⏭'; text = `Skipped${reason ? ': ' + reason : ''}`;
+      icon = '·'; text = `skipped${reason ? ': ' + reason : ''}`;
     } else if (k === 'completed') {
-      icon = '✓'; cls = 'text-green-300'; text = `Completed${reason ? ': ' + reason : ''}`;
+      icon = '✓'; cls = 'ok'; text = `done${reason ? ': ' + reason : ''}`;
     } else {
       text = `${d.decision}${reason ? ' — ' + reason : ''}`;
     }
   }
-
-  return `<div class="flex items-start gap-2 text-xs py-0.5">
-    <span class="text-slate-600 w-4 text-center flex-shrink-0 mt-px">${icon}</span>
-    <span class="${cls} leading-snug">${text}</span>
-  </div>`;
+  return `<div class="d-line ${cls}"><span class="d-icon">${esc(icon)}</span><span>${esc(text)}</span></div>`;
 }
 
-function renderStage(stage, perStage, prevScore, decisions) {
-  const id = stage.stage;
+// ── Stage row renderer ───────────────────────────────────────────────────────
+function renderStageRows(stage, perStage, prevScore, decisions) {
+  const id   = stage.stage;
   const meta = STAGE_META[id];
   if (!meta) return '';
-  const hasWork = stage.pages_affected > 0;
-  const hasError = decisions.some(d => d.decision?.includes('fail') || d.decision?.includes('error'));
+  const hasWork  = stage.pages_affected > 0;
+  const hasError = decisions.some(d => /fail|error/.test(d.decision ?? ''));
   const stageScore = perStage[id] ?? null;
   const delta = (stageScore != null && prevScore != null && hasWork)
     ? Math.round((stageScore - prevScore) * 100) : null;
 
-  const iconClass = hasError ? 'error' : hasWork ? 'done' : 'skipped';
-  const scoreHtml = stageScore != null && hasWork ? `
-    <div class="text-right min-w-[80px]">
-      <div class="text-lg font-bold ${stageScore >= 0.8 ? 'text-green-400' : stageScore >= 0.5 ? 'text-yellow-400' : 'text-red-400'}">${pct(stageScore)}</div>
-      ${delta !== null ? `<div class="delta-pill ${delta > 0 ? 'delta-pos' : delta < 0 ? 'delta-neg' : 'delta-zero'} mt-0.5 inline-block">${delta > 0 ? '+' : ''}${delta}%</div>` : ''}
-    </div>` : `<div class="min-w-[80px]"></div>`;
+  const statsParts = [
+    hasWork && stage.pages_affected ? `${stage.pages_affected} pg` : null,
+    stage.approach ? stage.approach : null,
+    fmtMs(stage.duration_ms) ? `⏱ ${fmtMs(stage.duration_ms)}` : null,
+    fmtCost(stage.cost_usd)  ? `${fmtCost(stage.cost_usd)}` : null,
+    stage.tokens_in ? `${stage.tokens_in.toLocaleString()}t` : null,
+  ].filter(Boolean).join(' · ');
 
-  const statsHtml = [
-    hasWork && stage.pages_affected ? `<span>${stage.pages_affected} page${stage.pages_affected !== 1 ? 's' : ''} processed</span>` : null,
-    stage.approach ? `<span class="mono">${stage.approach}</span>` : null,
-    stage.notes ? `<span class="mono">${stage.notes}</span>` : null,
-    fmtMs(stage.duration_ms) ? `<span>⏱ ${fmtMs(stage.duration_ms)}</span>` : null,
-    fmtCost(stage.cost_usd) ? `<span>💰 ${fmtCost(stage.cost_usd)}</span>` : null,
-    stage.tokens_in ? `<span class="mono">${stage.tokens_in.toLocaleString()} / ${stage.tokens_out?.toLocaleString() ?? 0} tokens</span>` : null,
-  ].filter(Boolean).join('<span class="text-slate-700 mx-1">·</span>');
+  const scoreCell = stageScore != null && hasWork
+    ? `<td class="s-score ${scoreClr(stageScore)}">${pct(stageScore)}</td><td class="s-delta">${delta != null && delta > 0 ? '+'+delta+'%' : ''}</td>`
+    : `<td class="s-score" style="color:#aaa">${hasWork ? '—' : ''}</td><td class="s-delta"></td>`;
 
-  const decisionHtml = decisions.length
-    ? `<div class="mt-2 space-y-1">${decisions.map(renderForensicDecision).join('')}</div>` : '';
+  const nameHtml = hasWork
+    ? `<span class="s-name${hasError ? ' s-err' : ''}">${esc(meta.label)}${hasError ? ' [!]' : ''}</span>`
+    : `<span class="s-skip">${esc(meta.label)} — skipped</span>`;
 
-  return `
-    <div class="flex gap-3 pl-2">
-      <div class="stage-icon ${iconClass}">${meta.icon}</div>
-      <div class="flex-1 bg-slate-800/40 rounded-xl border ${hasError ? 'border-red-500/20' : hasWork ? 'border-white/8' : 'border-white/4'} p-3 -mt-1 min-w-0">
-        <div class="flex items-start gap-2 justify-between">
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2 flex-wrap">
-              <span class="font-semibold text-sm ${hasWork ? 'text-white' : 'text-slate-500'}">${meta.label}</span>
-              ${!hasWork ? `<span class="text-xs text-slate-600 italic">skipped</span>` : ''}
-              ${hasError ? `<span class="decision-chip alert">error</span>` : ''}
-            </div>
-            <div class="text-xs text-slate-500 mt-0.5 leading-snug">${meta.desc}</div>
-            ${statsHtml ? `<div class="flex flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 mt-1.5">${statsHtml}</div>` : ''}
-            ${decisionHtml}
-          </div>
-          ${scoreHtml}
-        </div>
-      </div>
-    </div>`;
+  const stageRow = `<tr class="stage-row">
+    <td class="s-id">[${id}]</td>
+    <td>
+      ${nameHtml}
+      ${hasWork ? `<div class="s-desc">${esc(meta.desc)}</div>` : ''}
+      ${statsParts ? `<div class="s-stats">${esc(statsParts)}</div>` : ''}
+    </td>
+    ${scoreCell}
+  </tr>`;
+
+  const decisionRow = decisions.length ? `<tr class="decisions-row">
+    <td colspan="4"><div>${decisions.map(renderDecisionLine).join('')}</div></td>
+  </tr>` : '';
+
+  return stageRow + decisionRow;
 }
 
-function perfCard(label, value, sub) {
-  return `<div class="bg-slate-800/40 rounded-xl border border-white/5 p-4">
-    <div class="text-xs text-slate-500 mb-1">${label}</div>
-    <div class="text-xl font-bold text-white">${value}</div>
-    ${sub ? `<div class="text-xs text-slate-600 mt-0.5">${sub}</div>` : ''}
-  </div>`;
-}
-
-function metaRow(label, value) {
-  return `<div class="meta-item">
-    <span class="text-xs text-slate-500">${label}</span>
-    <span class="text-sm font-medium text-slate-200">${value}</span>
-  </div>`;
-}
-
+// ── Forensic narrative ───────────────────────────────────────────────────────
 function buildForensicAssessment(r, beforeScore, afterScore, gainPct) {
-  const baseline = r.quality?.baseline ?? {};
-  const decisions = r.decisions ?? [];
-  const stages = r.stages ?? [];
+  const baseline    = r.quality?.baseline ?? {};
+  const decisions   = r.decisions ?? [];
+  const stages      = r.stages ?? [];
   const activeStages = stages.filter(s => s.pages_affected > 0).map(s => s.stage);
 
-  const lang = baseline.language ?? null;
+  const lang        = baseline.language ?? null;
   const hasTextLayer = baseline.has_text_layer;
-  const pages = r.page_count ?? 1;
-  const difficulty = baseline.processing_difficulty ?? 0;
+  const pages       = r.page_count ?? 1;
+  const difficulty  = baseline.processing_difficulty ?? 0;
 
-  // Mine decisions for forensic data
   const enginePages = {};
   let totalBlocks = 0;
   const consensusItems = [];
   let synthBlocks = 0;
   let routingSummary = null;
-  let visionEngines = null;
+  let visionEngines  = null;
   const pageMethodMap = {};
-  let rebuildMethod = null;
+  let rebuildMethod   = null;
 
   for (const d of decisions) {
     const k = d.decision ?? '';
@@ -375,15 +488,14 @@ function buildForensicAssessment(r, beforeScore, afterScore, gainPct) {
       enginePages[m[1]].push(+m[2]);
     }
     if ((m = k.match(/^blocks_p(\d+)$/))) {
-      const n = parseInt(d.reason) || 0;
-      totalBlocks += n;
+      totalBlocks += parseInt(d.reason) || 0;
     }
     if ((m = k.match(/^consensus_p(\d+)_b(\d+)$/))) {
       consensusItems.push({ page: +m[1], block: +m[2], detail: d.reason ?? '' });
     }
     if ((m = k.match(/^synth_p(\d+)$/))) {
-      const match = (d.reason ?? '').match(/^(\d+)/);
-      if (match) synthBlocks += +match[1];
+      const n = (d.reason ?? '').match(/^(\d+)/);
+      if (n) synthBlocks += +n[1];
     }
     if (k === 'routing_summary' && d.value && typeof d.value === 'object') routingSummary = d.value;
     if (k === 'engines') visionEngines = typeof d.value === 'string' ? d.value : d.reason;
@@ -391,56 +503,44 @@ function buildForensicAssessment(r, beforeScore, afterScore, gainPct) {
     if (k === 'rebuilt') rebuildMethod = d.value?.method ?? (typeof d.value === 'string' ? d.value : d.reason);
   }
 
-  const enginesUsed = Object.keys(enginePages);
-  const reEscalated = consensusItems.filter(c => /re-ran|re-run|escalat/i.test(c.detail)).length;
-
-  const diffDesc = difficulty > 0.7 ? 'high extraction difficulty'
-                 : difficulty > 0.4 ? 'moderate extraction difficulty'
-                 : 'standard extraction difficulty';
-  const typeDesc = hasTextLayer === false ? 'image-only (scanned) PDF — no embedded text layer present'
-                 : hasTextLayer === true ? 'PDF with existing text layer'
-                 : 'PDF';
-  const langDesc = lang ? lang.charAt(0).toUpperCase() + lang.slice(1) : null;
-
+  const enginesUsed  = Object.keys(enginePages);
+  const reEscalated  = consensusItems.filter(c => /re-ran|re-run|escalat/i.test(c.detail)).length;
+  const diffDesc     = difficulty > 0.7 ? 'high extraction difficulty'
+                     : difficulty > 0.4 ? 'moderate extraction difficulty'
+                     : 'standard extraction difficulty';
+  const typeDesc     = hasTextLayer === false ? 'image-only (scanned) PDF — no embedded text layer present'
+                     : hasTextLayer === true  ? 'PDF with existing text layer' : 'PDF';
+  const langDesc     = lang ? lang.charAt(0).toUpperCase() + lang.slice(1) : null;
   const parts = [];
 
-  // Opening
-  parts.push([
-    `Examination of this ${pages}-page`,
-    langDesc,
-    typeDesc,
-  ].filter(Boolean).join(' ') + (diffDesc ? ` reveals a document of ${diffDesc}.` : '.'));
+  parts.push([`Examination of this ${pages}-page`, langDesc, typeDesc].filter(Boolean).join(' ')
+    + (diffDesc ? ` reveals a document of ${diffDesc}.` : '.'));
 
-  // Baseline condition
   if (hasTextLayer === false && beforeScore < 0.05) {
     parts.push(`Baseline analysis returned ${pct(beforeScore)} native text yield — effectively zero — confirming a complete OCR reconstruction case: all text must be extracted entirely from the raster image layer.`);
   } else if (beforeScore < 0.3) {
-    parts.push(`Baseline scoring returned ${pct(beforeScore)}, indicating severe text layer degradation with minimal recoverable content. Full OCR reconstruction was required across all pages.`);
+    parts.push(`Baseline scoring returned ${pct(beforeScore)}, indicating severe text layer degradation. Full OCR reconstruction was required across all pages.`);
   } else if (beforeScore < 0.7) {
-    parts.push(`Baseline scoring returned ${pct(beforeScore)}, indicating a partially degraded text layer. Substantial regions required OCR correction to restore full fidelity.`);
+    parts.push(`Baseline scoring returned ${pct(beforeScore)}, indicating a partially degraded text layer with substantial regions requiring correction.`);
   } else {
-    parts.push(`Baseline scoring returned ${pct(beforeScore)}, indicating a largely intact text layer. Targeted refinements were applied to residual low-confidence regions.`);
+    parts.push(`Baseline scoring returned ${pct(beforeScore)}, indicating a largely intact text layer with targeted refinements applied to residual low-confidence regions.`);
   }
 
-  // Script routing
   if (routingSummary) {
     const routes = Object.entries(routingSummary)
-      .map(([l, n]) => `${l.toUpperCase()} (${n} page${n !== 1 ? 's' : ''})`)
-      .join('; ');
-    parts.push(`Script detection identified the following language distribution: ${routes}. Engine routing and confidence thresholds were adjusted per-script accordingly.`);
+      .map(([l, n]) => `${l.toUpperCase()} (${n} page${n !== 1 ? 's' : ''})`).join('; ');
+    parts.push(`Script detection identified: ${routes}. Engine routing and confidence thresholds were configured per-script.`);
   }
 
-  // Multi-engine OCR
   if (enginesUsed.length > 0) {
     const nameList = enginesUsed.map(e => ENGINE_NAMES[e] ?? e).join(', ');
     let para = `Multi-engine OCR deployed ${enginesUsed.length} engine${enginesUsed.length !== 1 ? 's' : ''}`;
-    if (totalBlocks > 0) para += ` across ${totalBlocks} independently segmented block${totalBlocks !== 1 ? 's' : ''}`;
+    if (totalBlocks > 0) para += ` across ${totalBlocks} independently segmented content block${totalBlocks !== 1 ? 's' : ''}`;
     para += `: ${nameList}. Each block crop was submitted to all engines in parallel.`;
-
     if (consensusItems.length > 0) {
       para += ` Consensus arbitration evaluated ${consensusItems.length} block${consensusItems.length !== 1 ? 's' : ''} for inter-engine agreement.`;
       if (reEscalated > 0) {
-        para += ` ${reEscalated} block${reEscalated !== 1 ? 's' : ''} triggered a Tesseract re-pass at full raster resolution after the consensus stage detected script ambiguity or insufficient agreement.`;
+        para += ` ${reEscalated} block${reEscalated !== 1 ? 's' : ''} triggered a Tesseract re-pass at full raster resolution after script ambiguity was detected.`;
       }
     }
     if (synthBlocks > 0) {
@@ -449,39 +549,36 @@ function buildForensicAssessment(r, beforeScore, afterScore, gainPct) {
     parts.push(para);
   }
 
-  // Vision escalation
   if (activeStages.includes('s5')) {
     const pgCount = Object.keys(pageMethodMap).length;
     const engDesc = visionEngines ? `using ${visionEngines}` : 'via multimodal vision models';
     parts.push(`${pgCount > 0 ? pgCount + ' page' + (pgCount !== 1 ? 's were' : ' was') : 'Select pages were'} escalated to vision OCR ${engDesc} — applied where multi-engine consensus fell below the per-script confidence threshold.`);
   }
 
-  // Spell fix
   if (activeStages.includes('s6')) {
-    parts.push(`Fuzzy-confidence words underwent context-aware linguistic correction via Claude Haiku, improving character-level precision without altering bounding box geometry or layout coordinates.`);
+    parts.push(`Fuzzy-confidence words underwent context-aware linguistic correction via Claude Haiku, improving character-level precision without altering bounding box geometry.`);
   }
 
-  // Rebuild
   if (rebuildMethod) {
     parts.push(`The corrected text layer was embedded into an archival PDF/A-3 via ${rebuildMethod}, preserving the original scan as the visual substrate while enabling full-text search and accessibility compliance.`);
   } else if (activeStages.includes('s7')) {
     parts.push(`The document was reconstructed as a PDF/A-3 archival file with the corrected text layer embedded and the original scan preserved as the visual substrate.`);
   }
 
-  // Outcome
   if (gainPct > 20) {
     parts.push(`Net outcome: ${pct(beforeScore)} → ${pct(afterScore)} — a ${gainPct}-point quality gain, substantially increasing OCR fidelity, full-text searchability, and downstream RAG indexing yield.`);
   } else if (gainPct > 5) {
-    parts.push(`Net outcome: ${pct(beforeScore)} → ${pct(afterScore)} — a ${gainPct}-point improvement in composite text quality score.`);
+    parts.push(`Net outcome: ${pct(beforeScore)} → ${pct(afterScore)} — a ${gainPct}-point improvement in composite text quality.`);
   } else if (gainPct > 0) {
     parts.push(`Net outcome: ${pct(beforeScore)} → ${pct(afterScore)}. Document quality was already high; corrections targeted residual noise and low-confidence regions.`);
-  } else if (gainPct === 0) {
-    parts.push(`Net outcome: quality unchanged at ${pct(afterScore)}. The pipeline confirmed existing text layer fidelity with no structural changes warranted.`);
+  } else {
+    parts.push(`Net outcome: quality confirmed at ${pct(afterScore)}. No structural changes required.`);
   }
 
   return parts.join(' ');
 }
 
+// ── Data fetch & render ──────────────────────────────────────────────────────
 async function load() {
   const res = await fetch(`${API_BASE}/api/docs/receipt?site=${encodeURIComponent(site)}&url=${encodeURIComponent(url)}`);
   if (!res.ok) throw new Error(`Receipt not available (HTTP ${res.status})`);
@@ -492,116 +589,150 @@ load().then(r => {
   document.getElementById('loading').classList.add('hidden');
   document.getElementById('content').classList.remove('hidden');
 
-  const q = r.quality ?? {};
-  const baseline = q.baseline ?? {};
-  const perStage = q.per_stage ?? {};
-  const totals = r.totals ?? {};
+  // Support both new format (r.quality.baseline.*) and old pipeline-v2 format (r.document.*)
+  const q          = r.quality ?? {};
+  const baseline   = q.baseline ?? r.document ?? {};
+  const perStage   = q.per_stage ?? {};
+  const totals     = r.totals ?? r.processing ?? {};
   const beforeScore = baseline.composite_score ?? 0;
-  const afterScore = q.final ?? 0;
-  const gainPct = Math.round((afterScore - beforeScore) * 100);
+  const afterScore  = q.final ?? r.processing?.final_score ?? 0;
+  const gainPct     = Math.round((afterScore - beforeScore) * 100);
+  const srcUrl      = r.source_url ?? r.source?.url ?? '';
+  const filename    = decodeURIComponent(srcUrl.split('/').pop().replace(/\.pdf$/i,'').replace(/[_-]/g,' ') || 'Document');
+  const dateStr     = r.processed_at ?? r.completed_at ?? null;
+  const processedDate = dateStr
+    ? new Date(dateStr).toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })
+    : '—';
+  const pageCount   = r.page_count ?? r.document?.page_count ?? null;
+  const avgChars    = baseline.avg_chars_per_page ?? 0;
 
-  const filename = (r.source_url ?? '').split('/').pop().replace(/\.pdf$/i, '').replace(/[_-]/g, ' ') || 'Document';
+  // Certification stamp
+  if (afterScore >= 0.85) document.getElementById('cert-stamp').classList.remove('hidden');
 
-  // Header
-  document.getElementById('doc-title').textContent = decodeURIComponent(filename);
-  document.getElementById('doc-url').textContent = r.source_url ?? '';
-  document.getElementById('header-score').textContent = pct(afterScore);
-  if (afterScore >= 0.85) document.getElementById('cert-badge').classList.remove('hidden');
-
-  // Score cards
-  document.getElementById('score-before').textContent = pct(beforeScore);
-  document.getElementById('score-after').textContent = pct(afterScore);
-  document.getElementById('score-gain').textContent = (gainPct > 0 ? '+' : '') + gainPct + '%';
-  document.getElementById('score-gain').className = 'text-3xl font-black ' + (gainPct > 0 ? 'text-green-400' : 'text-slate-400');
-  document.getElementById('gain-sub').textContent = gainPct > 0 ? `${pct(beforeScore)} → ${pct(afterScore)}` : 'No change';
-
-  setTimeout(() => {
-    const setBars = (id, score) => {
-      const el = document.getElementById(id);
-      const c = barColor(score);
-      el.style.width = pct(score);
-      el.classList.add(c);
-    };
-    setBars('bar-before', beforeScore);
-    setBars('bar-after', afterScore);
-  }, 100);
-
-  // Doc profile
-  const profile = document.getElementById('doc-profile');
-  const lang = baseline.language ? baseline.language.charAt(0).toUpperCase() + baseline.language.slice(1) : '—';
-  const docType = baseline.has_text_layer != null ? (baseline.has_text_layer ? 'Text-layer PDF' : 'Image-only PDF (scanned)') : '—';
-  const processedDate = r.processed_at ? new Date(r.processed_at).toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' }) : '—';
-  profile.innerHTML = [
-    metaRow('Document type', docType),
-    metaRow('Language', lang),
-    metaRow('Pages', r.page_count ?? '—'),
-    metaRow('Average characters per page', Math.round(baseline.avg_chars_per_page ?? 0).toLocaleString()),
-    metaRow('Analysis date', processedDate),
-    metaRow('Pipeline version', r.pipeline_version ?? '—'),
+  // Meta block
+  const rawLang = baseline.language ?? null;
+  const lang    = rawLang ? rawLang.charAt(0).toUpperCase() + rawLang.slice(1) : '—';
+  const hasLayer = baseline.has_text_layer;
+  const docType = hasLayer != null ? (hasLayer ? 'Text-layer PDF' : 'Image-only PDF') : '—';
+  const metaEl = document.getElementById('doc-meta');
+  const ml = (key, val, full) => `<div class="meta-line${full?' meta-full':''}"><span class="meta-key">${key}</span><span class="meta-val">${val}</span></div>`;
+  metaEl.innerHTML = [
+    ml('Document', filename, true),
+    ml('URL', `<span style="font-size:9px;word-break:break-all">${srcUrl || '—'}</span>`, true),
+    ml('Date', processedDate),
+    ml('Type', docType),
+    ml('Language', lang),
+    ml('Pages', pageCount ?? '—'),
+    ml('Avg chars/page', Math.round(avgChars).toLocaleString()),
+    ml('Pipeline ver.', r.pipeline_version ?? '—'),
   ].join('');
 
-  // Assessment
-  const assessText = buildForensicAssessment(r, beforeScore, afterScore, gainPct);
-  if (assessText) {
-    document.getElementById('assessment-text').textContent = assessText;
+  // Score row
+  document.getElementById('score-before').textContent = pct(beforeScore);
+  document.getElementById('score-gain').textContent   = (gainPct > 0 ? '+' : '') + gainPct + '%';
+  document.getElementById('score-after').textContent  = pct(afterScore);
+  if (gainPct < 0) document.getElementById('score-gain').classList.replace('gain', 'neg');
+  setTimeout(() => {
+    const fill = (id, score) => {
+      const el = document.getElementById(id);
+      el.style.width = pct(score);
+      el.classList.add(barClr(score));
+    };
+    fill('bar-before', beforeScore);
+    fill('bar-after',  afterScore);
+  }, 120);
+
+  // Forensic narrative
+  const narrative = r.narrative || buildForensicAssessment(r, beforeScore, afterScore, gainPct);
+  if (narrative) {
+    document.getElementById('assessment-text').textContent = narrative;
     document.getElementById('assessment-block').classList.remove('hidden');
   }
 
-  // Pipeline stages
-  const stagesEl = document.getElementById('stages-list');
-  const stageOrder = ['s0','s1','s2','s3','s4','s5','s6','s7','s8'];
-  let prevScore = perStage['s0'] ?? beforeScore;
-  let html = '';
-  for (const id of stageOrder) {
-    const stage = (r.stages ?? []).find(s => s.stage === id);
-    if (!stage) continue;
-    const decisions = (r.decisions ?? []).filter(d => d.stage === id);
-    html += renderStage(stage, perStage, prevScore, decisions);
-    if (perStage[id] != null && (r.stages.find(s => s.stage === id)?.pages_affected ?? 0) > 0) prevScore = perStage[id];
+  // Pipeline stages — new format has r.stages[]; old pipeline-v2 has r.processing + r.pages
+  const tbl = document.getElementById('pipeline-table');
+  if (r.stages?.length) {
+    const stageOrder = ['s0','s1','s2','s3','s4','s5','s6','s7','s8'];
+    let prevScore = perStage['s0'] ?? beforeScore;
+    let html = '';
+    for (const id of stageOrder) {
+      const stage = r.stages.find(s => s.stage === id);
+      if (!stage) continue;
+      const decs = (r.decisions ?? []).filter(d => d.stage === id);
+      html += renderStageRows(stage, perStage, prevScore, decs);
+      if (perStage[id] != null && (stage.pages_affected ?? 0) > 0) prevScore = perStage[id];
+    }
+    tbl.innerHTML = html;
+  } else if (r.processing) {
+    // Old pipeline-v2 format: render a summary row from r.processing
+    const p = r.processing;
+    const enginesUsed = (p.engines_used ?? []).join(', ') || p.method_summary || '—';
+    const dur = p.duration_ms ? fmtMs(p.duration_ms) : null;
+    const cost = fmtCost(p.cost_usd);
+    const statsParts = [pageCount ? `${pageCount} pp` : null, dur ? `⏱ ${dur}` : null, cost].filter(Boolean).join(' · ');
+    tbl.innerHTML = `<tr class="stage-row">
+      <td class="s-id">[ocr]</td>
+      <td>
+        <span class="s-name">Text Extraction</span>
+        <div class="s-desc">Engines: ${esc(enginesUsed)}</div>
+        ${statsParts ? `<div class="s-stats">${esc(statsParts)}</div>` : ''}
+        ${p.pages_failed > 0 ? `<div class="s-stats" style="color:#8a1a1a">${p.pages_failed} pages failed</div>` : ''}
+      </td>
+      <td class="s-score" style="color:#aaa">—</td><td class="s-delta"></td>
+    </tr>`;
   }
-  stagesEl.innerHTML = html;
 
   // Errors
   if (r.errors?.length) {
     document.getElementById('errors-block').classList.remove('hidden');
-    document.getElementById('errors-list').innerHTML = r.errors.map(e =>
-      `<div class="bg-red-950/40 border border-red-500/20 rounded-lg p-3 text-sm text-red-300 mono">${e.stage ? `[${e.stage}] ` : ''}${e.message ?? JSON.stringify(e)}</div>`
-    ).join('');
+    document.getElementById('errors-list').innerHTML = r.errors
+      .map(e => `<div class="err-block">${e.stage ? `[${e.stage}] ` : ''}${esc(e.message ?? JSON.stringify(e))}</div>`)
+      .join('');
   }
 
-  // Performance
-  const activeStages = (r.stages ?? []).filter(s => s.pages_affected > 0);
-  const perfEl = document.getElementById('perf-grid');
-  perfEl.innerHTML = [
-    totals.cost_usd != null ? perfCard('Total processing cost', fmtCost(totals.cost_usd) ?? '$0.0000', `${activeStages.length} active stage${activeStages.length !== 1 ? 's' : ''}`) : '',
-    totals.duration_ms ? perfCard('Total processing time', fmtMs(totals.duration_ms), `${r.page_count ?? 0} page${r.page_count !== 1 ? 's' : ''}`) : '',
-    totals.tokens_in ? perfCard('Tokens used', `${(totals.tokens_in + (totals.tokens_out ?? 0)).toLocaleString()}`, `${totals.tokens_in.toLocaleString()} in · ${(totals.tokens_out ?? 0).toLocaleString()} out`) : '',
-    q.cost_per_quality_point != null && q.cost_per_quality_point > 0 ? perfCard('Cost per quality point', '$' + q.cost_per_quality_point.toFixed(4), 'efficiency ratio') : '',
-  ].filter(Boolean).join('');
-
   // Output files
-  const isDone = r.status === 'done' || (r.quality?.final != null);
+  const isDone = r.status === 'done' || q.final != null;
   if (isDone) {
-    const siteParam = `site=${encodeURIComponent(site)}&url=${encodeURIComponent(url)}`;
-    const outputsEl = document.getElementById('outputs-grid');
-    const dlCard = (icon, label, ext, apiPath, mime) => `
-      <a href="${API_BASE}${apiPath}?${siteParam}" download
-         class="bg-slate-800/40 rounded-xl border border-white/8 p-4 flex flex-col items-center gap-2 hover:border-indigo-500/40 hover:bg-indigo-950/20 transition-colors group text-center">
-        <span class="text-3xl">${icon}</span>
-        <span class="text-xs font-semibold text-slate-300 group-hover:text-white">${label}</span>
-        <span class="decision-chip mono">${ext}</span>
+    const sp = `site=${encodeURIComponent(site)}&url=${encodeURIComponent(url)}`;
+    const row = (icon, label, ext, path) =>
+      `<a href="${API_BASE}${path}?${sp}" download class="out-row">
+        <span class="out-icon">${icon}</span>
+        <span class="out-lbl">${label}</span>
+        <span class="out-ext">${ext}</span>
+        <span class="out-arr">↓</span>
       </a>`;
-    outputsEl.innerHTML = [
-      dlCard('📦', 'Archival PDF', '.pdf', '/api/docs/download', 'application/pdf'),
-      dlCard('📄', 'Markdown Text', '.md', '/api/docs/download-md', 'text/markdown'),
-      dlCard('🧾', 'Analysis Receipt', '.json', '/api/docs/receipt', 'application/json'),
+    document.getElementById('outputs-list').innerHTML = [
+      row('📦', 'Archival PDF',      '.pdf',  '/api/docs/download'),
+      row('📄', 'Markdown Text',     '.md',   '/api/docs/download-md'),
+      row('🧾', 'Analysis Receipt',  '.json', '/api/docs/receipt'),
     ].join('');
     document.getElementById('outputs-block').classList.remove('hidden');
   }
 
+  // Performance
+  const activeStages = (r.stages ?? []).filter(s => s.pages_affected > 0);
+  const perfRows = [
+    totals.cost_usd != null
+      ? [['Total cost', fmtCost(totals.cost_usd) ?? '$0.0000'], ['Stages run', activeStages.length]] : null,
+    totals.duration_ms
+      ? [['Processing time', fmtMs(totals.duration_ms)], ['Pages', r.page_count ?? 0]] : null,
+    totals.tokens_in
+      ? [['Tokens in / out', `${totals.tokens_in.toLocaleString()} / ${(totals.tokens_out ?? 0).toLocaleString()}`]] : null,
+    q.cost_per_quality_point > 0
+      ? [['Cost/quality pt', '$' + q.cost_per_quality_point.toFixed(4)]] : null,
+  ].filter(Boolean);
+
+  if (perfRows.length) {
+    document.getElementById('perf-table').innerHTML = perfRows.map(pairs =>
+      `<tr>${pairs.map(([k, v]) => `<td class="perf-key">${k}</td><td class="perf-val">${v}</td>`).join('')}</tr>`
+    ).join('');
+  } else {
+    document.getElementById('perf-block').style.display = 'none';
+  }
+
   // Footer
-  document.getElementById('footer-line').textContent =
-    `Job ID: ${r.doc_id ?? '—'} · Processed ${processedDate}`;
+  document.getElementById('footer-left').innerHTML =
+    `Job ID: ${r.doc_id ?? '—'}<br>Processed by site2rag pipeline · ${processedDate}`;
 
 }).catch(e => {
   document.getElementById('loading').classList.add('hidden');

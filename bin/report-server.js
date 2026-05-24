@@ -305,6 +305,8 @@ createServer(async (req, res) => {
     if (!row?.receipt_json) return err(res, 404, 'receipt not available');
     let receipt;
     try { receipt = JSON.parse(row.receipt_json); } catch { return err(res, 500, 'receipt parse error'); }
+    // Inject source_url from query param — pipeline only knows the local file path
+    if (!receipt.source_url && !(receipt.source?.url)) receipt.source_url = docUrl;
     return json(res, receipt);
   }
 
