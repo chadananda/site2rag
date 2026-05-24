@@ -15,6 +15,10 @@ import { generateThumb } from './thumb-worker-pool.js';
 import { runScorePdfs } from '../src/score-pdfs.js';
 import { maybeQueue } from '../src/pdf-upgrade/score.js';
 
+// Prevent crashes from unhandled DB errors — log and keep serving
+process.on('unhandledRejection', (err) => console.error('[server] unhandled rejection:', err?.message ?? err));
+process.on('uncaughtException',  (err) => console.error('[server] uncaught exception:',  err?.message ?? err));
+
 const PORT = parseInt(process.env.REPORT_PORT || '7840', 10);
 const FOCUS_FILE = join(getMirrorRoot(), '.focused_domain');
 
@@ -350,6 +354,9 @@ createServer(async (req, res) => {
           .run(docUrl, quality.content_hash || null, upgradeMethod, imp, now);
       }
       return json(res, { ok: true, status: 'pending', queued: !existing, method: upgradeMethod, importance: imp, message: existing ? 'Restarted from scratch' : 'Added to front of queue' });
+    } catch (e) {
+      console.error('[server] /api/docs/upgrade error:', e?.message);
+      return err(res, 500, e?.message ?? 'internal error');
     } finally { db.close(); }
   }
 
