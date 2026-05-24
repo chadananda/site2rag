@@ -349,11 +349,9 @@ createServer(async (req, res) => {
       const quality = db.prepare('SELECT composite_score, content_hash FROM pdf_quality WHERE url=?').get(docUrl);
       if (!quality) return err(res, 404, 'doc not scored yet');
       const upgradeMethod = url.searchParams.get('method') || 'ocr'; // 'spell-fix' | 'ocr'
-      const importanceParam = url.searchParams.get('importance');
-      const importance = importanceParam ? Math.max(1, Math.min(5, parseInt(importanceParam, 10))) : null;
       const existing = db.prepare('SELECT status FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
       const now = new Date().toISOString();
-      const imp = importance ?? 1;
+      const imp = 999; // user-triggered reprocess always jumps the queue
 
       // Cancel any in-flight pipeline job for this URL
       const pipelineDb = process.env.PIPELINE_DB;
