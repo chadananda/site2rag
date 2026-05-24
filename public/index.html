@@ -734,26 +734,6 @@ if ('serviceWorker' in navigator) {
                           <span class="text-gray-400 ml-auto" x-text="relTime(doc.finished_at)"></span>
                         </template>
                       </div>
-                      <!-- Attempt history: show only when scores vary across attempts -->
-                      <template x-if="doc.upgrade_history_parsed && doc.upgrade_history_parsed.length > 1 && new Set(doc.upgrade_history_parsed.map(a=>a.score_after)).size > 1">
-                        <div class="px-3 py-2 border-b border-gray-100 space-y-1">
-                          <div class="text-gray-400 font-semibold uppercase tracking-wide" style="font-size:10px">Attempts</div>
-                          <template x-for="(att, i) in doc.upgrade_history_parsed" :key="i">
-                            <div class="flex items-center gap-2">
-                              <span class="text-gray-300 font-mono">#<span x-text="i+1"></span></span>
-                              <span class="font-medium text-gray-600" x-text="methodLabel(att.method)"></span>
-                              <template x-if="att.score_before != null || att.score_after != null">
-                                <span class="font-mono text-gray-400 flex items-center gap-1">
-                                  <template x-if="att.score_before != null"><span class="score-pill" :class="scorePillCls(att.score_before)" x-text="Math.round(att.score_before*100)+'%'"></span></template>
-                                  <span class="text-gray-200">›</span>
-                                  <template x-if="att.score_after != null"><span class="score-pill bg-green-100 text-green-800" x-text="Math.round(Math.min(att.score_after,1)*100)+'%'"></span></template>
-                                </span>
-                              </template>
-                              <template x-if="att.error"><span class="text-red-500 truncate" x-text="att.error"></span></template>
-                            </div>
-                          </template>
-                        </div>
-                      </template>
                       <!-- Download footer -->
                       <template x-if="doc.upgraded_pdf_path || doc.status==='done'">
                         <div class="px-3 py-1.5 flex items-center gap-3 bg-green-50/50 flex-wrap">
