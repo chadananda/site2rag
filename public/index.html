@@ -681,7 +681,7 @@ if ('serviceWorker' in navigator) {
                               x-text="doc.pdf_type==='image' ? 'Image PDF' : doc.pdf_type==='mixed' ? 'Mixed PDF' : 'Text PDF'"></span>
                         <!-- Readable pages before -->
                         <template x-if="doc.readable_pages_pct != null">
-                          <span class="text-gray-500" x-text="Math.round(doc.readable_pages_pct*100)+'% text coverage'"></span>
+                          <span class="text-gray-500" x-text="Math.round(doc.readable_pages_pct*100)+'% of pages with search text'"></span>
                         </template>
                         <!-- Score: before → after + improvement (or just before if no after yet) -->
                         <span class="ml-auto flex items-center gap-1.5 font-mono">
