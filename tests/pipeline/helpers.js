@@ -1,5 +1,5 @@
 // Shared test helpers for pipeline tests.
-import { mkdirSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, rmSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { PipelineContext } from '../../src/pipeline/context.js';
@@ -12,7 +12,7 @@ export const makeTempDir = () => {
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 };
 
-/** Minimal valid 1-page text PDF (embeds ASCII text in content stream). */
+/** Minimal hand-crafted PDF — valid structure but pdf-parse may not extract text. */
 export const makeTextPdf = (text = 'Hello world this is a test document page one') => {
   const safeText = text.replace(/[()\\]/g, '\\$&');
   const stream = `BT /F1 12 Tf 50 750 Td (${safeText}) Tj ET`;
@@ -36,6 +36,7 @@ export const makeTextPdf = (text = 'Hello world this is a test document page one
   body += `trailer\n<</Size 6 /Root 1 0 R>>\nstartxref\n${xrefOffset}\n%%EOF\n`;
   return Buffer.from(body);
 };
+
 
 /** Build a PipelineContext with sensible test defaults. */
 export const makeCtx = (overrides = {}) => {

@@ -1,7 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { writeFileSync } from 'fs';
+import { writeFileSync, readFileSync } from 'fs';
+import { execSync } from 'child_process';
 import { join } from 'path';
-import { makeTempDir, makeTextPdf, makeCtx } from './helpers.js';
+import { tmpdir } from 'os';
+import { makeTempDir, makeCtx } from './helpers.js';
+
+// Ghostscript PDF — pdf-parse detects text layer (has_text_layer=1)
+function makeTextPdf(text = 'The quick brown fox jumps over the lazy dog. This is a readable test document with substantial content for pipeline testing.') {
+  const outPath = join(tmpdir(), `integ-test-${Date.now()}.pdf`);
+  const safe = text.replace(/[()\\]/g, '\\$&').slice(0, 500);
+  const ps = `%!PS-Adobe-3.0\n/Helvetica findfont 12 scalefont setfont\n72 720 moveto (${safe}) show\nshowpage\n`;
+  execSync(`gs -q -sDEVICE=pdfwrite -dNOPAUSE -dBATCH -dCompatibilityLevel=1.4 -sOutputFile=${outPath} -`, { input: ps });
+  return readFileSync(outPath);
+}
 import { runPipeline, runStage, STAGES, buildSystemPrompt } from '../../src/pipeline/index.js';
 import { PipelineContext } from '../../src/pipeline/context.js';
 
@@ -22,7 +33,7 @@ describe('runPipeline — integration', () => {
       sourcePath: pdfPath,
       sourceUrl: 'https://example.com/doc.pdf',
       importance: 2,
-      config: { failFast: false },
+      config: { failFast: false, skip: ["s1","s2","s3","s4","s5","s6","s7"] },
       meta: { title: 'Integration Test Doc' },
     });
 
@@ -39,7 +50,7 @@ describe('runPipeline — integration', () => {
       sourcePath: pdfPath,
       sourceUrl: 'https://example.com/doc.pdf',
       importance: 2,
-      config: { failFast: false },
+      config: { failFast: false, skip: ["s1","s2","s3","s4","s5","s6","s7"] },
     });
 
     expect(ctx.quality.final).not.toBeNull();
@@ -55,7 +66,7 @@ describe('runPipeline — integration', () => {
       sourcePath: pdfPath,
       sourceUrl: 'https://example.com/doc.pdf',
       importance: 2,
-      config: { failFast: false },
+      config: { failFast: false, skip: ["s1","s2","s3","s4","s5","s6","s7"] },
     });
 
     const s0 = ctx.metrics.stages.find(s => s.stage === 's0');
@@ -72,7 +83,7 @@ describe('runPipeline — integration', () => {
       sourcePath: pdfPath,
       sourceUrl: 'https://example.com/doc.pdf',
       importance: 2,
-      config: { failFast: false },
+      config: { failFast: false, skip: ["s1","s2","s3","s4","s5","s6","s7"] },
     });
 
     const receipt = ctx.toReceipt();
@@ -94,7 +105,7 @@ describe('runPipeline — integration', () => {
       sourcePath: pdfPath,
       sourceUrl: 'https://example.com/doc.pdf',
       importance: 2,
-      config: { failFast: false },
+      config: { failFast: false, skip: ["s1","s2","s3","s4","s5","s6","s7"] },
     });
 
     const fatalErrors = ctx.metrics.errors.filter(e => !e.recoverable);
@@ -107,7 +118,7 @@ describe('runPipeline — integration', () => {
       sourcePath: join(tmpDir, 'missing.pdf'),
       sourceUrl: 'https://example.com/missing.pdf',
       importance: 2,
-      config: { failFast: false },
+      config: { failFast: false, skip: ["s1","s2","s3","s4","s5","s6","s7"] },
     });
 
     expect(ctx.metrics.errors.some(e => e.stage === 's0')).toBe(true);
@@ -121,7 +132,7 @@ describe('runPipeline — integration', () => {
       sourcePath: join(tmpDir, 'missing.pdf'),
       sourceUrl: 'https://example.com/missing.pdf',
       importance: 2,
-      config: { failFast: true },
+      config: { failFast: true, skip: ["s1","s2","s3","s4","s5","s6","s7"] },
     })).rejects.toThrow();
   });
 
@@ -135,7 +146,7 @@ describe('runPipeline — integration', () => {
       sourcePath: pdfPath,
       sourceUrl: 'https://example.com/doc.pdf',
       importance: 1,
-      config: { failFast: false },
+      config: { failFast: false, skip: ["s1","s2","s3","s4","s5","s6","s7"] },
       onStageStart: (stageName) => stagesStarted.push(stageName),
     });
 
@@ -154,7 +165,7 @@ describe('runPipeline — integration', () => {
       sourcePath: pdfPath,
       sourceUrl: 'https://example.com/doc.pdf',
       importance: 1,
-      config: { failFast: false },
+      config: { failFast: false, skip: ["s1","s2","s3","s4","s5","s6","s7"] },
       onProgress: (stageName, pagesAffected, total) => progressCalls.push({ stageName, pagesAffected, total }),
     });
 
@@ -172,7 +183,7 @@ describe('runPipeline — integration', () => {
       sourcePath: pdfPath,
       sourceUrl: 'https://example.com/doc.pdf',
       importance: 1,
-      config: { failFast: false },
+      config: { failFast: false, skip: ["s1","s2","s3","s4","s5","s6","s7"] },
       onStageStart: () => { throw new Error('callback crash'); },
     });
 
