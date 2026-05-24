@@ -171,15 +171,18 @@ async function dispatchToWorker(workerUrl, jobId, pdfPath, onProgress = null) {
         const md = mdRes.ok ? await mdRes.text() : null;
         const rawReceipt = rcptRes.ok ? await rcptRes.json() : d;
         const pdfBuf = pdfRes.ok ? Buffer.from(await pdfRes.arrayBuffer()) : null;
-        // Merge worker receipt: keep all worker fields, normalise page_count alias
-        const pages = rawReceipt.page_count ?? rawReceipt.pages ?? 0;
-        const receipt = { ...rawReceipt, page_count: pages };
-        // Ensure quality.final is always present — fall back to coverage estimate if pipeline omitted it
+        const receipt = { ...rawReceipt };
+        // Ensure quality.final exists for backwards-compat consumers
         if (!receipt.quality?.final) {
-          const blocks = rawReceipt.blocks ?? 0;
-          const synth  = rawReceipt.synth_blocks ?? 0;
-          const coverage = blocks > 0 ? synth / blocks : 0;
-          receipt.quality = { ...(receipt.quality ?? {}), final: parseFloat((0.5 + coverage * 0.4).toFixed(3)) };
+          const after = receipt.quality?.after;
+          if (after != null) {
+            receipt.quality = { ...receipt.quality, final: after };
+          } else {
+            const blocks = rawReceipt.blocks ?? rawReceipt.processing?.blocks_total ?? 0;
+            const synth  = rawReceipt.synth_blocks ?? rawReceipt.processing?.blocks_synthesized ?? 0;
+            const coverage = blocks > 0 ? synth / blocks : 0;
+            receipt.quality = { ...(receipt.quality ?? {}), final: parseFloat((0.5 + coverage * 0.4).toFixed(3)) };
+          }
         }
         // Clean up job on worker after successful retrieval
         fetch(workerUrl + '/jobs/' + jobId, { method: 'DELETE', signal: AbortSignal.timeout(5_000) }).catch(() => {});

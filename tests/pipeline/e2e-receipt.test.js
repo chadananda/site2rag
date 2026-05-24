@@ -168,50 +168,87 @@ describe.skipIf(SKIP_REASON)(`E2E: image PDF through full pipeline${SKIP_REASON 
     }
   });
 
-  it('receipt from GET /jobs/:id/receipt has required top-level fields', () => {
+  it('receipt has required v2 spec fields', () => {
     expect(receipt, 'receipt fetch failed').not.toBeNull();
-    // Core identity fields
+
+    // Identity
     expect(receipt.doc_id).toEqual(expect.any(String));
-    expect(receipt.page_count).toEqual(expect.any(Number));
-    expect(receipt.stages).toEqual(expect.any(Array));
+    expect(receipt.pipeline_version).toEqual(expect.any(String));
+    expect(receipt.submitted_at).toEqual(expect.any(String));
+    expect(receipt.completed_at).toEqual(expect.any(String));
+
+    // Source block
+    expect(receipt.source).toMatchObject({ filename: expect.any(String) });
+
+    // Document block
+    expect(receipt.document).toMatchObject({ page_count: expect.any(Number) });
+
+    // Quality block
     expect(receipt.quality).toEqual(expect.any(Object));
-    expect(receipt.quality.final).toEqual(expect.any(Number));
-    // cost accounting
-    expect(receipt.cost_usd).toEqual(expect.any(Number));
-    // human-readable narrative (added to pipeline output)
+    expect(receipt.quality.final ?? receipt.quality.after).toEqual(expect.any(Number));
+
+    // Processing block
+    expect(receipt.processing).toMatchObject({
+      duration_ms: expect.any(Number),
+      cost_usd:    expect.any(Number),
+      engines_used: expect.any(Array),
+    });
+    expect(receipt.processing.engines_used.length).toBeGreaterThan(0);
+
+    // Narrative
     expect(receipt.narrative).toEqual(expect.any(String));
     expect(receipt.narrative.length).toBeGreaterThan(20);
+
+    // Structured arrays
+    expect(receipt.stages).toEqual(expect.any(Array));
+    expect(receipt.pages).toEqual(expect.any(Array));
+    expect(receipt.warnings).toEqual(expect.any(Array));
+
+    // Outputs
+    expect(receipt.outputs).toMatchObject({
+      has_markdown: expect.any(Boolean),
+      has_pdf:      expect.any(Boolean),
+    });
   });
 
-  it('receipt.stages has a record for each stage that ran, with required fields', () => {
+  it('receipt.stages has s0, s8, labels, and required fields', () => {
     expect(receipt).not.toBeNull();
     const s0 = receipt.stages.find(s => s.stage === 's0');
     expect(s0).toBeDefined();
+    expect(s0.label).toEqual(expect.any(String));
     expect(s0.duration_ms).toBeGreaterThanOrEqual(0);
 
-    const s8 = receipt.stages.find(s => s.stage === 's8');
-    expect(s8).toBeDefined();
+    expect(receipt.stages.find(s => s.stage === 's8')).toBeDefined();
 
-    // Stage names may have letter suffixes (s2b, s3b) — allow that
     for (const stage of receipt.stages) {
       expect(stage).toMatchObject({
         stage:          expect.stringMatching(/^s\d+[a-z]?$/),
+        label:          expect.any(String),
         pages_affected: expect.any(Number),
         duration_ms:    expect.any(Number),
+        cost_usd:       expect.any(Number),
       });
     }
   });
 
   it('receipt.quality.final is a valid score (0–1)', () => {
     expect(receipt).not.toBeNull();
-    expect(receipt.quality.final).toBeGreaterThanOrEqual(0);
-    expect(receipt.quality.final).toBeLessThanOrEqual(1);
+    const score = receipt.quality.final ?? receipt.quality.after;
+    expect(score).toBeGreaterThanOrEqual(0);
+    expect(score).toBeLessThanOrEqual(1);
   });
 
-  it('receipt.engines_used is a non-empty array', () => {
+  it('receipt.pages entries have required fields', () => {
     expect(receipt).not.toBeNull();
-    expect(Array.isArray(receipt.engines_used)).toBe(true);
-    expect(receipt.engines_used.length).toBeGreaterThan(0);
+    for (const p of receipt.pages) {
+      expect(p).toMatchObject({
+        page:            expect.any(Number),
+        status:          expect.stringMatching(/^clean|ocr|escalated|failed$/),
+        engine:          expect.any(String),
+        confidence:      expect.any(Number),
+        words_extracted: expect.any(Number),
+      });
+    }
   });
 
   it('GET /jobs/:id returns has_markdown=true after done', () => {
