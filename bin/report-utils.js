@@ -80,14 +80,15 @@ export const mapDoc = (d, domain) => {
   const pdf_type = !hasTextLayer ? 'image'
     : (readablePctRaw != null && readablePctRaw < 0.4) ? 'mixed'
     : 'text';
-  // Effective before/after scores: before_score (stored at submit) > history fallback
-  const historyBefore = history.find(h => h.score_before != null)?.score_before ?? null;
-  const effective_before = d.before_score ?? historyBefore ?? null;
-  const effective_after = d.after_score != null ? Math.min(d.after_score, 1) : null;
-  const effective_improvement = (effective_before != null && effective_after != null) ? effective_after - effective_before : null;
-
   // Parse pipeline receipt for step-by-step method display with per-stage gains
   const _receipt = (() => { try { return JSON.parse(d.receipt_json || 'null'); } catch { return null; } })();
+
+  // Effective before/after scores: before_score (stored at submit) > history > receipt baseline
+  const historyBefore = history.find(h => h.score_before != null)?.score_before ?? null;
+  const receiptBaseline = _receipt?.quality?.baseline?.composite_score ?? null;
+  const effective_before = d.before_score ?? historyBefore ?? receiptBaseline ?? null;
+  const effective_after = d.after_score != null ? Math.min(d.after_score, 1) : null;
+  const effective_improvement = (effective_before != null && effective_after != null) ? effective_after - effective_before : null;
   const method_summary = _receipt?.method_summary ?? null;
   const method_steps = (() => {
     if (!_receipt) return null;

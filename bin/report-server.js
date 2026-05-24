@@ -382,10 +382,11 @@ createServer(async (req, res) => {
         const page = db.prepare('SELECT local_path FROM pages WHERE url=?').get(docUrl);
         if (page?.local_path && existsSync(page.local_path)) {
           const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: process.env.PIPELINE_API_KEY });
+          const beforeScore = quality.composite_score ?? null;
           pClient.submitJob({ pdfPath: page.local_path, sourceUrl: docUrl, importance: imp, meta: {} })
             .then(jobId => {
               const db3 = safeOpenDb(domain);
-              if (db3) { try { db3.prepare("UPDATE pdf_upgrade_queue SET status='submitted', started_at=?, pipeline_job_id=? WHERE url=?").run(new Date().toISOString(), jobId, docUrl); } finally { db3.close(); } }
+              if (db3) { try { db3.prepare("UPDATE pdf_upgrade_queue SET status='submitted', started_at=?, pipeline_job_id=?, before_score=? WHERE url=?").run(new Date().toISOString(), jobId, beforeScore, docUrl); } finally { db3.close(); } }
               console.log(`[upgrade] submitted ${docUrl.split('/').pop()} → pipeline job ${jobId}`);
             })
             .catch(e => console.error(`[upgrade] pipeline submit failed for ${docUrl.split('/').pop()}: ${e.message}`));
