@@ -83,11 +83,14 @@ export const mapDoc = (d, domain) => {
   // Parse pipeline receipt for step-by-step method display with per-stage gains
   const _receipt = (() => { try { return JSON.parse(d.receipt_json || 'null'); } catch { return null; } })();
 
-  // Effective before/after scores: before_score (stored at submit) > history > receipt baseline
+  // Effective before/after scores: priority chain
   const historyBefore = history.find(h => h.score_before != null)?.score_before ?? null;
   const receiptBaseline = _receipt?.quality?.baseline?.composite_score ?? null;
-  const effective_before = d.before_score ?? historyBefore ?? receiptBaseline ?? null;
   const effective_after = d.after_score != null ? Math.min(d.after_score, 1) : null;
+  // Back-calculate before from score_improvement if no direct before available
+  const calculatedBefore = (effective_after != null && d.score_improvement != null)
+    ? Math.max(0, effective_after - d.score_improvement) : null;
+  const effective_before = d.before_score ?? historyBefore ?? receiptBaseline ?? calculatedBefore ?? null;
   const effective_improvement = (effective_before != null && effective_after != null) ? effective_after - effective_before : null;
   const method_summary = _receipt?.method_summary ?? null;
   const method_steps = (() => {
