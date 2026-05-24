@@ -76,9 +76,9 @@ export const mapDoc = (d, domain) => {
   // PDF type classification from pre-upgrade signals
   const hasTextLayer = d.has_text_layer === 1;
   const readablePctRaw = d.readable_pages_pct ?? null;
-  // image = no text layer at all; mixed = has text layer but low readability; text = good text layer
-  const pdf_type = !hasTextLayer ? 'image'
-    : (readablePctRaw != null && readablePctRaw < 0.4) ? 'mixed'
+  // < 30% readable pages = image-like even with a junk text layer; 30-70% = mixed; > 70% = text
+  const pdf_type = (!hasTextLayer || (readablePctRaw != null && readablePctRaw < 0.3)) ? 'image'
+    : (readablePctRaw != null && readablePctRaw < 0.7) ? 'mixed'
     : 'text';
   // Parse pipeline receipt for step-by-step method display with per-stage gains
   const _receipt = (() => { try { return JSON.parse(d.receipt_json || 'null'); } catch { return null; } })();
@@ -90,7 +90,7 @@ export const mapDoc = (d, domain) => {
   // Back-calculate before from score_improvement if no direct before available
   const calculatedBefore = (effective_after != null && d.score_improvement != null)
     ? Math.max(0, effective_after - d.score_improvement) : null;
-  const effective_before = d.before_score ?? historyBefore ?? receiptBaseline ?? calculatedBefore ?? null;
+  const effective_before = d.before_score ?? historyBefore ?? receiptBaseline ?? d.composite_score ?? calculatedBefore ?? null;
   const effective_improvement = (effective_before != null && effective_after != null) ? effective_after - effective_before : null;
   const method_summary = _receipt?.method_summary ?? null;
   const method_steps = (() => {

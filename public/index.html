@@ -481,13 +481,19 @@ if ('serviceWorker' in navigator) {
                   <!-- Upgraded tab: three numbers (before/gain/after) when improved, one number when no gain -->
                   <template x-if="activeTab==='upgraded' && doc.effective_after != null">
                     <div class="flex flex-col gap-1.5">
-                      <!-- No meaningful gain: single score block -->
+                      <!-- No meaningful gain: show before→after if before is known and different -->
                       <template x-if="!(doc.effective_improvement > 0.005)">
+                        <template x-if="doc.effective_before != null && Math.abs((doc.effective_before||0)-(doc.effective_after||0)) > 0.005">
+                          <div class="score-block" :class="scoreBlockCls({composite_score: doc.effective_before})">
+                            <div class="score-num" x-text="Math.round(doc.effective_before*100)+'%'"></div>
+                            <div class="score-sub">original</div>
+                          </div>
+                        </template>
                         <button @click.stop="receiptUrl=`/receipt.html?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
                                 class="score-block hover:bg-indigo-50 hover:border-indigo-300 transition-colors cursor-pointer"
                                 :class="scoreBlockCls({composite_score: doc.effective_after})">
                           <div class="score-num" x-text="Math.round(doc.effective_after*100)+'%'"></div>
-                          <div class="score-sub">quality ↗</div>
+                          <div class="score-sub" x-text="doc.effective_before != null && Math.abs((doc.effective_before||0)-(doc.effective_after||0)) > 0.005 ? 'final ↗' : 'quality ↗'"></div>
                         </button>
                       </template>
                       <!-- Meaningful gain: before / +gain / after -->
@@ -728,8 +734,8 @@ if ('serviceWorker' in navigator) {
                           <span class="text-gray-400 ml-auto" x-text="relTime(doc.finished_at)"></span>
                         </template>
                       </div>
-                      <!-- Attempt history (only if > 1 attempt) -->
-                      <template x-if="doc.upgrade_history_parsed && doc.upgrade_history_parsed.length > 1">
+                      <!-- Attempt history: show only when scores vary across attempts -->
+                      <template x-if="doc.upgrade_history_parsed && doc.upgrade_history_parsed.length > 1 && new Set(doc.upgrade_history_parsed.map(a=>a.score_after)).size > 1">
                         <div class="px-3 py-2 border-b border-gray-100 space-y-1">
                           <div class="text-gray-400 font-semibold uppercase tracking-wide" style="font-size:10px">Attempts</div>
                           <template x-for="(att, i) in doc.upgrade_history_parsed" :key="i">
@@ -749,14 +755,20 @@ if ('serviceWorker' in navigator) {
                         </div>
                       </template>
                       <!-- Download footer -->
-                      <template x-if="doc.upgraded_pdf_path">
+                      <template x-if="doc.upgraded_pdf_path || doc.status==='done'">
                         <div class="px-3 py-1.5 flex items-center gap-3 bg-green-50/50 flex-wrap">
-                          <a :href="`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
-                             @click.stop class="font-semibold text-green-700 hover:underline">↓ PDF</a>
-                          <a :href="`${API_BASE}/api/docs/download-md?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
-                             @click.stop class="font-semibold text-blue-700 hover:underline">↓ Markdown</a>
+                          <a :href="doc.url" target="_blank" @click.stop
+                             class="text-gray-400 hover:text-gray-600 text-xs font-medium hover:underline">↗ Original</a>
+                          <template x-if="doc.upgraded_pdf_path">
+                            <a :href="`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
+                               @click.stop class="font-semibold text-green-700 hover:underline">↓ Upgraded PDF</a>
+                          </template>
+                          <template x-if="doc.upgraded_pdf_path">
+                            <a :href="`${API_BASE}/api/docs/download-md?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
+                               @click.stop class="font-semibold text-blue-700 hover:underline">↓ Markdown</a>
+                          </template>
                           <button @click.stop="receiptUrl=`/receipt.html?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`"
-                                  class="text-xs text-indigo-500 hover:text-indigo-700 font-medium hover:underline">📋 View Analysis</button>
+                                  class="text-xs text-indigo-500 hover:text-indigo-700 font-medium hover:underline">📋 Receipt</button>
                         </div>
                       </template>
                     </div>
