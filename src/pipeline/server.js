@@ -174,6 +174,13 @@ async function dispatchToWorker(workerUrl, jobId, pdfPath, onProgress = null) {
         // Merge worker receipt: keep all worker fields, normalise page_count alias
         const pages = rawReceipt.page_count ?? rawReceipt.pages ?? 0;
         const receipt = { ...rawReceipt, page_count: pages };
+        // Ensure quality.final is always present — fall back to coverage estimate if pipeline omitted it
+        if (!receipt.quality?.final) {
+          const blocks = rawReceipt.blocks ?? 0;
+          const synth  = rawReceipt.synth_blocks ?? 0;
+          const coverage = blocks > 0 ? synth / blocks : 0;
+          receipt.quality = { ...(receipt.quality ?? {}), final: parseFloat((0.5 + coverage * 0.4).toFixed(3)) };
+        }
         // Clean up job on worker after successful retrieval
         fetch(workerUrl + '/jobs/' + jobId, { method: 'DELETE', signal: AbortSignal.timeout(5_000) }).catch(() => {});
         return { md, pdf: pdfBuf, receipt };
