@@ -1197,6 +1197,7 @@ function app() {
       const headers = { ...(opts.headers || {}), ...(this.adminToken ? { Authorization: `Bearer ${this.adminToken}` } : {}) };
       const res = await fetch(url, { ...opts, headers });
       if (res.status === 401) {
+        this.apiError = 'Session expired — please log in again';
         this.showLoginModal = true;
         return null;
       }

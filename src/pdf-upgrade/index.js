@@ -597,8 +597,28 @@ const tick = async () => {
         upgradeDocumentMarker(db, domain, row, allDomains, siteConfig)));
     };
 
-    const runPass2 = () => {
+    const runPass2 = async () => {
       if (!pass2plus.length) return;
+
+      // When pipeline is configured, route pass-2 through it — no direct boss/Claude calls
+      if (pipelineClient) {
+        try { await pipelineClient.health(); } catch { return; }
+        const batch = pass2plus.slice(0, MARKER_CONCURRENCY);
+        if (batch.length) {
+          log(`Pass 2+ (pipeline): submitting ${batch.length} docs`);
+          await Promise.all(batch.map(async ({ db, domain, row, siteConfig }) => {
+            const page = db.prepare('SELECT * FROM pages WHERE url=?').get(row.url);
+            if (!page?.local_path || !existsSync(page.local_path)) {
+              db.prepare("UPDATE pdf_upgrade_queue SET status='failed', error=? WHERE url=?")
+                .run('local_path missing', row.url);
+              return;
+            }
+            return submitViaPipeline(db, domain, row, page, siteConfig, openDbs);
+          }));
+        }
+        return;
+      }
+
       if (!ocrBackend) { log('No OCR backend available — skipping pass-2+'); return; }
       if (ocrBackend === 'claude') log('Boss unreachable — falling back to Claude Haiku for OCR');
       // Per-site fair cap: each site gets equal share of OCR slots to prevent starvation
@@ -622,7 +642,7 @@ const tick = async () => {
         upgradeDocumentOcr(domain, row, allDomains, ocrBackend, siteConfig).catch(e => log(`OCR job error: ${e.message}`)));
     };
 
-    await Promise.all([runPass1(), Promise.resolve(runPass2())]);
+    await Promise.all([runPass1(), runPass2()]);
 
     if (!pass1.length && !pass2plus.length) log('No pending items');
   } finally {

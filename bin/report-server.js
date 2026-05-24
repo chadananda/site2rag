@@ -57,17 +57,27 @@ const getSitesData = (sites) => {
 const invalidateSitesCache = () => { _sitesCacheAt = 0; };
 const ADMIN_PASSWORD = process.env.SITE_ADMIN_PASS || process.env.REPORT_ADMIN_PASSWORD || null;
 const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
-const SESSION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+const SESSIONS_FILE = join(getMirrorRoot(), '.admin-sessions.json');
 
-/** Active session tokens: token -> expiry timestamp */
+/** Active session tokens: token -> expiry timestamp (persisted across restarts) */
 const sessions = new Map();
+try {
+  const raw = JSON.parse(readFileSync(SESSIONS_FILE, 'utf8'));
+  for (const [k, v] of Object.entries(raw)) { if (Date.now() < v) sessions.set(k, v); }
+} catch {}
 
-/** Issue a new random session token. */
+const persistSessions = () => {
+  try { writeFileSync(SESSIONS_FILE, JSON.stringify(Object.fromEntries(sessions))); } catch {}
+};
+
+/** Issue a new random session token (persisted to disk so restarts don't log users out). */
 const issueToken = () => {
   const token = createHash('sha256')
     .update(`${Math.random()}${Date.now()}${ADMIN_PASSWORD}`)
     .digest('hex');
   sessions.set(token, Date.now() + SESSION_TTL_MS);
+  persistSessions();
   return token;
 };
 

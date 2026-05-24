@@ -88,7 +88,7 @@ module.exports = {
         AZURE_ENDPOINT: envVars.AZURE_ENDPOINT || '',
         GOOGLE_KEY: envVars.GOOGLE_KEY || '',
         // Worker agents: comma-separated http://host:port URLs; seeded at startup, self-register on connect
-        WORKER_URLS: envVars.WORKER_URLS || 'http://jafar:49910,http://tower-nas:49910,http://boss:49910',
+        WORKER_URLS: envVars.WORKER_URLS || 'http://localhost:49910',
         KRAKEN_ENDPOINT: 'http://boss:8093',
       },
       autorestart: true,
