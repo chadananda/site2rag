@@ -4,10 +4,10 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSyn
 import { join, extname, dirname, resolve } from 'path';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
-import Anthropic from '@anthropic-ai/sdk';
+import OpenAI from 'openai';
 import Database from 'better-sqlite3';
 import { loadConfig, getMirrorRoot } from '../src/config.js';
-import { openDb, logLlmCall, llmCost } from '../src/db.js';
+import { openDb } from '../src/db.js';
 import { detectLanguage } from '../src/language.js';
 import { siteSummary, siteDocs, siteTabCounts, recentRuns } from './report-queries.js';
 import { stripHtml, getLinkContext, buildSummaryPrompt } from './report-utils.js';
@@ -56,7 +56,8 @@ const getSitesData = (sites) => {
 };
 const invalidateSitesCache = () => { _sitesCacheAt = 0; };
 const ADMIN_PASSWORD = process.env.SITE_ADMIN_PASS || process.env.REPORT_ADMIN_PASSWORD || null;
-const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
+const DEEPSEEK_MODEL = 'deepseek-chat';
+const mkDeepSeek = () => new OpenAI({ apiKey: process.env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com/v1' });
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const SESSIONS_FILE = join(getMirrorRoot(), '.admin-sessions.json');
 
@@ -442,8 +443,7 @@ createServer(async (req, res) => {
     const limit = Math.min(1000, parseInt(url.searchParams.get('limit') || '500', 10));
     const concurrency = Math.min(40, parseInt(url.searchParams.get('concurrency') || '20', 10));
     if (!domain) return err(res, 400, 'site param required');
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return err(res, 503, 'ANTHROPIC_API_KEY not set');
+    if (!process.env.DEEPSEEK_API_KEY) return err(res, 503, 'DEEPSEEK_API_KEY not set');
     const db = safeOpenDb(domain);
     if (!db) return err(res, 404, 'db unavailable');
     let rows;
@@ -459,7 +459,7 @@ createServer(async (req, res) => {
     } catch (e) { db.close(); return err(res, 500, e.message); } finally { db.close(); }
 
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', ...corsHeaders });
-    const client = new Anthropic({ apiKey });
+    const client = mkDeepSeek();
     let done = 0;
     const total = rows.length;
 
@@ -467,8 +467,8 @@ createServer(async (req, res) => {
       try {
         const prompt = buildSummaryPrompt(row);
         if (!prompt) return;
-        const msg = await client.messages.create({ model: HAIKU_MODEL, max_tokens: 120, messages: [{ role: 'user', content: prompt }] });
-        const text = msg.content[0]?.text || '';
+        const msg = await client.chat.completions.create({ model: DEEPSEEK_MODEL, max_tokens: 120, messages: [{ role: 'user', content: prompt }] });
+        const text = msg.choices[0]?.message?.content || '';
         const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
         const summary = lines[0] || null;
         const authorLine = lines.find(l => l.toLowerCase().startsWith('author:'));
@@ -477,8 +477,7 @@ createServer(async (req, res) => {
         const db2 = safeOpenDb(domain);
         if (db2) {
           try {
-            db2.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_language=?, summary_tier=?, ai_summarized_at=? WHERE url=?').run(summary, author, lang, 'haiku', new Date().toISOString(), row.url);
-            logLlmCall(db2, { stage: 'summarize', url: row.url, page_no: null, provider: 'claude', model: HAIKU_MODEL, tokens_in: msg.usage?.input_tokens || 0, tokens_out: msg.usage?.output_tokens || 0, cost_usd: llmCost(HAIKU_MODEL, msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0), ok: 1 });
+            db2.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_language=?, summary_tier=?, ai_summarized_at=? WHERE url=?').run(summary, author, lang, 'deepseek', new Date().toISOString(), row.url);
           } finally { db2.close(); }
         }
       } catch (e) { console.error(`[batch-summarize] ${row.url}: ${e.message}`); }
@@ -536,7 +535,7 @@ createServer(async (req, res) => {
     } catch (e) { db.close(); return err(res, 500, e.message); } finally { db.close(); }
 
     if (!row) return err(res, 404, 'doc not found in pdf_quality');
-    if (row.summary_tier === 'haiku' && row.ai_summarized_at) {
+    if (row.ai_summarized_at) {
       return json(res, { summary: row.ai_summary, author: row.ai_author, language: row.ai_language, tier: 'haiku' });
     }
 
@@ -583,14 +582,13 @@ createServer(async (req, res) => {
       return json(res, { summary: null, author: null, language, tier: 'free' });
     }
 
-    const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return err(res, 503, 'ANTHROPIC_API_KEY not set');
+    if (!process.env.DEEPSEEK_API_KEY) return err(res, 503, 'DEEPSEEK_API_KEY not set');
 
     try {
       const prompt = `Context clues for a PDF document (language: ${language}):\n${parts.join('\n')}\n\nRespond with exactly three plain-text lines. Do NOT echo or repeat the title, URL, or raw metadata verbatim.\nLine 1: One original sentence describing what this document is about and who would benefit from reading it.\nLine 2: Author: [full name only, or Unknown]\nLine 3: Language: [${language}]`;
-      const client = new Anthropic({ apiKey });
-      const msg = await client.messages.create({ model: HAIKU_MODEL, max_tokens: 160, messages: [{ role: 'user', content: prompt }] });
-      const text = msg.content[0]?.text || '';
+      const client = mkDeepSeek();
+      const msg = await client.chat.completions.create({ model: DEEPSEEK_MODEL, max_tokens: 160, messages: [{ role: 'user', content: prompt }] });
+      const text = msg.choices[0]?.message?.content || '';
       const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
       const summary = lines[0] || null;
       const authorLine = lines.find(l => l.toLowerCase().startsWith('author:'));
@@ -600,11 +598,10 @@ createServer(async (req, res) => {
       const db2 = safeOpenDb(domain);
       if (db2) {
         try {
-          db2.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_language=?, summary_tier=?, ai_summarized_at=? WHERE url=?').run(summary, author, detectedLang, 'haiku', new Date().toISOString(), docUrl);
-          logLlmCall(db2, { stage: 'summarize', url: docUrl, page_no: null, provider: 'claude', model: HAIKU_MODEL, tokens_in: msg.usage?.input_tokens || 0, tokens_out: msg.usage?.output_tokens || 0, cost_usd: llmCost(HAIKU_MODEL, msg.usage?.input_tokens || 0, msg.usage?.output_tokens || 0), ok: 1 });
+          db2.prepare('UPDATE pdf_quality SET ai_summary=?, ai_author=?, ai_language=?, summary_tier=?, ai_summarized_at=? WHERE url=?').run(summary, author, detectedLang, 'deepseek', new Date().toISOString(), docUrl);
         } finally { db2.close(); }
       }
-      return json(res, { summary, author, language: detectedLang, tier: 'haiku' });
+      return json(res, { summary, author, language: detectedLang, tier: 'deepseek' });
     } catch (e) {
       console.error(`[summarize] ${docUrl}: ${e.message}`);
       return err(res, 500, e.message);
