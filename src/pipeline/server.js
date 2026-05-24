@@ -163,20 +163,20 @@ async function dispatchToWorker(workerUrl, jobId, pdfPath, onProgress = null) {
       const d = await (await fetch(workerUrl + '/jobs/' + jobId, { signal: AbortSignal.timeout(15_000) })).json();
       if (onProgress && d.stage) onProgress({ stage: d.stage, pages: d.metrics?.find(m => m.stage === d.stage)?.pages_affected ?? null });
       if (d.status === 'done') {
-        const mdRes = await fetch(workerUrl + '/jobs/' + jobId + '/md', { signal: AbortSignal.timeout(30_000) });
+        const [mdRes, rcptRes, pdfRes] = await Promise.all([
+          fetch(workerUrl + '/jobs/' + jobId + '/md',      { signal: AbortSignal.timeout(30_000) }),
+          fetch(workerUrl + '/jobs/' + jobId + '/receipt', { signal: AbortSignal.timeout(15_000) }),
+          fetch(workerUrl + '/jobs/' + jobId + '/pdf',     { signal: AbortSignal.timeout(60_000) }),
+        ]);
         const md = mdRes.ok ? await mdRes.text() : null;
-        const rcptRes = await fetch(workerUrl + '/jobs/' + jobId + '/receipt', { signal: AbortSignal.timeout(15_000) });
         const rawReceipt = rcptRes.ok ? await rcptRes.json() : d;
-        // Normalize boss receipt to format expected by pdf-upgrade consumer
-        const pages = rawReceipt.pages ?? 0;
-        const blocks = rawReceipt.blocks ?? 0;
-        const synthBlocks = rawReceipt.synth_blocks ?? 0;
-        const coverage = blocks > 0 ? synthBlocks / blocks : 0;
-        const qualityFinal = parseFloat((0.5 + coverage * 0.4).toFixed(3));
-        const receipt = { ...rawReceipt, page_count: pages, quality: { final: qualityFinal, gain: null } };
+        const pdfBuf = pdfRes.ok ? Buffer.from(await pdfRes.arrayBuffer()) : null;
+        // Merge worker receipt: keep all worker fields, normalise page_count alias
+        const pages = rawReceipt.page_count ?? rawReceipt.pages ?? 0;
+        const receipt = { ...rawReceipt, page_count: pages };
         // Clean up job on worker after successful retrieval
         fetch(workerUrl + '/jobs/' + jobId, { method: 'DELETE', signal: AbortSignal.timeout(5_000) }).catch(() => {});
-        return { md, receipt };
+        return { md, pdf: pdfBuf, receipt };
       }
       if (d.status === 'failed' || d.status === 'cancelled') throw new Error('worker job ' + d.status);
     } catch (e) { if (e.message.startsWith('worker job')) throw e; }
@@ -340,16 +340,17 @@ export async function startPipelineServer({
       const worker = await pickWorker();
       if (worker) {
         log(`dispatch job=${job.id} → ${worker.hostname ?? worker.url}`);
-        const { md, receipt } = await dispatchToWorker(worker.url, job.id, job.pdf_path, p => { if (!jobs.isClosed()) jobs.setProgress(job.id, p); });
-        // Write output markdown to the expected location
-        if (md && job.pdf_path) {
+        const { md, pdf, receipt } = await dispatchToWorker(worker.url, job.id, job.pdf_path, p => { if (!jobs.isClosed()) jobs.setProgress(job.id, p); });
+        if (job.pdf_path) {
           const { writeFileSync, mkdirSync } = await import('fs');
           const { join, dirname } = await import('path');
           const outDir = join(dirname(job.pdf_path), '..', 'content');
           mkdirSync(outDir, { recursive: true });
-          const mdPath = join(outDir, job.id + '.md');
-          writeFileSync(mdPath, md, 'utf8');
-          if (!jobs.isClosed()) jobs.setDone(job.id, { mdPath, receipt });
+          const mdPath  = md  ? join(outDir, job.id + '.md')  : null;
+          const pdfPath = pdf ? join(outDir, job.id + '.pdf') : null;
+          if (mdPath)  writeFileSync(mdPath,  md,  'utf8');
+          if (pdfPath) writeFileSync(pdfPath, pdf);
+          if (!jobs.isClosed()) jobs.setDone(job.id, { mdPath, pdfOutPath: pdfPath, receipt });
         } else {
           if (!jobs.isClosed()) jobs.setDone(job.id, { receipt });
         }
