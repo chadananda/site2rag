@@ -13,6 +13,7 @@ import { stripHtml, getLinkContext, buildSummaryPrompt } from './report-utils.js
 import { generateThumb } from './thumb-worker-pool.js';
 import { runScorePdfs } from '../src/score-pdfs.js';
 import { maybeQueue } from '../src/pdf-upgrade/score.js';
+import { PipelineClient } from '../src/pipeline/client.js';
 
 // Prevent crashes from unhandled DB errors — log and keep serving
 process.on('unhandledRejection', (err) => console.error('[server] unhandled rejection:', err?.message ?? err));
@@ -370,12 +371,29 @@ createServer(async (req, res) => {
       if (existing) {
         db.prepare(`UPDATE pdf_upgrade_queue SET status='pending', priority=999, pass=1,
           started_at=NULL, finished_at=NULL, error=NULL, requested_method=?, importance=?, queued_at=?,
-          upgraded_pdf_path=NULL, after_score=NULL, score_improvement=NULL, pages_processed=NULL, method=NULL, receipt_json=NULL
+          upgraded_pdf_path=NULL, after_score=NULL, score_improvement=NULL, pages_processed=NULL, method=NULL, receipt_json=NULL, pipeline_job_id=NULL
           WHERE url=?`).run(upgradeMethod, imp, now, docUrl);
       } else {
         db.prepare(`INSERT INTO pdf_upgrade_queue (url, content_hash, priority, status, requested_method, importance, queued_at) VALUES (?,?,999,'pending',?,?,?)`)
           .run(docUrl, quality.content_hash || null, upgradeMethod, imp, now);
       }
+
+      // Immediately submit to pipeline (don't wait for upgrade worker tick)
+      const pipelineUrl = process.env.PIPELINE_URL;
+      if (pipelineUrl) {
+        const page = db.prepare('SELECT local_path FROM pages WHERE url=?').get(docUrl);
+        if (page?.local_path && existsSync(page.local_path)) {
+          const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: process.env.PIPELINE_API_KEY });
+          pClient.submitJob({ pdfPath: page.local_path, sourceUrl: docUrl, importance: imp, meta: {} })
+            .then(jobId => {
+              const db3 = safeOpenDb(domain);
+              if (db3) { try { db3.prepare("UPDATE pdf_upgrade_queue SET status='submitted', started_at=?, pipeline_job_id=? WHERE url=?").run(new Date().toISOString(), jobId, docUrl); } finally { db3.close(); } }
+              console.log(`[upgrade] submitted ${docUrl.split('/').pop()} → pipeline job ${jobId}`);
+            })
+            .catch(e => console.error(`[upgrade] pipeline submit failed for ${docUrl.split('/').pop()}: ${e.message}`));
+        }
+      }
+
       return json(res, { ok: true, status: 'pending', queued: !existing, method: upgradeMethod, importance: imp, message: existing ? 'Restarted from scratch' : 'Added to front of queue' });
     } catch (e) {
       console.error('[server] /api/docs/upgrade error:', e?.message);

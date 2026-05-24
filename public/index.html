@@ -27,9 +27,9 @@ if ('serviceWorker' in navigator) {
   .mono{font-family:ui-monospace,monospace}
 
   /* Thumbnail — letter/A4 ratio (8.5:11 ≈ 0.773) */
-  .thumb-wrap{position:relative;width:160px;flex-shrink:0;border-radius:3px;
+  .thumb-wrap{position:relative;width:100px;flex-shrink:0;border-radius:3px;
     box-shadow:0 1px 3px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06);
-    aspect-ratio:8.5/11;overflow:hidden;cursor:pointer;}
+    aspect-ratio:8.5/11;max-height:130px;overflow:hidden;cursor:pointer;}
   .thumb{width:100%;height:100%;object-fit:cover;object-position:top;background:#f3f4f6;display:block;}
   .thumb-placeholder{display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:2rem;
     width:100%;height:100%;background:#f3f4f6;}
@@ -1508,6 +1508,13 @@ function app() {
         const rows = await fetch(`${API_BASE}/api/sites/activity?site=${this.activeSite.domain}`).then(r => r.json());
         const map = {};
         for (const r of rows) map[r.url] = r;
+        // Preserve locally-queued docs that haven't reached the pipeline yet
+        for (const [url, prior] of Object.entries(this.processingActivity)) {
+          if (!map[url] && prior?.stage === 'queued') {
+            const doc = this.docs.find(d => d.url === url);
+            if (doc?.status === 'pending') map[url] = prior;
+          }
+        }
         this.processingActivity = map;
       } catch {}
     },
