@@ -55,7 +55,7 @@ const getSitesData = (sites) => {
 };
 const invalidateSitesCache = () => { _sitesCacheAt = 0; };
 const ADMIN_PASSWORD = process.env.SITE_ADMIN_PASS || process.env.REPORT_ADMIN_PASSWORD || null;
-const DEEPSEEK_MODEL = 'deepseek-chat';
+const DEEPSEEK_MODEL = 'deepseek-v4-flash';
 const deepseekChat = async (prompt, maxTokens = 160) => {
   const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
     method: 'POST',
@@ -67,6 +67,9 @@ const deepseekChat = async (prompt, maxTokens = 160) => {
   const data = await res.json();
   return data.choices[0]?.message?.content || '';
 };
+
+/** Strip "Line N:" or "1." style prefixes the model sometimes echoes back. */
+const stripLinePrefix = (s) => s?.replace(/^(line\s*\d+[:.]?\s*|\d+[.:]\s*)/i, '').trim() || s;
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const SESSIONS_FILE = join(getMirrorRoot(), '.admin-sessions.json');
 
@@ -477,9 +480,9 @@ createServer(async (req, res) => {
         if (!prompt) return;
         const text = await deepseekChat(prompt, 120);
         const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
-        const summary = lines[0] || null;
-        const authorLine = lines.find(l => l.toLowerCase().startsWith('author:'));
-        const author = authorLine ? authorLine.replace(/^author:\s*/i, '').trim() : null;
+        const summary = stripLinePrefix(lines[0]) || null;
+        const authorLine = lines.find(l => /^(line\s*2[:.]?\s*)?author:/i.test(l));
+        const author = authorLine ? authorLine.replace(/^(line\s*2[:.]?\s*)?author:\s*/i, '').trim() : null;
         const lang = detectLanguage([row.excerpt, row.pdf_title, row.hosted_title].filter(Boolean).join(' '));
         const db2 = safeOpenDb(domain);
         if (db2) {
@@ -595,11 +598,11 @@ createServer(async (req, res) => {
       const prompt = `Context clues for a PDF document (language: ${language}):\n${parts.join('\n')}\n\nRespond with exactly three plain-text lines. Do NOT echo or repeat the title, URL, or raw metadata verbatim.\nLine 1: One original sentence describing what this document is about and who would benefit from reading it.\nLine 2: Author: [full name only, or Unknown]\nLine 3: Language: [${language}]`;
       const text = await deepseekChat(prompt, 160);
       const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
-      const summary = lines[0] || null;
-      const authorLine = lines.find(l => l.toLowerCase().startsWith('author:'));
-      const author = authorLine ? authorLine.replace(/^author:\s*/i, '').trim() : null;
-      const langLine = lines.find(l => l.toLowerCase().startsWith('language:'));
-      const detectedLang = langLine ? langLine.replace(/^language:\s*/i, '').trim() : language;
+      const summary = stripLinePrefix(lines[0]) || null;
+      const authorLine = lines.find(l => /^(line\s*2[:.]?\s*)?author:/i.test(l));
+      const author = authorLine ? authorLine.replace(/^(line\s*2[:.]?\s*)?author:\s*/i, '').trim() : null;
+      const langLine = lines.find(l => /^(line\s*3[:.]?\s*)?language:/i.test(l));
+      const detectedLang = langLine ? langLine.replace(/^(line\s*3[:.]?\s*)?language:\s*/i, '').trim() : language;
       const db2 = safeOpenDb(domain);
       if (db2) {
         try {
