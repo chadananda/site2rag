@@ -4,7 +4,6 @@ import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSyn
 import { join, extname, dirname, resolve } from 'path';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
-import OpenAI from 'openai';
 import Database from 'better-sqlite3';
 import { loadConfig, getMirrorRoot } from '../src/config.js';
 import { openDb } from '../src/db.js';
@@ -57,7 +56,17 @@ const getSitesData = (sites) => {
 const invalidateSitesCache = () => { _sitesCacheAt = 0; };
 const ADMIN_PASSWORD = process.env.SITE_ADMIN_PASS || process.env.REPORT_ADMIN_PASSWORD || null;
 const DEEPSEEK_MODEL = 'deepseek-chat';
-const mkDeepSeek = () => new OpenAI({ apiKey: process.env.DEEPSEEK_API_KEY, baseURL: 'https://api.deepseek.com/v1' });
+const deepseekChat = async (prompt, maxTokens = 160) => {
+  const res = await fetch('https://api.deepseek.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}` },
+    body: JSON.stringify({ model: DEEPSEEK_MODEL, max_tokens: maxTokens, messages: [{ role: 'user', content: prompt }] }),
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!res.ok) throw new Error(`DeepSeek ${res.status}: ${await res.text()}`);
+  const data = await res.json();
+  return data.choices[0]?.message?.content || '';
+};
 const SESSION_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
 const SESSIONS_FILE = join(getMirrorRoot(), '.admin-sessions.json');
 
@@ -459,7 +468,6 @@ createServer(async (req, res) => {
     } catch (e) { db.close(); return err(res, 500, e.message); } finally { db.close(); }
 
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', ...corsHeaders });
-    const client = mkDeepSeek();
     let done = 0;
     const total = rows.length;
 
@@ -467,8 +475,7 @@ createServer(async (req, res) => {
       try {
         const prompt = buildSummaryPrompt(row);
         if (!prompt) return;
-        const msg = await client.chat.completions.create({ model: DEEPSEEK_MODEL, max_tokens: 120, messages: [{ role: 'user', content: prompt }] });
-        const text = msg.choices[0]?.message?.content || '';
+        const text = await deepseekChat(prompt, 120);
         const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
         const summary = lines[0] || null;
         const authorLine = lines.find(l => l.toLowerCase().startsWith('author:'));
@@ -586,9 +593,7 @@ createServer(async (req, res) => {
 
     try {
       const prompt = `Context clues for a PDF document (language: ${language}):\n${parts.join('\n')}\n\nRespond with exactly three plain-text lines. Do NOT echo or repeat the title, URL, or raw metadata verbatim.\nLine 1: One original sentence describing what this document is about and who would benefit from reading it.\nLine 2: Author: [full name only, or Unknown]\nLine 3: Language: [${language}]`;
-      const client = mkDeepSeek();
-      const msg = await client.chat.completions.create({ model: DEEPSEEK_MODEL, max_tokens: 160, messages: [{ role: 'user', content: prompt }] });
-      const text = msg.choices[0]?.message?.content || '';
+      const text = await deepseekChat(prompt, 160);
       const lines = text.trim().split('\n').map(l => l.trim()).filter(Boolean);
       const summary = lines[0] || null;
       const authorLine = lines.find(l => l.toLowerCase().startsWith('author:'));
