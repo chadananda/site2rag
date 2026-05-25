@@ -353,6 +353,20 @@ createServer(async (req, res) => {
     return res.end(readFileSync(mdPath));
   }
 
+  if (path === '/api/docs/download-md-original') {
+    const domain = url.searchParams.get('site');
+    const docUrl = url.searchParams.get('url');
+    if (!domain || !docUrl) return err(res, 400, 'site and url params required');
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, 'db unavailable');
+    let row;
+    try { row = db.prepare('SELECT md_path FROM exports WHERE url=?').get(docUrl); }
+    finally { db.close(); }
+    if (!row?.md_path || !existsSync(row.md_path)) return err(res, 404, 'original markdown not found');
+    res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', ...cacheHeaders(3600) });
+    return res.end(readFileSync(row.md_path));
+  }
+
   if (path === '/api/docs/upgrade' && req.method === 'POST') {
     if (!isAdmin(req)) return err(res, 401, 'Admin password required');
     const domain = url.searchParams.get('site');
