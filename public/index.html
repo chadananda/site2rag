@@ -1626,19 +1626,20 @@ function app() {
         if (!this._seenInPipeline) this._seenInPipeline = {};
         let needsRefresh = false;
         for (const [url, prior] of Object.entries(this.processingActivity)) {
-          if (prior?.stage !== 'queued') continue; // already has real stage from server
+          if (prior?.stage && prior.stage !== 'queued') {
+            // Had real pipeline stage — if gone from feed now, job completed
+            if (!map[url]) needsRefresh = true;
+            continue;
+          }
+          // 'queued' stage: waiting for pipeline to pick up
           const doc = this.docs.find(d => d.url === url);
-          // Doc completed — drop queued indicator and reload
           if (doc && doc.status !== 'pending') { delete this._seenInPipeline?.[url]; needsRefresh = true; continue; }
           if (map[url]) {
-            // Job now visible in activity feed — let server stage show through, mark as seen
             this._seenInPipeline[url] = true;
           } else if (this._seenInPipeline[url]) {
-            // Was in feed, now gone — job completed; trigger refresh
             delete this._seenInPipeline[url];
             needsRefresh = true;
           } else {
-            // Still waiting for pipeline to pick it up — preserve local queued indicator
             if (!prior._queuedAt) prior._queuedAt = Date.now();
             if (Date.now() - prior._queuedAt > 15000) needsRefresh = true;
             else map[url] = prior;

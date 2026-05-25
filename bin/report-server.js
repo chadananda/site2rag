@@ -328,7 +328,7 @@ createServer(async (req, res) => {
     finally { db.close(); }
     if (!row?.upgraded_pdf_path || !existsSync(row.upgraded_pdf_path)) return err(res, 404, 'upgraded pdf not found');
     const filename = decodeURIComponent(docUrl.split('/').pop()) || 'document.pdf';
-    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${filename}"`, ...cacheHeaders(3600) });
+    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${filename}"`, ...cacheHeaders(3600) });
     return res.end(readFileSync(row.upgraded_pdf_path));
   }
 
