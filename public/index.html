@@ -401,28 +401,16 @@ if ('serviceWorker' in navigator) {
   <template x-if="activeSite">
     <div class="ml-3 pl-4 border-l-2 border-gray-200">
 
-      <!-- Sticky context bar: domain + PDF tabs -->
-      <div class="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-gray-200 -mx-4 px-4 pt-2 pb-0 mb-4">
-        <div class="flex items-center gap-2 text-xs text-gray-400 mb-1">
+      <!-- Sticky context bar: domain breadcrumb -->
+      <div class="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-gray-200 -mx-4 px-4 pt-2 pb-2 mb-4">
+        <div class="flex items-center gap-2 text-xs text-gray-400">
           <span class="status-dot flex-shrink-0"
             :class="activeSite.last_run?.status==='running'?'bg-blue-400 processing-pulse':activeSite.last_run?.status==='failed'?'bg-red-400':'bg-gray-300'"></span>
           <span class="mono font-semibold text-gray-700" x-text="activeSite.domain"></span>
           <span class="text-gray-300 mx-1">›</span>
-          <span class="text-gray-500">PDF Assets</span>
+          <span class="text-gray-500">PDF Documents</span>
+          <span class="mono text-gray-400 ml-1" x-text="docsTotal ? '('+fmt(docsTotal)+')' : ''"></span>
         </div>
-        <!-- Tabs -->
-        <div class="flex items-end gap-0">
-        <button class="tab-btn" :class="activeTab==='original'?'active':''" @click="switchTab('original')">
-          Original
-          <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='original'?'text-gray-600':'text-gray-400'"
-            x-text="tabTotals.original != null ? '('+fmt(tabTotals.original)+')' : ''"></span>
-        </button>
-        <button class="tab-btn" :class="activeTab==='upgraded'?'active':''" @click="switchTab('upgraded')">
-          Upgraded
-          <span class="ml-1.5 text-xs mono font-normal" :class="activeTab==='upgraded'?'text-green-500':'text-gray-400'"
-            x-text="tabTotals.upgraded != null ? '('+fmt(tabTotals.upgraded)+')' : ''"></span>
-        </button>
-        </div><!-- end sticky tabs -->
       </div><!-- end sticky bar -->
 
       <!-- About upgrade popup -->
@@ -465,19 +453,18 @@ if ('serviceWorker' in navigator) {
             placeholder="title, URL or text…"
             class="border border-gray-200 rounded px-3 py-1.5 text-sm w-52 focus:outline-none focus:ring-1 focus:ring-gray-400">
         </div>
-        <template x-if="activeTab==='original'">
-          <div>
-            <label class="block text-xs text-gray-400 mb-1">Status</label>
-            <select x-model="filters.status" @change="loadDocs()"
-              class="border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400">
-              <option value="">All</option>
-              <option value="pending">Queued</option>
-              <option value="processing">Processing</option>
-              <option value="failed">Failed</option>
-              <option value="unscored">Unscored</option>
-            </select>
-          </div>
-        </template>
+        <div>
+          <label class="block text-xs text-gray-400 mb-1">Status</label>
+          <select x-model="filters.status" @change="loadDocs()"
+            class="border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400">
+            <option value="">All</option>
+            <option value="done">Upgraded</option>
+            <option value="pending">Queued</option>
+            <option value="processing">Processing</option>
+            <option value="failed">Failed</option>
+            <option value="unscored">Unscored</option>
+          </select>
+        </div>
         <div>
           <label class="block text-xs text-gray-400 mb-1">Max score</label>
           <div class="flex items-center gap-1.5">
@@ -490,15 +477,11 @@ if ('serviceWorker' in navigator) {
           <label class="block text-xs text-gray-400 mb-1">Sort</label>
           <select x-model="filters.sort" @change="loadDocs()"
             class="border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400">
-            <template x-if="activeTab==='original'">
-              <option value="score_asc">Worst first</option>
-            </template>
+            <option value="score_asc">Worst first</option>
             <option value="score_desc">Best first</option>
+            <option value="improved_desc">Most improved</option>
             <option value="pages_desc">Most pages</option>
             <option value="title_asc">Title A–Z</option>
-            <template x-if="activeTab==='upgraded'">
-              <option value="improved_desc">Most improved</option>
-            </template>
           </select>
         </div>
       </div>
@@ -509,22 +492,17 @@ if ('serviceWorker' in navigator) {
 
       <template x-if="!loading || docs.length">
         <div>
-          <!-- Results count -->
-          <template x-if="docsTotal > 0">
-            <div class="text-xs text-gray-400 mono mb-3" x-text="fmt(docsTotal)+' total'"></div>
-          </template>
-
           <!-- Doc rows -->
           <div class="space-y-2 mb-4">
             <template x-for="doc in docs" :key="doc.url">
               <div class="border rounded-xl p-3 flex gap-3 shadow-sm hover:shadow-md transition-shadow"
                    :class="[
                      doc.skip ? 'opacity-40' : '',
-                     doc.status==='processing'                       ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-300' :
-                     doc.status==='pending'                          ? 'bg-amber-50 border-amber-200' :
-                     doc.status==='failed' && activeTab!=='upgraded' ? 'bg-red-50 border-red-200' :
-                     activeTab==='upgraded'                          ? 'bg-green-50 border-green-200' :
-                                                                       'bg-white border-gray-200'
+                     doc.status==='processing' ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-300' :
+                     doc.status==='pending'    ? 'bg-amber-50 border-amber-200' :
+                     doc.status==='failed'     ? 'bg-red-50 border-red-200' :
+                     doc.status==='done'       ? 'bg-green-50 border-green-200' :
+                                                 'bg-white border-gray-200'
                    ]">
 
                 <!-- Thumbnail -->
@@ -539,8 +517,8 @@ if ('serviceWorker' in navigator) {
 
                 <!-- Score block(s) -->
                 <div class="shrink-0 self-stretch flex flex-col gap-1.5 mt-0.5">
-                  <!-- Upgraded tab: three numbers (before/gain/after) when improved, one number when no gain -->
-                  <template x-if="activeTab==='upgraded' && doc.effective_after != null">
+                  <!-- Upgraded doc: show before/gain/after score blocks -->
+                  <template x-if="doc.status==='done' && doc.effective_after != null">
                     <div class="flex flex-col gap-1.5">
                       <!-- No meaningful gain: show before→after if before is known and different -->
                       <template x-if="!(doc.effective_improvement > 0.005)">
@@ -583,8 +561,8 @@ if ('serviceWorker' in navigator) {
                       </template>
                     </div>
                   </template>
-                  <!-- Other tabs: show composite_score -->
-                  <template x-if="activeTab!=='upgraded' || doc.effective_after == null">
+                  <!-- Not upgraded (or no effective_after): show current composite score -->
+                  <template x-if="doc.status!=='done' || doc.effective_after == null">
                     <div class="score-block" :class="scoreBlockCls(doc)">
                       <template x-if="doc.composite_score!=null">
                         <div class="score-num" x-text="Math.round(doc.composite_score*100)+'%'"></div>
@@ -617,10 +595,10 @@ if ('serviceWorker' in navigator) {
                         <span x-text="activityLabel(doc.url) + ' ' + overallPct(processingActivity[doc.url]) + '%'"></span>
                       </span>
                     </template>
-                    <template x-if="activeTab==='upgraded' && doc.status==='failed' && !activityLabel(doc.url)">
+                    <template x-if="doc.status==='failed' && !activityLabel(doc.url)">
                       <span class="shrink-0 text-xs font-semibold text-red-600 bg-red-50 px-2 py-0.5 rounded-full" title="Upgrade failed">✗ failed</span>
                     </template>
-                    <template x-if="activeTab==='upgraded' && doc.status==='done'">
+                    <template x-if="doc.status==='done'">
                       <span class="shrink-0 text-xs font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded-full">✓ upgraded</span>
                     </template>
                   </div>
@@ -731,8 +709,8 @@ if ('serviceWorker' in navigator) {
                     </div>
                   </template>
 
-                  <!-- Upgraded tab: full report panel for done docs -->
-                  <template x-if="activeTab==='upgraded' && doc.status==='done'">
+                  <!-- Full upgrade report panel for done docs -->
+                  <template x-if="doc.status==='done'">
                     <div class="mt-2 rounded-lg border border-green-200 bg-white overflow-hidden text-xs">
                       <!-- Header row: PDF type + score trail -->
                       <div class="flex items-center gap-2 px-3 py-2 bg-green-50 border-b border-green-100 flex-wrap">
@@ -832,11 +810,11 @@ if ('serviceWorker' in navigator) {
                             :title="doc.lang_key==='unknown' ? 'Language undetected — deprioritized in queue' : doc.ai_language"
                             x-text="doc.lang_key==='unknown' ? '?' : doc.ai_language"></span>
                     </template>
-                    <template x-if="effortEstimate(doc) && activeTab==='original'">
+                    <template x-if="effortEstimate(doc) && doc.status !== 'done'">
                       <span :class="(doc.lang_key && doc.lang_key !== 'english' && doc.lang_key !== 'unknown') ? 'text-amber-600 font-bold' : 'text-amber-600 font-medium'"
                             x-text="effortEstimate(doc)"></span>
                     </template>
-                    <template x-if="doc.readable_pages_pct!=null && activeTab!=='upgraded'">
+                    <template x-if="doc.readable_pages_pct!=null && doc.status !== 'done'">
                       <span x-text="Math.round(doc.readable_pages_pct*100)+'% readable'"></span>
                     </template>
                     <a x-show="doc.source_url" :href="doc.source_url" target="_blank" rel="noopener" @click.stop
@@ -849,7 +827,7 @@ if ('serviceWorker' in navigator) {
                               class="px-2 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 active:scale-95 text-xs font-semibold cursor-pointer transition-all"
                               title="View document details">ℹ</button>
                       <!-- Admin-only action buttons -->
-                      <template x-if="adminToken && (activeTab==='original' || activeTab==='all' || activeTab==='adequate' || activeTab==='upgraded')">
+                      <template x-if="adminToken">
                         <div class="flex gap-1.5 items-center">
                           <!-- Processing / queued state -->
                           <template x-if="!doc.skip && doc.status==='pending'">
@@ -885,15 +863,7 @@ if ('serviceWorker' in navigator) {
           <!-- Empty state -->
           <template x-if="!loading && !docs.length">
             <div class="text-center py-12 text-gray-400 text-sm bg-white border border-gray-100 rounded-xl">
-              <template x-if="activeTab==='original'">
-                <div>No image PDFs needing upgrade match the current filters.</div>
-              </template>
-              <template x-if="activeTab==='adequate'">
-                <div>No adequate PDFs found — PDFs scoring ≥70% appear here.</div>
-              </template>
-              <template x-if="activeTab==='upgraded'">
-                <div>No upgraded PDFs yet. Reprocess documents to see results here.</div>
-              </template>
+              No PDF documents match the current filters.
             </div>
           </template>
 
@@ -1222,7 +1192,7 @@ function app() {
     processingActivity: {}, // url -> { stage, pages_done, total_pages }
     expandedDoc: null,
     modalPage: 1,
-    activeTab: 'original',
+    activeTab: 'original', // fixed — no tab switching; 'original' = all PDFs
     showUpgradeInfo: false, showHealthDetail: false,
     serverHealth: null,
     appVersion: '', _buildId: null,
@@ -1374,7 +1344,7 @@ function app() {
       this.upgradingUrls = { ...this.upgradingUrls, [doc.url]: true };
       this._toast('⟳ Queuing for reprocessing…', 10000);
 
-      // Keep upgraded_pdf_path so the doc stays visible in Upgraded tab while reprocessing
+      // Keep upgraded_pdf_path so upgraded card stays visible while reprocessing
       const clearFields = { error: null, status: 'pending',
         effective_after: null, effective_before: null, effective_improvement: null,
         after_score: null, score_improvement: null,
@@ -1644,8 +1614,7 @@ function app() {
             const justDone = this.docs.filter(d => watched.has(d.url) && d.status === 'done');
             if (justDone.length) {
               this._queuedUrls = new Set([...this._queuedUrls].filter(u => !justDone.find(d => d.url === u)));
-              if (this.activeTab !== 'upgraded') this.switchTab('upgraded');
-              this._toast(`✓ ${justDone.length === 1 ? (justDone[0].title || 'Document') : justDone.length + ' documents'} processed`, 5000);
+              this._toast(`✓ ${justDone.length === 1 ? (justDone[0].title || 'Document') : justDone.length + ' documents'} upgraded`, 5000);
             }
           }, 1500);
         }
@@ -1734,13 +1703,8 @@ function app() {
       } catch {}
     },
 
-    async switchTab(tab) {
-      this.activeTab = tab;
-      this.docsPage = 1;
-      this.docs = [];
-      const defaultSort = 'score_asc';
-      this.filters = { q: '', status: '', score_max: 1, sort: defaultSort };
-      await this.loadDocs();
+    async switchTab() {
+      // No-op: tab system removed; single unified list always shown
     },
 
     async loadDocs() {
