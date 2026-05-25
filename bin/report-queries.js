@@ -118,8 +118,8 @@ export const siteDocs = (domain, params) => {
     const vals = [];
 
     if (tab === 'upgraded') {
-      // done = completed; processing = actively running in pipeline
-      wheres.push("u.status IN ('done','processing')");
+      // Include reprocessing docs (pending/submitted) if they already have an upgraded PDF
+      wheres.push("(u.status IN ('done','processing') OR (u.status IN ('pending','submitted') AND u.upgraded_pdf_path IS NOT NULL))");
     }
     // 'original' (default/fallback): all PDFs, no quality filter
 

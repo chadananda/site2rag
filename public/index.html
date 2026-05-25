@@ -1378,9 +1378,10 @@ function app() {
       this.upgradingUrls = { ...this.upgradingUrls, [doc.url]: true };
       this._toast('⟳ Queuing for reprocessing…', 10000);
 
+      // Keep upgraded_pdf_path so the doc stays visible in Upgraded tab while reprocessing
       const clearFields = { error: null, status: 'pending',
         effective_after: null, effective_before: null, effective_improvement: null,
-        upgraded_pdf_path: null, after_score: null, score_improvement: null,
+        after_score: null, score_improvement: null,
         pages_processed: null, method: null };
       this._splicedDoc(doc.url, clearFields);
       if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...this.expandedDoc, ...clearFields };
@@ -1626,15 +1627,28 @@ function app() {
           } else {
             // Still waiting for pipeline to pick it up — preserve local queued indicator
             if (!prior._queuedAt) prior._queuedAt = Date.now();
-            if (Date.now() - prior._queuedAt > 90000) needsRefresh = true; // safety timeout
+            if (Date.now() - prior._queuedAt > 15000) needsRefresh = true;
             else map[url] = prior;
           }
         }
+        // Remember which URLs were queued so we can detect completion after refresh
+        if (!this._queuedUrls) this._queuedUrls = new Set();
+        for (const [url, prior] of Object.entries(this.processingActivity)) {
+          if (prior?.stage === 'queued') this._queuedUrls.add(url);
+        }
         this.processingActivity = map;
         if (needsRefresh && !this._pendingRefreshTimer) {
-          this._pendingRefreshTimer = setTimeout(() => {
+          this._pendingRefreshTimer = setTimeout(async () => {
             this._pendingRefreshTimer = null;
-            this.refresh();
+            const watched = new Set(this._queuedUrls);
+            await this.refresh();
+            // After refresh, check if any watched doc is now done → switch to Upgraded tab
+            const justDone = this.docs.filter(d => watched.has(d.url) && d.status === 'done');
+            if (justDone.length) {
+              this._queuedUrls = new Set([...this._queuedUrls].filter(u => !justDone.find(d => d.url === u)));
+              if (this.activeTab !== 'upgraded') this.switchTab('upgraded');
+              this._toast(`✓ ${justDone.length === 1 ? justDone[0].title || 'Document' : justDone.length + ' documents'} processed — see Upgraded tab`, 5000);
+            }
           }, 1500);
         }
       } catch {}
