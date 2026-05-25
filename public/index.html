@@ -1478,17 +1478,22 @@ function app() {
         const res = await fetch(`${API_BASE}/api/sites`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
-        this.sites = data.sites || (Array.isArray(data) ? data : []);
-        this._updateSumRates(this.sites); this._updateCrawlRates(this.sites);
+        const rawSites = data.sites || (Array.isArray(data) ? data : []);
+        this._updateSumRates(rawSites); this._updateCrawlRates(rawSites);
         this.apiStatus = 'connected'; this.apiError = '';
-        if (!this.activeSite && this.sites.length) {
+        if (!this.activeSite && rawSites.length) {
           const saved = localStorage.getItem('selectedDomain');
-          const match = saved && this.sites.find(s => s.domain === saved);
-          await this.selectSite(match || this.sites[0]);
-        }
-        else if (this.activeSite) {
-          const u = this.sites.find(s => s.domain === this.activeSite.domain);
+          const match = saved && rawSites.find(s => s.domain === saved);
+          const first = match || rawSites[0];
+          this.sites = [first, ...rawSites.filter(s => s.domain !== first.domain)];
+          await this.selectSite(first);
+        } else if (this.activeSite) {
+          const active = this.activeSite.domain;
+          const u = rawSites.find(s => s.domain === active);
           if (u) this.activeSite = u;
+          this.sites = [u || rawSites[0], ...rawSites.filter(s => s.domain !== active)];
+        } else {
+          this.sites = rawSites;
         }
       } catch (e) { this.apiError = e.message; this.apiStatus = 'offline'; }
     },
@@ -1502,9 +1507,16 @@ function app() {
       if (healthRes?.ok) this.serverHealth = await healthRes.json().catch(() => null);
       if (!sitesRes?.ok) return;
       const data = await sitesRes.json();
-      this.sites = data.sites || (Array.isArray(data) ? data : []);
-      this._updateSumRates(this.sites);
-      if (this.activeSite) { const u = this.sites.find(s => s.domain === this.activeSite.domain); if (u) this.activeSite = u; }
+      const refreshedSites = data.sites || (Array.isArray(data) ? data : []);
+      this._updateSumRates(refreshedSites);
+      if (this.activeSite) {
+        const active = this.activeSite.domain;
+        const u = refreshedSites.find(s => s.domain === active);
+        if (u) this.activeSite = u;
+        this.sites = [u || refreshedSites[0], ...refreshedSites.filter(s => s.domain !== active)];
+      } else {
+        this.sites = refreshedSites;
+      }
       this.lastRefresh = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       this.refreshTabCounts();
     },
