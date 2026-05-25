@@ -48,6 +48,27 @@ export const scriptConsistency = (text, lang) => {
 };
 
 /**
+ * Average number of in-script chars per token for word-forming scripts (Arabic/Persian/Hebrew).
+ * Real Persian/Arabic words average 3.5-5 chars. Fragmented garbage (single isolated letters
+ * mixed with ASCII) averages 1.2-1.8 chars. Returns null if lang has no script ranges.
+ */
+const scriptAvgTokenLen = (text, lang) => {
+  const ranges = SCRIPT_RANGES[lang];
+  if (!ranges) return null;
+  const tokens = text.split(/\s+/);
+  const scriptLens = [];
+  for (const tok of tokens) {
+    const inScript = [...tok].filter(c => {
+      const cp = c.codePointAt(0);
+      return cp >= 0x20 && ranges.some(([lo, hi]) => cp >= lo && cp <= hi);
+    });
+    if (inScript.length >= 1) scriptLens.push(inScript.length);
+  }
+  if (scriptLens.length < 5) return null;
+  return scriptLens.reduce((a, b) => a + b, 0) / scriptLens.length;
+};
+
+/**
  * Token distribution quality: reasonable word lengths and variety.
  * Works for any script — does not require a word list.
  * Returns 0-1. Penalises OCR artefacts (all same length, extreme lengths, heavy repetition).
@@ -88,10 +109,20 @@ export const wordQuality = (text, lang = 'english') => {
   const sc = scriptConsistency(text, lang);
   if (sc !== null) {
     const td = tokenDistribution(text);
-    // sc dominates: Latin OCR garbage on an Arabic scan has sc≈0, so td (which can be decent
-    // for any varied token set) cannot rescue the score. Real text in the right script has sc≥0.6.
+    let scriptScore = Math.min(1, sc * 0.85 + td * 0.15);
+    // Word-forming scripts (Arabic/Persian/Hebrew): real words are 3-7 chars of connected script.
+    // Fragmented encoding garbage produces single isolated letters (avg 1.2-1.8 chars/token).
+    // Apply a length penalty: avgLen < 2.5 → garbage; >= 2.5 → no penalty.
+    // Max penalty 0.80 so partially-real docs still score something.
+    const WORD_FORMING = new Set(['arabic', 'persian', 'hebrew']);
+    if (WORD_FORMING.has(lang)) {
+      const avgLen = scriptAvgTokenLen(text, lang);
+      if (avgLen !== null && avgLen < 2.5) {
+        const lenPenalty = Math.min(0.80, (2.5 - avgLen) / 1.5);
+        scriptScore *= (1 - lenPenalty);
+      }
+    }
     // Multiply by printableRatio: if 40% of chars are control-char garbage, max quality is 60%.
-    const scriptScore = Math.min(1, sc * 0.85 + td * 0.15);
     return Math.round(pr * scriptScore * 100) / 100;
   }
   // Latin scripts: word-list + vowel-ratio heuristic
