@@ -172,10 +172,15 @@ export const saveQualityScore = (db, url, contentHash, metrics) => {
   // treat it as an image PDF for scoring purposes.
   let composite = metrics.composite_score;
   let hasText = metrics.has_text_layer;
-  if (hasText === 1 && (metrics.word_quality_estimate ?? 0) < 0.05) {
-    // Custom-encoded text layer — functionally equivalent to image PDF
+  const wq = metrics.word_quality_estimate ?? 0;
+  if (hasText === 1 && wq < 0.05) {
+    // Completely garbled encoding (custom font, mojibake) — treat as image PDF
     hasText = 0;
-    composite = Math.min(composite, 0.15); // cap score so it stays in upgrade queue
+    composite = Math.min(composite, 0.15);
+  } else if (hasText === 1 && wq < 0.8) {
+    // Low-quality text layer: chars/page score inflates composite above threshold even for garbage.
+    // Only skip OCR upgrade when text is genuinely clean (wq >= 0.8 = "perfect").
+    composite = Math.min(composite, 0.65);
   }
   db.prepare(`INSERT OR REPLACE INTO pdf_quality (url, content_hash, scored_at, avg_chars_per_page, readable_pages_pct, has_text_layer, word_quality_estimate, composite_score, pages, pdf_title, excerpt, ai_language, processing_difficulty)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)

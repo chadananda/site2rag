@@ -9,6 +9,7 @@ import { compileRules } from './rules.js';
 import { scorePdf, saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
 export { addBacklink, assembleDocMd } from './export-doc-utils.js';
 import { addBacklink, assembleDocMd } from './export-doc-utils.js';
+import { wordQuality } from './pdf-upgrade/score.js';
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const PDF_PARSE_TIMEOUT_MS = 30_000;
@@ -43,12 +44,17 @@ export const exportTextPdf = async (db, siteConfig, page) => {
   const backlinkFormat = docCfg.backlink_format || 'both';
   const backlinkGranularity = docCfg.backlink_granularity || 'paragraph';
   if (!existsSync(page.local_path)) return false;
-  const existing = db.prepare('SELECT source_hash FROM exports WHERE url=?').get(page.url);
-  if (existing?.source_hash === page.content_hash) return false;
+  const existing = db.prepare('SELECT source_hash, conversion_method FROM exports WHERE url=?').get(page.url);
+  const reprocessMethods = ['stub', 'pdf-text-garbled', 'pdf-text-sparse'];
+  if (existing?.source_hash === page.content_hash && !reprocessMethods.includes(existing?.conversion_method)) return false;
   let buf;
   try { buf = readFileSync(page.local_path); } catch { return false; }
   const pdfData = await tryPdfParse(buf);
-  if (!pdfData || pdfData.text.length / (pdfData.numpages || 1) < minCharsPerPage) return false;
+  if (!pdfData) return false;
+  const charsPerPage = pdfData.text.length / (pdfData.numpages || 1);
+  const lowTextDensity = charsPerPage < minCharsPerPage;
+  const wq = wordQuality(pdfData.text.slice(0, 5000));
+  const lowTextQuality = wq < 0.8;
   const totalPages = pdfData.numpages;
   const pageTexts = pdfData.text.split(/\f/).filter(t => t.trim());
   const pageResults = [];
@@ -62,6 +68,9 @@ export const exportTextPdf = async (db, siteConfig, page) => {
     mime_type: page.mime_type, mirror_path: page.local_path,
     url_path: new URL(page.url).pathname, page_role: 'document',
     ocr_used: false, pages: totalPages,
+    low_text_density: lowTextDensity || undefined,
+    low_text_quality: lowTextQuality || undefined,
+    word_quality_estimate: Math.round(wq * 100) / 100,
     host_page_url: hostRow?.host_url || null, host_page_md: hostRow?.md_path || null,
     backlink_format: backlinkFormat, backlink_granularity: backlinkGranularity
   };
@@ -73,7 +82,7 @@ export const exportTextPdf = async (db, siteConfig, page) => {
   upsertExport(db, {
     url: page.url, md_path: mdPath, source_hash: page.content_hash,
     md_hash: `sha256:${sha256(Buffer.from(fullMd))}`, exported_at: new Date().toISOString(),
-    conversion_method: 'pdf-text', word_count: fullMd.split(/\s+/).filter(Boolean).length,
+    conversion_method: lowTextDensity ? 'pdf-text-sparse' : lowTextQuality ? 'pdf-text-garbled' : 'pdf-text', word_count: fullMd.split(/\s+/).filter(Boolean).length,
     ocr_used: 0, ocr_engines: null, reconciler: null, pages: totalPages,
     agreement_avg: null, flagged_pages: null, host_page_url: hostRow?.host_url || null,
     status: 'ok', error: null
@@ -137,12 +146,14 @@ export const runExportDoc = async (db, siteConfig) => {
   }
 
   // PDFs — text layer extraction only; image PDFs get stub MD and are queued for upgrade
-  const pdfPages = db.prepare("SELECT p.*, e.source_hash as exp_hash FROM pages p LEFT JOIN exports e ON p.url=e.url WHERE p.gone=0 AND p.mime_type='application/pdf' AND p.local_path IS NOT NULL").all();
+  const pdfPages = db.prepare("SELECT p.*, e.source_hash as exp_hash, e.conversion_method as exp_method FROM pages p LEFT JOIN exports e ON p.url=e.url WHERE p.gone=0 AND p.mime_type='application/pdf' AND p.local_path IS NOT NULL").all();
   const upgradeThreshold = siteConfig.pdf_upgrade?.score_threshold ?? 0.7;
 
   for (const page of pdfPages) {
     if (!existsSync(page.local_path)) { stats.failed++; continue; }
-    if (page.exp_hash && page.exp_hash === page.content_hash) { stats.skipped++; continue; }
+    // Skip if already exported at same hash, UNLESS it was low-quality (re-attempt after OCR)
+    const reprocessMethods = ['stub', 'pdf-text-garbled', 'pdf-text-sparse'];
+    if (page.exp_hash && page.exp_hash === page.content_hash && !reprocessMethods.includes(page.exp_method)) { stats.skipped++; continue; }
     try {
       const buf = readFileSync(page.local_path);
       let qualityMetrics;
