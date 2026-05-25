@@ -449,7 +449,7 @@ createServer(async (req, res) => {
     const db = safeOpenDb(domain);
     if (!db) return err(res, 404, 'db unavailable');
     try {
-      const quality = db.prepare('SELECT composite_score, content_hash, has_text_layer, readable_pages_pct FROM pdf_quality WHERE url=?').get(docUrl);
+      const quality = db.prepare('SELECT composite_score, content_hash FROM pdf_quality WHERE url=?').get(docUrl);
       if (!quality) return err(res, 404, 'doc not scored yet');
       const upgradeMethod = url.searchParams.get('method') || 'ocr'; // 'spell-fix' | 'ocr'
       const existing = db.prepare('SELECT status, before_score FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
@@ -486,14 +486,13 @@ createServer(async (req, res) => {
         const page = db.prepare('SELECT local_path FROM pages WHERE url=?').get(docUrl);
         if (page?.local_path && existsSync(page.local_path)) {
           const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: process.env.PIPELINE_API_KEY });
-          // For image PDFs (no text layer), before_score is effectively 0 — the stored before_score may be
-          // corrupted from earlier bugs, and composite_score is now the post-upgrade value.
-          const isImagePdf = !quality.has_text_layer || (quality.readable_pages_pct != null && quality.readable_pages_pct < 0.3);
-          const beforeScore = isImagePdf ? 0 : (existing?.before_score ?? quality.composite_score ?? null);
+          // before_score is set once (at first submission) and never overwritten on reprocess.
+          // Use COALESCE so existing before_score is preserved; only set it if currently NULL.
+          const firstSubmitScore = quality.composite_score ?? null;
           pClient.submitJob({ pdfPath: page.local_path, sourceUrl: docUrl, importance: imp, meta: {} })
             .then(jobId => {
               const db3 = safeOpenDb(domain);
-              if (db3) { try { db3.prepare("UPDATE pdf_upgrade_queue SET status='submitted', started_at=?, pipeline_job_id=?, before_score=? WHERE url=?").run(new Date().toISOString(), jobId, beforeScore, docUrl); } finally { db3.close(); } }
+              if (db3) { try { db3.prepare("UPDATE pdf_upgrade_queue SET status='submitted', started_at=?, pipeline_job_id=?, before_score=COALESCE(before_score,?) WHERE url=?").run(new Date().toISOString(), jobId, firstSubmitScore, docUrl); } finally { db3.close(); } }
               console.log(`[upgrade] submitted ${docUrl.split('/').pop()} → pipeline job ${jobId}`);
             })
             .catch(e => console.error(`[upgrade] pipeline submit failed for ${docUrl.split('/').pop()}: ${e.message}`));
@@ -778,7 +777,7 @@ if (process.env.PIPELINE_URL) {
               try { const md = await pipelinePoller._getRaw(mdPath, 'text'); if (md?.trim()) { const p = join(upgradedDir, `x${hash}.md`); writeFileSync(p, md); savedMd = p; } } catch {}
               db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=COALESCE(?,upgraded_pdf_path), marker_md_path=COALESCE(?,marker_md_path), before_score=COALESCE(before_score,?), after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?`)
                 .run(new Date().toISOString(), savedPdf, savedMd, beforeScore, afterScore, gain, receipt.document?.page_count ?? null, 'pipeline-v2', JSON.stringify(receipt), url);
-              if (afterScore != null) db.prepare('UPDATE pdf_quality SET composite_score=? WHERE url=?').run(afterScore, url);
+              // Never overwrite pdf_quality.composite_score — it holds the original pre-upgrade score.
               // Write metadata + language from receipt to pdf_quality
               const meta = receipt.metadata ?? {};
               const lang = receipt.document?.language ?? null;
