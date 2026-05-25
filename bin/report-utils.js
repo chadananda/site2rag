@@ -82,6 +82,10 @@ export const mapDoc = (d, domain) => {
     : 'text';
   // Parse pipeline receipt for step-by-step method display with per-stage gains
   const _receipt = (() => { try { return JSON.parse(d.receipt_json || 'null'); } catch { return null; } })();
+  // Sum all per-stage cost_usd fields from the receipt to get actual upgrade cost
+  const upgrade_cost_usd = _receipt?.stages
+    ? _receipt.stages.reduce((sum, s) => sum + (s.cost_usd ?? 0), 0)
+    : null;
 
   // Effective before/after scores: priority chain
   const historyBefore = history.find(h => h.score_before != null)?.score_before ?? null;
@@ -149,6 +153,7 @@ export const mapDoc = (d, domain) => {
     receipt_json: undefined,
     spell_fix_cost_usd,
     vision_cost_usd,
+    upgrade_cost_usd,
     archive_url: d.status === 'done' && d.upgraded_pdf_path
       ? `https://${domain}.lnker.com/_upgraded/${d.path_slug || d.url.replace(/[^a-z0-9]/gi,'_').slice(-60)}.pdf`
       : null,

@@ -134,58 +134,62 @@ if ('serviceWorker' in navigator) {
       </div>
     </div>
   </template>
-  <!-- Markdown viewer modal: side-by-side original vs upgraded with unified scroll -->
+  <!-- Markdown viewer modal: single pane if not upgraded, dual pane if upgraded -->
   <template x-if="mdViewerDoc">
     <div class="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" @click.self="mdViewerDoc=null;mdViewerOld=null;mdViewerNew=null">
-      <div class="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-[90vh] flex flex-col overflow-hidden">
-        <div class="flex items-center justify-between px-4 py-2 border-b bg-gray-50 rounded-t-xl shrink-0">
-          <span class="text-sm font-semibold text-gray-700" x-text="mdViewerDoc?.title || 'Markdown'"></span>
-          <div class="flex items-center gap-3">
-            <template x-if="mdViewerDoc">
-              <div class="flex items-center gap-2 text-xs">
-                <a :href="`${API_BASE}/api/docs/download-pdf-upgraded?site=${activeSite?.domain}&url=${encodeURIComponent(mdViewerDoc?.url||'')}`"
-                   download class="text-green-700 hover:underline font-medium">↓ PDF</a>
-                <a :href="`${API_BASE}/api/docs/download-md?site=${activeSite?.domain}&url=${encodeURIComponent(mdViewerDoc?.url||'')}`"
-                   download class="text-blue-600 hover:underline font-medium">↓ Markdown</a>
-                <a :href="`${API_BASE}/api/docs/receipt?site=${activeSite?.domain}&url=${encodeURIComponent(mdViewerDoc?.url||'')}`"
-                   download="receipt.json" class="text-indigo-600 hover:underline font-medium">↓ Receipt</a>
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-6xl h-[92vh] flex flex-col overflow-hidden">
+        <!-- Header -->
+        <div class="flex items-center justify-between px-5 py-3 border-b bg-gray-50 rounded-t-xl shrink-0">
+          <div class="min-w-0">
+            <div class="text-sm font-semibold text-gray-800 truncate" x-text="mdViewerDoc?.title || mdViewerDoc?.url || 'Markdown'"></div>
+            <div class="text-xs text-gray-400 mono truncate" x-text="mdViewerDoc?.url"></div>
+          </div>
+          <div class="flex items-center gap-4 shrink-0 ml-4">
+            <div class="flex items-center gap-3 text-xs">
+              <a :href="`${API_BASE}/api/docs/download-md?site=${activeSite?.domain}&url=${encodeURIComponent(mdViewerDoc?.url||'')}`"
+                 download class="text-indigo-600 hover:underline font-medium">↓ MD</a>
+              <template x-if="mdViewerNew">
+                <a :href="`${API_BASE}/api/docs/download-md-upgraded?site=${activeSite?.domain}&url=${encodeURIComponent(mdViewerDoc?.url||'')}`"
+                   download class="text-green-700 hover:underline font-medium">↓ MD (upgraded)</a>
+              </template>
+            </div>
+            <button @click="mdViewerDoc=null;mdViewerOld=null;mdViewerNew=null" class="text-gray-400 hover:text-gray-700 text-2xl leading-none">&times;</button>
+          </div>
+        </div>
+        <!-- Column headers: only shown for dual pane -->
+        <template x-if="mdViewerNew">
+          <div class="flex shrink-0 border-b text-xs font-semibold text-gray-500 bg-gray-50">
+            <div class="flex-1 px-5 py-1.5 border-r text-gray-400">Original</div>
+            <div class="flex-1 px-5 py-1.5 text-green-700">Upgraded</div>
+          </div>
+        </template>
+        <!-- Loading state -->
+        <template x-if="mdViewerOld === null">
+          <div class="flex-1 flex items-center justify-center text-gray-300 text-sm">Loading…</div>
+        </template>
+        <!-- Content: dual pane when upgraded, single pane otherwise -->
+        <template x-if="mdViewerOld !== null">
+          <div class="flex flex-1 overflow-hidden">
+            <!-- Left / only pane (original) -->
+            <div class="overflow-auto p-6" x-ref="mdLeft"
+                 :class="mdViewerNew ? 'flex-1 border-r' : 'flex-1'"
+                 @scroll="mdViewerNew && ($refs.mdRight.scrollTop = $refs.mdLeft.scrollTop / Math.max(1,$refs.mdLeft.scrollHeight-$refs.mdLeft.clientHeight) * Math.max(1,$refs.mdRight.scrollHeight-$refs.mdRight.clientHeight))">
+              <template x-if="!mdViewerOld">
+                <div class="text-gray-300 text-sm text-center mt-12">no original markdown</div>
+              </template>
+              <template x-if="mdViewerOld">
+                <pre class="whitespace-pre-wrap text-sm font-mono text-gray-600 leading-relaxed" x-text="mdViewerOld"></pre>
+              </template>
+            </div>
+            <!-- Right pane (upgraded) — only shown when upgraded -->
+            <template x-if="mdViewerNew">
+              <div class="flex-1 overflow-auto p-6" x-ref="mdRight"
+                   @scroll="$refs.mdLeft.scrollTop = $refs.mdRight.scrollTop / Math.max(1,$refs.mdRight.scrollHeight-$refs.mdRight.clientHeight) * Math.max(1,$refs.mdLeft.scrollHeight-$refs.mdLeft.clientHeight)">
+                <pre class="whitespace-pre-wrap text-sm font-mono text-gray-800 leading-relaxed" x-text="mdViewerNew"></pre>
               </div>
             </template>
-            <button @click="mdViewerDoc=null;mdViewerOld=null;mdViewerNew=null" class="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
           </div>
-        </div>
-        <!-- Column headers -->
-        <div class="flex shrink-0 border-b text-xs font-semibold text-gray-500 bg-gray-50">
-          <div class="flex-1 px-4 py-1.5 border-r">Original</div>
-          <div class="flex-1 px-4 py-1.5 text-green-700">Upgraded</div>
-        </div>
-        <!-- Scroll container — JS syncs scroll percentage -->
-        <div class="flex flex-1 overflow-hidden" x-ref="mdScrollOuter">
-          <div class="flex-1 overflow-auto border-r p-4" x-ref="mdLeft"
-               @scroll="$refs.mdRight.scrollTop = $refs.mdLeft.scrollTop / Math.max(1,$refs.mdLeft.scrollHeight-$refs.mdLeft.clientHeight) * Math.max(1,$refs.mdRight.scrollHeight-$refs.mdRight.clientHeight)">
-            <template x-if="mdViewerOld === null">
-              <div class="text-gray-300 text-xs text-center mt-10">loading…</div>
-            </template>
-            <template x-if="mdViewerOld === ''">
-              <div class="text-gray-300 text-xs text-center mt-10">no original markdown</div>
-            </template>
-            <template x-if="mdViewerOld">
-              <pre class="whitespace-pre-wrap text-xs font-mono text-gray-500 leading-relaxed" x-text="mdViewerOld"></pre>
-            </template>
-          </div>
-          <div class="flex-1 overflow-auto p-4" x-ref="mdRight"
-               @scroll="$refs.mdLeft.scrollTop = $refs.mdRight.scrollTop / Math.max(1,$refs.mdRight.scrollHeight-$refs.mdRight.clientHeight) * Math.max(1,$refs.mdLeft.scrollHeight-$refs.mdLeft.clientHeight)">
-            <template x-if="mdViewerNew === null">
-              <div class="text-gray-300 text-xs text-center mt-10">loading…</div>
-            </template>
-            <template x-if="mdViewerNew === ''">
-              <div class="text-gray-300 text-xs text-center mt-10">no upgraded markdown yet — reprocess to generate</div>
-            </template>
-            <template x-if="mdViewerNew">
-              <pre class="whitespace-pre-wrap text-xs font-mono text-gray-800 leading-relaxed" x-text="mdViewerNew"></pre>
-            </template>
-          </div>
-        </div>
+        </template>
       </div>
     </div>
   </template>
@@ -577,12 +581,37 @@ if ('serviceWorker' in navigator) {
 
                 <!-- Main content -->
                 <div class="flex-1 min-w-0">
-                  <!-- Title row -->
+                  <!-- Title row: title + admin action buttons top-right -->
                   <div class="flex items-start gap-2 mb-0.5">
-                    <a :href="pdfSrc(doc)" target="_blank" rel="noopener" @click.stop
-                       class="font-semibold text-sm text-gray-900 hover:text-blue-600 leading-snug line-clamp-2 flex-1"
-                       x-text="docTitle(doc)"></a>
-                    <!-- Status badges: visible on any tab -->
+                    <div class="flex-1 min-w-0">
+                      <a :href="pdfSrc(doc)" target="_blank" rel="noopener" @click.stop
+                         class="font-semibold text-sm text-gray-900 hover:text-blue-600 leading-snug line-clamp-2"
+                         x-text="docTitle(doc)"></a>
+                      <!-- "was: old title" hint when AI upgraded the title -->
+                      <template x-if="doc.status==='done' && doc.ai_title && doc.pdf_title && doc.ai_title !== doc.pdf_title">
+                        <div class="text-xs text-gray-400 truncate" x-text="'was: ' + doc.pdf_title"></div>
+                      </template>
+                    </div>
+                    <!-- Admin action buttons top-right -->
+                    <template x-if="adminToken">
+                      <div class="flex gap-1 items-center shrink-0">
+                        <template x-if="!doc.skip && doc.status==='pending'">
+                          <button @click.stop="queueUpgrade(doc)"
+                                  class="px-2 py-0.5 rounded border border-indigo-300 text-indigo-600 bg-indigo-50 hover:bg-indigo-200 hover:border-indigo-400 active:scale-95 text-xs font-semibold cursor-pointer transition-all">↑ boost</button>
+                        </template>
+                        <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending'">
+                          <button @click.stop="queueUpgrade(doc, 'ocr')"
+                                  class="px-2 py-0.5 rounded border text-xs font-semibold transition-all cursor-pointer active:scale-95 border-indigo-200 text-indigo-600 bg-white hover:bg-indigo-100 hover:border-indigo-400"
+                                  title="Upgrade PDF: improve text layer, convert to PDF/A archival format"
+                                  x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ reprocess' : '⬆ upgrade'"></button>
+                        </template>
+                        <button @click.stop="toggleSkip(doc)"
+                                class="px-2 py-0.5 rounded border text-xs transition-all cursor-pointer active:scale-95"
+                                :class="doc.skip ? 'border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100' : 'border-gray-200 text-gray-400 hover:text-amber-600 hover:border-amber-300 hover:bg-amber-50'"
+                                x-text="doc.skip ? '⊘' : 'skip'"></button>
+                      </div>
+                    </template>
+                    <!-- Status badges -->
                     <template x-if="doc.status==='pending' && !activityLabel(doc.url)">
                       <span class="shrink-0 flex items-center gap-1.5 text-xs font-semibold text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full">
                         <span class="inline-block w-1.5 h-1.5 rounded-full bg-amber-400 processing-pulse shrink-0"></span>
@@ -820,34 +849,32 @@ if ('serviceWorker' in navigator) {
                     <a x-show="doc.source_url" :href="doc.source_url" target="_blank" rel="noopener" @click.stop
                        class="hover:text-blue-500 truncate max-w-xs"
                        x-text="'↗ '+(doc.source_url||'').replace(/^https?:\/\//,'').split('/')[0]"></a>
-                    <!-- Card action buttons -->
-                    <div class="ml-auto flex gap-1.5 items-center flex-shrink-0">
-                      <!-- View detail button (always visible) -->
-                      <button @click.stop="openDetail(doc)"
-                              class="px-2 py-0.5 rounded border border-gray-200 text-gray-400 hover:text-blue-600 hover:border-blue-300 hover:bg-blue-50 active:scale-95 text-xs font-semibold cursor-pointer transition-all"
-                              title="View document details">ℹ</button>
-                      <!-- Admin-only action buttons -->
-                      <template x-if="adminToken">
-                        <div class="flex gap-1.5 items-center">
-                          <!-- Processing / queued state -->
-                          <template x-if="!doc.skip && doc.status==='pending'">
-                            <button @click.stop="queueUpgrade(doc)"
-                                    class="px-2 py-0.5 rounded border border-indigo-300 text-indigo-600 bg-indigo-50 hover:bg-indigo-200 hover:border-indigo-400 active:scale-95 text-xs font-semibold cursor-pointer transition-all">↑ boost</button>
-                          </template>
-                          <!-- Upgrade / Reprocess button -->
-                          <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending'">
-                            <button @click.stop="queueUpgrade(doc, 'ocr')"
-                                    class="px-2 py-0.5 rounded border text-xs font-semibold transition-all cursor-pointer active:scale-95 border-indigo-200 text-indigo-600 bg-white hover:bg-indigo-100 hover:border-indigo-400"
-                                    title="Upgrade PDF: improve text layer, convert to PDF/A archival format"
-                                    x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ reprocess' : '⬆ upgrade'"></button>
-                          </template>
-                          <!-- Skip toggle -->
-                          <button @click.stop="toggleSkip(doc)"
-                                  class="px-2 py-0.5 rounded border text-xs transition-all cursor-pointer active:scale-95"
-                                  :class="doc.skip ? 'border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100 hover:border-amber-400' : 'border-gray-200 text-gray-400 bg-white hover:text-amber-600 hover:border-amber-300 hover:bg-amber-50'"
-                                  x-text="doc.skip ? '⊘' : 'skip'"></button>
-                        </div>
-                      </template>
+                    <!-- Card viewer links + admin action buttons -->
+                    <div class="ml-auto flex gap-1.5 items-center flex-shrink-0 flex-wrap">
+                      <!-- Viewer links (always visible) -->
+                      <!-- PDF (original) — colored by composite_score -->
+                      <a :href="doc.url" target="_blank" rel="noopener" @click.stop
+                         class="px-2 py-0.5 rounded border text-xs font-semibold transition-all active:scale-95"
+                         :class="scoreColorCls(doc.composite_score)"
+                         :title="'Open original PDF' + (doc.composite_score != null ? ' · '+Math.round(doc.composite_score*100)+'%' : '')"
+                         x-text="'PDF' + (doc.composite_score != null ? ' '+Math.round(doc.composite_score*100)+'%' : '')"></a>
+                      <!-- Markdown viewer -->
+                      <button @click.stop="openMdViewer(doc)"
+                         class="px-2 py-0.5 rounded border border-indigo-200 text-indigo-600 hover:bg-indigo-50 active:scale-95 text-xs font-semibold transition-all cursor-pointer"
+                         title="View extracted markdown">Markdown</button>
+                      <!-- PDF/A (upgraded) — colored by after_score, grayed if not upgraded -->
+                      <a :href="(doc.status==='done' && doc.upgraded_pdf_path) ? `${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}` : null"
+                         target="_blank" rel="noopener" @click.stop
+                         class="px-2 py-0.5 rounded border text-xs font-semibold transition-all"
+                         :class="(doc.status==='done' && doc.upgraded_pdf_path) ? scoreColorCls(doc.effective_after ?? doc.after_score) + ' active:scale-95' : 'border-gray-100 text-gray-300 cursor-not-allowed pointer-events-none'"
+                         :title="(doc.status==='done' && doc.upgraded_pdf_path) ? 'Open upgraded PDF/A' + (doc.effective_after != null ? ' · '+Math.round(doc.effective_after*100)+'%' : '') : 'Not yet upgraded'"
+                         x-text="'PDF/A' + ((doc.status==='done' && doc.effective_after != null) ? ' '+Math.round(doc.effective_after*100)+'%' : '')"></a>
+                      <!-- Receipt — grayed if not upgraded; shows actual cost when available -->
+                      <button @click.stop="doc.status==='done' && (receiptUrl=`/receipt.html?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`)"
+                         class="px-2 py-0.5 rounded border text-xs font-semibold transition-all"
+                         :class="doc.status==='done' ? 'border-purple-200 text-purple-600 hover:bg-purple-50 active:scale-95 cursor-pointer' : 'border-gray-100 text-gray-300 cursor-not-allowed'"
+                         :title="doc.status==='done' ? 'View upgrade analysis receipt' : 'No receipt until upgraded'"
+                         x-text="'Receipt' + (doc.upgrade_cost_usd > 0 ? ' $'+doc.upgrade_cost_usd.toFixed(2) : '')"></button>
                     </div>
                   </div>
 
@@ -1143,6 +1170,14 @@ function scoreLabel(doc) {
   return { label: 'Good Quality', cls: 'text-green-700' };
 }
 
+// Border+text color for a score pill/button: red < 0.45, blue 0.45–0.85, green >= 0.85
+function scoreColorCls(s) {
+  if (s == null) return 'border-gray-200 text-gray-400 hover:bg-gray-50';
+  if (s < 0.45) return 'border-red-200 text-red-600 hover:bg-red-50';
+  if (s < 0.85) return 'border-blue-200 text-blue-600 hover:bg-blue-50';
+  return 'border-green-200 text-green-700 hover:bg-green-50';
+}
+
 function effortEstimate(doc) {
   const mins = doc.effort_mins;
   if (!mins || mins <= 0) return null;
@@ -1203,7 +1238,7 @@ function app() {
     mdViewerDoc: null, mdViewerOld: null, mdViewerNew: null,
     focusDomain: null,
     upgradingUrls: {},
-    fmt, scorePillCls, scoreBlockCls, scoreLabel, effortEstimate, cannotUpgrade, langBadgeCls,
+    fmt, scorePillCls, scoreBlockCls, scoreLabel, scoreColorCls, effortEstimate, cannotUpgrade, langBadgeCls,
 
     fmtUptime(s) {
       if (s < 60) return s + 's';

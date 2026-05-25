@@ -88,7 +88,7 @@ const DOC_SELECT = `
   SELECT p.url, p.path_slug, p.last_seen_at,
          q.composite_score, q.pages, q.word_quality_estimate, q.readable_pages_pct,
          q.avg_chars_per_page, q.has_text_layer, q.skip,
-         COALESCE(q.ai_title, q.pdf_title) as title,
+         COALESCE(q.ai_title, q.pdf_title) as title, q.ai_title, q.pdf_title,
          q.excerpt, q.ai_summary, q.ai_author, q.ai_summarized_at,
          q.thumbnail_path, q.summary_tier, q.ai_language,
          h.host_url as source_url,
