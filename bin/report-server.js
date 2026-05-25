@@ -367,6 +367,20 @@ createServer(async (req, res) => {
     return res.end(readFileSync(row.md_path));
   }
 
+  if (path === '/api/docs/download-md-upgraded') {
+    const domain = url.searchParams.get('site');
+    const docUrl = url.searchParams.get('url');
+    if (!domain || !docUrl) return err(res, 400, 'site and url params required');
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, 'db unavailable');
+    let row;
+    try { row = db.prepare('SELECT marker_md_path FROM pdf_upgrade_queue WHERE url=?').get(docUrl); }
+    finally { db.close(); }
+    if (!row?.marker_md_path || !existsSync(row.marker_md_path)) return err(res, 404, 'no upgraded markdown');
+    res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', ...cacheHeaders(3600) });
+    return res.end(readFileSync(row.marker_md_path));
+  }
+
   if (path === '/api/docs/upgrade' && req.method === 'POST') {
     if (!isAdmin(req)) return err(res, 401, 'Admin password required');
     const domain = url.searchParams.get('site');

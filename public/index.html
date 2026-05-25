@@ -1249,7 +1249,7 @@ function app() {
       // Fetch both in parallel
       const [oldMd, newMd] = await Promise.all([
         fetchMd('/api/docs/download-md-original'),
-        fetchMd('/api/docs/download-md'),
+        fetchMd('/api/docs/download-md-upgraded'),
       ]);
       this.mdViewerOld = oldMd;
       this.mdViewerNew = newMd;
