@@ -595,7 +595,7 @@ if ('serviceWorker' in navigator) {
                 </div>
 
                 <!-- Main content -->
-                <div class="flex-1 min-w-0">
+                <div class="flex-1 min-w-0 flex flex-col">
                   <!-- Title row: title + admin action buttons top-right -->
                   <div class="flex items-start gap-2 mb-0.5">
                     <div class="flex-1 min-w-0">
@@ -871,8 +871,8 @@ if ('serviceWorker' in navigator) {
                     <div class="text-xs text-red-500 mt-1 truncate" x-text="'Error: '+doc.error"></div>
                   </template>
 
-                  <!-- Viewer buttons: right-aligned at bottom of content column -->
-                  <div class="flex gap-1.5 items-center flex-wrap justify-end mt-2">
+                  <!-- Viewer buttons pinned to bottom of content column -->
+                  <div class="flex gap-1.5 items-center flex-wrap justify-end mt-auto pt-2">
                     <button @click.stop="openPdfViewer(doc.url, docTitle(doc))"
                        class="px-2.5 py-1 rounded border text-xs font-semibold shadow-sm transition-all active:scale-95 cursor-pointer"
                        :class="scoreColorCls(doc.composite_score)"
