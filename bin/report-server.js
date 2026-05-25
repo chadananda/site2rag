@@ -722,3 +722,48 @@ createServer(async (req, res) => {
 }).listen(PORT, '127.0.0.1', () => {
   console.log(`[report-server] API listening on http://127.0.0.1:${PORT}`);
 });
+
+// Poll pipeline jobs submitted via the reprocess button (upgrade worker is stopped)
+if (process.env.PIPELINE_URL) {
+  const pipelinePoller = new PipelineClient({ baseUrl: process.env.PIPELINE_URL });
+  const sha256 = (s) => createHash('sha256').update(s).digest('hex');
+  const pollPipelineJobs = async () => {
+    let sites;
+    try { ({ sites } = loadConfig()); } catch { return; }
+    for (const site of sites) {
+      let domain;
+      try { domain = new URL(site.url).hostname; } catch { continue; }
+      const db = safeOpenDb(domain);
+      if (!db) continue;
+      try {
+        const jobs = db.prepare("SELECT url, pipeline_job_id, before_score FROM pdf_upgrade_queue WHERE pipeline_job_id IS NOT NULL AND status NOT IN ('done','failed')").all();
+        for (const { url, pipeline_job_id: jobId, before_score } of jobs) {
+          try {
+            const job = await pipelinePoller.getJob(jobId);
+            if (job.status === 'done') {
+              let receipt = job.receipt ?? {};
+              try { const r2 = await pipelinePoller._get(`/jobs/${jobId}/receipt`); if (r2?.quality) receipt = r2; } catch {}
+              const afterScore = receipt.quality?.final ?? null;
+              const upgradedDir = join(getMirrorRoot(), '..', 'websites_mirror', domain, '.upgraded');
+              mkdirSync(upgradedDir, { recursive: true });
+              const hash = sha256(url).slice(0, 16);
+              let savedPdf = null, savedMd = null;
+              try { const buf = await pipelinePoller.getPdf(jobId); const p = join(upgradedDir, `x${hash}.pdf`); writeFileSync(p, buf); savedPdf = p; } catch {}
+              try { const md = await pipelinePoller.getMarkdown(jobId); if (md?.trim()) { const p = join(upgradedDir, `x${hash}.md`); writeFileSync(p, md); savedMd = p; } } catch {}
+              db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, marker_md_path=?, after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?`)
+                .run(new Date().toISOString(), savedPdf, savedMd, afterScore, receipt.quality?.gain ?? null, receipt.document?.page_count ?? null, 'pipeline-v2', JSON.stringify(receipt), url);
+              if (afterScore != null) db.prepare('UPDATE pdf_quality SET composite_score=? WHERE url=?').run(afterScore, url);
+              console.log(`[poll] done: ${url.split('/').pop()} score=${afterScore}`);
+            } else if (job.status === 'failed') {
+              db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=?, pipeline_job_id=NULL WHERE url=?").run(new Date().toISOString(), (job.error || 'failed').slice(0, 300), url);
+            }
+          } catch (e) {
+            if (e.message?.includes('404')) db.prepare("UPDATE pdf_upgrade_queue SET status='failed', error='job expired', pipeline_job_id=NULL WHERE url=?").run(url);
+          }
+        }
+      } finally { db.close(); }
+    }
+  };
+  const runPoller = () => pollPipelineJobs().catch(e => console.error('[poll] error:', e.message)).finally(() => setTimeout(runPoller, 10000));
+  setTimeout(runPoller, 5000);
+}
