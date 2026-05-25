@@ -9,7 +9,7 @@ import { compileRules } from './rules.js';
 import { scorePdf, saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
 export { addBacklink, assembleDocMd } from './export-doc-utils.js';
 import { addBacklink, assembleDocMd } from './export-doc-utils.js';
-import { wordQuality } from './pdf-upgrade/score.js';
+import { wordQuality, detectLanguage, detectLanguageFromUrl } from './pdf-upgrade/score.js';
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const PDF_PARSE_TIMEOUT_MS = 30_000;
@@ -53,7 +53,9 @@ export const exportTextPdf = async (db, siteConfig, page) => {
   if (!pdfData) return false;
   const charsPerPage = pdfData.text.length / (pdfData.numpages || 1);
   const lowTextDensity = charsPerPage < minCharsPerPage;
-  const wq = wordQuality(pdfData.text.slice(0, 5000));
+  // Language-aware quality: use URL language hint first, then detect from text
+  const lang = detectLanguageFromUrl(page.url) || detectLanguage(pdfData.text.slice(0, 2000));
+  const wq = wordQuality(pdfData.text.slice(0, 5000), lang);
   const lowTextQuality = wq < 0.8;
   const totalPages = pdfData.numpages;
   const pageTexts = pdfData.text.split(/\f/).filter(t => t.trim());
