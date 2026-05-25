@@ -850,7 +850,7 @@ if ('serviceWorker' in navigator) {
                        class="px-2.5 py-1 rounded border text-xs font-semibold shadow-sm transition-all"
                        :class="doc.status==='done' ? 'border-purple-200 bg-purple-50 text-purple-600 hover:bg-purple-100 active:scale-95 cursor-pointer' : 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'"
                        :title="doc.status==='done' ? 'View upgrade analysis receipt' : 'No receipt until upgraded'"
-                       x-text="'Receipt' + (doc.upgrade_cost_usd > 0 ? ' $'+doc.upgrade_cost_usd.toFixed(2) : '')"></button>
+                       x-text="'Receipt' + (doc.upgrade_cost_usd > 0 ? ' $'+(doc.upgrade_cost_usd < 0.01 ? doc.upgrade_cost_usd.toFixed(4) : doc.upgrade_cost_usd.toFixed(2)) : '')"></button>
                   </div>
                 </div>
               </div>

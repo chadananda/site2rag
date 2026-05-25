@@ -86,9 +86,9 @@ export const mapDoc = (d, domain) => {
     : 'text';
   // Parse pipeline receipt for step-by-step method display with per-stage gains
   const _receipt = (() => { try { return JSON.parse(d.receipt_json || 'null'); } catch { return null; } })();
-  // Sum all per-stage cost_usd fields from the receipt to get actual upgrade cost
-  const upgrade_cost_usd = _receipt?.stages
-    ? _receipt.stages.reduce((sum, s) => sum + (s.cost_usd ?? 0), 0)
+  // Total cost: prefer receipt.processing.cost_usd, fall back to summing stages
+  const upgrade_cost_usd = _receipt
+    ? (_receipt.processing?.cost_usd ?? (_receipt.stages?.reduce((sum, s) => sum + (s.cost_usd ?? 0), 0) ?? null))
     : null;
 
   // Effective before/after scores: priority chain
