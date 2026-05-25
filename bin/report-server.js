@@ -359,12 +359,22 @@ createServer(async (req, res) => {
     if (!domain || !docUrl) return err(res, 400, 'site and url params required');
     const db = safeOpenDb(domain);
     if (!db) return err(res, 404, 'db unavailable');
-    let row;
-    try { row = db.prepare('SELECT md_path FROM exports WHERE url=?').get(docUrl); }
-    finally { db.close(); }
+    let row, meta;
+    try {
+      row  = db.prepare('SELECT md_path FROM exports WHERE url=?').get(docUrl);
+      meta = db.prepare('SELECT title, before_score FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
+    } finally { db.close(); }
     if (!row?.md_path || !existsSync(row.md_path)) return err(res, 404, 'original markdown not found');
+    let content = readFileSync(row.md_path, 'utf8');
+    if (!content.startsWith('---')) {
+      const fm = ['---', `source_url: ${docUrl}`, `domain: ${domain}`,
+        meta?.title ? `title: ${meta.title}` : null,
+        meta?.before_score != null ? `quality_score: ${Math.round(meta.before_score * 100)}%` : null,
+        `version: original`, '---', ''].filter(x => x !== null).join('\n');
+      content = fm + content;
+    }
     res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', ...cacheHeaders(3600) });
-    return res.end(readFileSync(row.md_path));
+    return res.end(content);
   }
 
   if (path === '/api/docs/download-md-upgraded') {
@@ -374,11 +384,24 @@ createServer(async (req, res) => {
     const db = safeOpenDb(domain);
     if (!db) return err(res, 404, 'db unavailable');
     let row;
-    try { row = db.prepare('SELECT marker_md_path FROM pdf_upgrade_queue WHERE url=?').get(docUrl); }
+    try { row = db.prepare('SELECT marker_md_path, title, after_score, before_score, finished_at, method FROM pdf_upgrade_queue WHERE url=?').get(docUrl); }
     finally { db.close(); }
     if (!row?.marker_md_path || !existsSync(row.marker_md_path)) return err(res, 404, 'no upgraded markdown');
+    let content = readFileSync(row.marker_md_path, 'utf8');
+    if (!content.startsWith('---')) {
+      const gain = (row.after_score != null && row.before_score != null)
+        ? `+${Math.round((row.after_score - row.before_score) * 100)}%` : null;
+      const fm = ['---', `source_url: ${docUrl}`, `domain: ${domain}`,
+        row.title ? `title: ${row.title}` : null,
+        row.after_score != null ? `quality_score: ${Math.round(row.after_score * 100)}%` : null,
+        gain ? `quality_gain: ${gain}` : null,
+        row.finished_at ? `upgraded_at: ${row.finished_at}` : null,
+        row.method ? `method: ${row.method}` : null,
+        `version: upgraded`, '---', ''].filter(x => x !== null).join('\n');
+      content = fm + content;
+    }
     res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', ...cacheHeaders(3600) });
-    return res.end(readFileSync(row.marker_md_path));
+    return res.end(content);
   }
 
   if (path === '/api/docs/upgrade' && req.method === 'POST') {

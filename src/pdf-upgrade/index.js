@@ -147,16 +147,17 @@ const checkPipelineJobs = async (db, domain, openDbs = []) => {
         } catch (dlErr) {
           log(`PDF download failed for ${jobId}: ${dlErr.message}`);
         }
+        let savedMdPath = null;
         try {
           const md = await pipelineClient.getMarkdown(jobId);
-          if (md?.trim()) writeFileSync(localMdPath, md);
+          if (md?.trim()) { writeFileSync(localMdPath, md); savedMdPath = localMdPath; }
         } catch {}
 
         db.prepare(`UPDATE pdf_upgrade_queue
-          SET status='done', finished_at=?, upgraded_pdf_path=?,
+          SET status='done', finished_at=?, upgraded_pdf_path=?, marker_md_path=?,
               after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL
           WHERE url=?`)
-          .run(now(), savedPdfPath,
+          .run(now(), savedPdfPath, savedMdPath,
             afterScore, receipt.quality?.gain ?? null,
             receipt.document?.page_count ?? receipt.page_count ?? null,
             'pipeline-v2', JSON.stringify(receipt), url);
