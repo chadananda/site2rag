@@ -338,13 +338,19 @@ createServer(async (req, res) => {
     if (!domain || !docUrl) return err(res, 400, 'site and url params required');
     const db = safeOpenDb(domain);
     if (!db) return err(res, 404, 'db unavailable');
-    let row;
-    try { row = db.prepare('SELECT md_path FROM exports WHERE url=?').get(docUrl); }
-    finally { db.close(); }
-    if (!row?.md_path || !existsSync(row.md_path)) return err(res, 404, 'markdown not found');
-    const filename = row.md_path.split('/').pop() || 'document.md';
+    let upgradeRow, exportRow;
+    try {
+      upgradeRow = db.prepare('SELECT marker_md_path FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
+      exportRow  = db.prepare('SELECT md_path FROM exports WHERE url=?').get(docUrl);
+    } finally { db.close(); }
+    // Prefer upgraded OCR markdown; fall back to pre-upgrade export
+    const mdPath = (upgradeRow?.marker_md_path && existsSync(upgradeRow.marker_md_path))
+      ? upgradeRow.marker_md_path
+      : (exportRow?.md_path && existsSync(exportRow.md_path)) ? exportRow.md_path : null;
+    if (!mdPath) return err(res, 404, 'markdown not found');
+    const filename = mdPath.split('/').pop() || 'document.md';
     res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Disposition': `attachment; filename="${filename}"`, ...cacheHeaders(3600) });
-    return res.end(readFileSync(row.md_path));
+    return res.end(readFileSync(mdPath));
   }
 
   if (path === '/api/docs/upgrade' && req.method === 'POST') {
