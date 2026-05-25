@@ -1262,12 +1262,16 @@ function app() {
             return r.ok ? await r.text() : '';
           } catch { return ''; }
         };
+        const stripFm = s => s.startsWith('---') ? s.replace(/^---[\s\S]*?---\n?/, '') : s;
         const [oldMd, newMd] = await Promise.all([
           fetchMd('/api/docs/download-md-original'),
           fetchMd('/api/docs/download-md-upgraded'),
         ]);
         this.mdViewerOld = oldMd;
-        this.mdViewerNew = newMd;
+        // If bodies are identical, note it but still show both
+        this.mdViewerNew = (oldMd && newMd && stripFm(oldMd) === stripFm(newMd))
+          ? '(OCR text unchanged by pipeline — content identical to original)\n\n' + newMd
+          : newMd;
       } catch { this.mdViewerOld = ''; this.mdViewerNew = ''; }
     },
 
