@@ -623,7 +623,7 @@ load().then(r => {
     ml('Type', docType),
     ml('Language', lang),
     ml('Pages', pageCount ?? '—'),
-    ml('Avg chars/page', Math.round(avgChars).toLocaleString()),
+    avgChars > 0 ? ml('Avg chars/page', Math.round(avgChars).toLocaleString()) : null,
     ml('Pipeline ver.', r.pipeline_version ?? '—'),
   ].join('');
 

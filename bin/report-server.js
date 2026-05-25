@@ -300,13 +300,20 @@ createServer(async (req, res) => {
     const db = safeOpenDb(domain);
     if (!db) return err(res, 404, 'db unavailable');
     let row;
-    try { row = db.prepare("SELECT receipt_json FROM pdf_upgrade_queue WHERE url=?").get(docUrl); }
+    try { row = db.prepare("SELECT receipt_json, before_score, after_score FROM pdf_upgrade_queue WHERE url=?").get(docUrl); }
     finally { db.close(); }
     if (!row?.receipt_json) return err(res, 404, 'receipt not available');
     let receipt;
     try { receipt = JSON.parse(row.receipt_json); } catch { return err(res, 500, 'receipt parse error'); }
-    // Inject source_url from query param — pipeline only knows the local file path
+    // Inject source_url — pipeline only knows the local file path, not the original URL
     if (!receipt.source_url && !(receipt.source?.url)) receipt.source_url = docUrl;
+    // Inject DB scores into old format that lacks composite_score in the document block
+    if (!receipt.quality && row.before_score != null) {
+      if (!receipt.document) receipt.document = {};
+      receipt.document.composite_score = row.before_score;
+      receipt.processing = receipt.processing ?? {};
+      receipt.processing.final_score = row.after_score ?? null;
+    }
     return json(res, receipt);
   }
 
