@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>com.site2rag.worker-agent</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/xSwarm/site2rag-venv/bin/python</string>
+    <string>/Users/xSwarm/.local/bin/worker-agent.py</string>
+    <string>--port</string><string>49910</string>
+    <string>--registry</string><string>http://100.77.148.41:49900</string>
+    <string>--public-url</string><string>http://100.98.204.79:49910</string>
+    <string>--capacity-limit</string><string>0.80</string>
+  </array>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>WORKER_PORT</key><string>49910</string>
+    <key>WORKER_REGISTRY</key><string>http://100.77.148.41:49900</string>
+    <key>CAPACITY_LIMIT</key><string>0.80</string>
+    <key>SERVE_POOL_SIZE</key><string>0</string>
+    <key>MIN_FREE_DISK_GB</key><string>0.5</string>
+    <key>PYTORCH_ENABLE_MPS_FALLBACK</key><string>1</string>
+    <key>TMPDIR</key><string>/Volumes/Fat-Library/tmp</string>
+    <key>EASYOCR_MODULE_PATH</key><string>/Volumes/Fat-Library/easyocr_models</string>
+    <key>HF_HOME</key><string>/Volumes/Fat-Library/huggingface</string>
+    <key>TRANSFORMERS_CACHE</key><string>/Volumes/Fat-Library/huggingface</string>
+    <key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>/Users/xSwarm/.local/log/worker-agent.log</string>
+  <key>StandardErrorPath</key><string>/Users/xSwarm/.local/log/worker-agent.err</string>
+</dict>
+</plist>

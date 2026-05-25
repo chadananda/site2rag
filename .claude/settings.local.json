@@ -9,7 +9,10 @@
       "WebFetch(domain:loom.loomofreality.org)",
       "WebFetch(domain:bahai-library.com)",
       "WebFetch(domain:bhcollection.netlify.app)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(rm /Users/chad/Dropbox/Public/JS/Projects/site2rag/.git/index.lock)",
+      "Bash(ssh tower-nas *)",
+      "Bash(wrangler pages *)"
     ]
   }
 }

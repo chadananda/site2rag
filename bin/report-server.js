@@ -1,5 +1,6 @@
 // HTTP API + static file server. Routes: /api/sites, /api/docs, /api/thumbnail, /api/runs, /api/docs/*, /api/pdf, /api/focus; static public/. Deps: report-queries, report-utils, thumb-worker-pool, db, config, Anthropic
 import { createServer } from 'http';
+import { execFile } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync } from 'fs';
 import { join, extname, dirname, resolve } from 'path';
 import { createHash } from 'crypto';
@@ -358,23 +359,33 @@ createServer(async (req, res) => {
     if (!domain || !docUrl) return err(res, 400, 'site and url params required');
     const db = safeOpenDb(domain);
     if (!db) return err(res, 404, 'db unavailable');
-    let row, meta;
+    let row, meta, page;
     try {
       row  = db.prepare('SELECT md_path FROM exports WHERE url=?').get(docUrl);
       const cols2 = db.prepare("PRAGMA table_info(pdf_upgrade_queue)").all().map(c => c.name);
       const tc = cols2.includes('title') ? 'title,' : '';
       meta = db.prepare(`SELECT ${tc} before_score FROM pdf_upgrade_queue WHERE url=?`).get(docUrl);
+      page = db.prepare('SELECT local_path FROM pages WHERE url=?').get(docUrl);
     } finally { db.close(); }
-    if (!row?.md_path || !existsSync(row.md_path)) return err(res, 404, 'original markdown not found');
-    let content = readFileSync(row.md_path, 'utf8');
-    if (!content.startsWith('---')) {
-      const fm = ['---', `source_url: ${docUrl}`, `domain: ${domain}`,
-        meta?.title ? `title: ${meta.title}` : null,
-        meta?.before_score != null ? `quality_score: ${Math.round(meta.before_score * 100)}%` : null,
-        `version: original`, '---', ''].filter(x => x !== null).join('\n');
-      content = fm + content;
+
+    // Load export MD; if it has no real text content, fall back to pdftotext on the PDF
+    let body = (row?.md_path && existsSync(row.md_path)) ? readFileSync(row.md_path, 'utf8') : '';
+    // Strip HTML tags/links/frontmatter to check for real text
+    const textOnly = body.replace(/^---[\s\S]*?---\n?/, '').replace(/<[^>]+>/g, '').replace(/\[.*?\]\(.*?\)/g, '').trim();
+    if (textOnly.replace(/\s/g, '').length < 100 && page?.local_path && existsSync(page.local_path)) {
+      // No real text — extract raw pdftotext output to show the actual (possibly garbage) content
+      body = await new Promise(resolve => {
+        execFile('pdftotext', [page.local_path, '-'], { timeout: 15000 }, (err, stdout) => resolve(err ? '' : stdout));
+      });
+      if (!body.trim()) body = '(pdftotext extracted no content — image-only PDF with no text layer)';
     }
-    res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', ...cacheHeaders(3600) });
+
+    const fm = ['---', `source_url: ${docUrl}`, `domain: ${domain}`,
+      meta?.title ? `title: ${meta.title}` : null,
+      meta?.before_score != null ? `quality_score: ${Math.round(meta.before_score * 100)}%` : null,
+      `version: original`, '---', ''].filter(x => x !== null).join('\n');
+    const content = body.startsWith('---') ? body : fm + body;
+    res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' });
     return res.end(content);
   }
 

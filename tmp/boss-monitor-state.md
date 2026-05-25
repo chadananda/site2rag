@@ -1,22 +1,27 @@
 # Pipeline Monitor State
-last_tick: 2026-05-08T22:36:00Z
-tick_number: 2
+last_tick: 2026-05-09T00:00:00Z
+tick_number: 3
 status: COMPLETE
-current_task: irfancolloquia.org pipeline upgrade — DONE
+current_task: LOOP STOPPED — user requested session restart
 
-## Final Status (Tick 2 — stopped)
-- **irfancolloquia.org queue**: 120/120 done (stop criterion >50 met)
-- **Pipeline server**: queue_depth=0, idle
-- **pdf-upgrade-worker**: "No pending items" — complete
+## Key Finding This Session
+The actual s3-ocr.js being loaded by pipeline-server is:
+  /tank/site2rag/app/src/pipeline/stages/s3-ocr.js  (1038 lines)
+NOT:
+  /tank/site2rag/app/src/pipeline/s3-ocr.js  (this was the wrong file)
 
-## Quality Summary
-- avg_score: 0.578
-- avg_improvement: 0.033 (most docs were already text-layer, minimal gain)
-- docs improved >5%: 4
-- min_score: 0 (release.pdf — needs review)
-- max_score: 1.0
+All previous session's patches were applied to the WRONG file.
 
-## Action Items
-- release.pdf scored 0 — check if it's a scan or corrupt
-- Most safini (Persian) docs scored ~0.56 — may need OCR pass if Persian text unreadable
-- Consider running pass-2 OCR on low-scoring docs (<0.5)
+## Architecture (stages/s3-ocr.js)
+- Pages: parallel (Promise.all at line 639)
+- Blocks per page: parallel
+- Engines per page: parallel (easyocr/paddle/doctr via Promise.all at line 897)
+- runEngineBatch: single batch call per page per engine (no chunking)
+- Decision format: `${engine.label}_p${page.pageNo}` → paddle_p1, paddle_p2, etc.
+
+## What Still Needs Doing
+1. Apply patches to the CORRECT file: /tank/site2rag/app/src/pipeline/stages/s3-ocr.js
+   - Chunked runEngineBatch (split per-page crops into chunks hitting different pool instances)
+   - Confidence filter (skip high-confidence crops from batch engines)
+2. Patches to wrong file can be reverted or left (they don't run)
+3. Current best timing: 159s for 5p English scan (target: <40s)

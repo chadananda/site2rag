@@ -1,6 +1,8 @@
 // API response utilities: HTML stripping, link context, free summary, doc mapping. Exports: stripHtml, getLinkContext, buildFreeSummary, mapDoc, buildSummaryPrompt. Deps: language
 import { detectLanguage, LANG_COST, LANG_DISPLAY } from '../src/language.js';
-import { spellFixCost } from '../src/pdf-upgrade/spell-fix.js';
+
+// Estimated cost to spell-fix a doc (Haiku pricing: $0.80/MTok in, $4.00/MTok out)
+const spellFixCost = (pages, avgChars = 2000) => pages * ((avgChars / 4 + 50) * 0.80 + (avgChars / 4) * 4.00) / 1e6;
 
 /** Strip HTML tags and decode common entities. */
 export const stripHtml = (html) => html
