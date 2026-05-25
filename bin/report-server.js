@@ -208,34 +208,68 @@ createServer(async (req, res) => {
   if (path === '/api/sites/activity') {
     const domain = url.searchParams.get('site');
     if (!domain) return err(res, 400, 'site param required');
-    const pipelineDb = process.env.PIPELINE_DB;
+    // Support both old pipeline-jobs.db schema and SLP tower.db schema (TOWER_DB env)
+    const pipelineDb = process.env.TOWER_DB || process.env.PIPELINE_DB;
     if (!pipelineDb || !existsSync(pipelineDb)) return json(res, []);
     try {
       const pdb = new Database(pipelineDb, { readonly: true });
-      const rows = pdb.prepare(
-        `SELECT source_url, progress, status FROM jobs WHERE status IN ('processing','pending') AND source_url LIKE ?`
-      ).all(`%${domain}%`);
+      // Detect schema: tower.db uses current_stage + metadata_json; old uses source_url + progress
+      const isTowerSchema = pdb.prepare("SELECT name FROM pragma_table_info('jobs') WHERE name='current_stage'").get();
+      let activity;
+      if (isTowerSchema) {
+        const rows = pdb.prepare(
+          `SELECT id, status, current_stage, pages_total, pages_done, started_at, metadata_json
+           FROM jobs WHERE status IN ('processing','queued') AND metadata_json LIKE ?`
+        ).all(`%${domain}%`);
+        activity = rows.map(r => {
+          let sourceUrl;
+          try { sourceUrl = JSON.parse(r.metadata_json || '{}').sourceUrl; } catch {}
+          if (!sourceUrl) return null;
+          const isActive = r.status === 'processing';
+          // started_at is a unix timestamp (ms or s — treat > 1e12 as ms, else seconds)
+          const startMs = r.started_at ? (r.started_at > 1e12 ? r.started_at : r.started_at * 1000) : null;
+          const elapsedMs = startMs ? Date.now() - startMs : null;
+          const pagesDone = r.pages_done || 0;
+          const pagesTotal = r.pages_total || 0;
+          const pagesRate = (pagesDone > 0 && elapsedMs > 0) ? pagesDone / elapsedMs : null;
+          const pagesRemaining = pagesTotal - pagesDone;
+          const estimatedRemainingMs = (pagesRate && pagesRemaining > 0) ? Math.round(pagesRemaining / pagesRate) : null;
+          return {
+            url: sourceUrl,
+            status: r.status,
+            stage: isActive ? (r.current_stage || null) : 'queued',
+            elapsed_ms: elapsedMs,
+            pages_done: pagesDone,
+            total_pages: pagesTotal,
+            estimated_remaining_ms: estimatedRemainingMs,
+            completed: [],
+          };
+        }).filter(Boolean);
+      } else {
+        const rows = pdb.prepare(
+          `SELECT source_url, progress, status FROM jobs WHERE status IN ('processing','pending') AND source_url LIKE ?`
+        ).all(`%${domain}%`);
+        activity = rows.map(r => {
+          const p = r.progress ? JSON.parse(r.progress) : {};
+          const isActive = r.status === 'processing';
+          const stageStartedAt = p.stage_started_at ? new Date(p.stage_started_at).getTime() : null;
+          const elapsedMs = stageStartedAt ? Date.now() - stageStartedAt : null;
+          const pagesRate = (p.pages_done > 0 && elapsedMs > 0) ? p.pages_done / elapsedMs : null;
+          const pagesRemaining = (p.total_pages || 0) - (p.pages_done || 0);
+          const estimatedRemainingMs = (pagesRate && pagesRemaining > 0) ? Math.round(pagesRemaining / pagesRate) : null;
+          return {
+            url: r.source_url,
+            status: r.status,
+            stage: isActive ? (p.stage || null) : 'queued',
+            elapsed_ms: elapsedMs,
+            pages_done: p.pages_done || 0,
+            total_pages: p.total_pages || 0,
+            estimated_remaining_ms: estimatedRemainingMs,
+            completed: p.completed || [],
+          };
+        });
+      }
       pdb.close();
-      const activity = rows.map(r => {
-        const p = r.progress ? JSON.parse(r.progress) : {};
-        const isActive = r.status === 'processing';
-        const stageStartedAt = p.stage_started_at ? new Date(p.stage_started_at).getTime() : null;
-        const elapsedMs = stageStartedAt ? Date.now() - stageStartedAt : null;
-        const pagesRate = (p.pages_done > 0 && elapsedMs > 0) ? p.pages_done / elapsedMs : null;
-        const pagesRemaining = (p.total_pages || 0) - (p.pages_done || 0);
-        const estimatedRemainingMs = (pagesRate && pagesRemaining > 0) ? Math.round(pagesRemaining / pagesRate) : null;
-        return {
-          url: r.source_url,
-          status: r.status,
-          stage: isActive ? (p.stage || null) : 'queued',
-          stage_started_at: p.stage_started_at || null,
-          elapsed_ms: elapsedMs,
-          pages_done: p.pages_done || 0,
-          total_pages: p.total_pages || 0,
-          estimated_remaining_ms: estimatedRemainingMs,
-          completed: p.completed || [],
-        };
-      });
       return json(res, activity);
     } catch { return json(res, []); }
   }
@@ -463,9 +497,10 @@ createServer(async (req, res) => {
       }
 
       if (existing) {
+        // Keep upgraded_pdf_path/after_score/receipt so the card stays visible in the upgraded tab while reprocessing.
+        // The poller overwrites them when the new job completes.
         db.prepare(`UPDATE pdf_upgrade_queue SET status='pending', priority=999, pass=1,
-          started_at=NULL, finished_at=NULL, error=NULL, requested_method=?, importance=?, queued_at=?,
-          upgraded_pdf_path=NULL, after_score=NULL, score_improvement=NULL, pages_processed=NULL, method=NULL, receipt_json=NULL, pipeline_job_id=NULL
+          started_at=NULL, finished_at=NULL, error=NULL, requested_method=?, importance=?, queued_at=?, pipeline_job_id=NULL
           WHERE url=?`).run(upgradeMethod, imp, now, docUrl);
       } else {
         db.prepare(`INSERT INTO pdf_upgrade_queue (url, content_hash, priority, status, requested_method, importance, queued_at) VALUES (?,?,999,'pending',?,?,?)`)

@@ -53,7 +53,7 @@ export const siteSummary = (domain, siteUrl, description = null) => {
       SELECT COUNT(*) as scored,
         SUM(CASE WHEN u.status='done' THEN 1 ELSE 0 END) as upgraded,
         SUM(CASE WHEN u.status IN ('pending','submitted') THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN u.status='processing' THEN 1 ELSE 0 END) as processing,
+        0 as processing,
         SUM(CASE WHEN u.status='failed' THEN 1 ELSE 0 END) as failed,
         SUM(CASE WHEN q.skip=1 THEN 1 ELSE 0 END) as skipped,
         SUM(CASE WHEN u.url IS NULL AND q.skip=0 AND q.composite_score >= 0.7 THEN 1 ELSE 0 END) as already_ok,
@@ -138,7 +138,7 @@ export const siteDocs = (domain, params) => {
 
     if (tab === 'upgraded') {
       // Include reprocessing docs (pending/submitted) if they already have an upgraded PDF
-      wheres.push("(u.status IN ('done','processing') OR (u.status IN ('pending','submitted') AND u.upgraded_pdf_path IS NOT NULL))");
+      wheres.push("(u.status='done' OR (u.status IN ('pending','submitted') AND u.upgraded_pdf_path IS NOT NULL))");
     }
     // 'original' (default/fallback): all PDFs, no quality filter
 
@@ -155,14 +155,13 @@ export const siteDocs = (domain, params) => {
       title_asc: 'COALESCE(h.hosted_title, p.url) ASC',
       improved_desc: 'COALESCE(u.score_improvement, 0) DESC'
     };
-    // Upgraded default: currently processing first, then done by newest first
-    const upgradedOrder = `CASE u.status WHEN 'processing' THEN 0 WHEN 'done' THEN 1 ELSE 2 END ASC, u.finished_at DESC NULLS LAST`;
+    // Upgraded default: submitted/pending first (in flight), then done by newest first
+    const upgradedOrder = `CASE u.status WHEN 'submitted' THEN 0 WHEN 'pending' THEN 1 WHEN 'done' THEN 2 ELSE 3 END ASC, u.finished_at DESC NULLS LAST`;
     const orderBy = tab === 'upgraded'
       ? (orderMap[sort] || upgradedOrder)
       : (sort && orderMap[sort])
         ? orderMap[sort]
-        // Original default: processing first, then by priority (easiest/highest score first)
-        : `CASE WHEN u.status='processing' THEN 0 ELSE 1 END ASC, COALESCE(u.priority, COALESCE(q.composite_score,0.5)*100) DESC`;
+        : `COALESCE(u.priority, COALESCE(q.composite_score,0.5)*100) DESC`;
     const where = wheres.join(' AND ');
 
     const total = db.prepare(`${HOST_CTE} SELECT COUNT(*) as n ${DOC_JOINS} WHERE ${where}`).get(...vals).n;

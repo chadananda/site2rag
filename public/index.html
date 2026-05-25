@@ -518,8 +518,7 @@ if ('serviceWorker' in navigator) {
               <div class="border rounded-xl p-3 flex gap-3 shadow-sm hover:shadow-md transition-shadow"
                    :class="[
                      doc.skip ? 'opacity-40' : '',
-                     doc.status==='processing' ? 'bg-blue-50 border-blue-200 ring-1 ring-blue-300' :
-                     doc.status==='pending'    ? 'bg-amber-50 border-amber-200' :
+                     (doc.status==='pending'||doc.status==='submitted') ? 'bg-amber-50 border-amber-200' :
                      doc.status==='failed'     ? 'bg-red-50 border-red-200' :
                      doc.status==='done'       ? 'bg-green-50 border-green-200' :
                                                  'bg-white border-gray-200'
@@ -589,7 +588,7 @@ if ('serviceWorker' in navigator) {
                           <button @click.stop="queueUpgrade(doc)"
                                   class="px-2.5 py-1 rounded border border-green-600/50 text-white shadow-sm active:scale-95 text-xs font-semibold cursor-pointer transition-all" style="background-color: oklch(0.47 0.14 149.73 / 0.59)">↑ boost</button>
                         </template>
-                        <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending'">
+                        <template x-if="!doc.skip && doc.status !== 'pending' && doc.status !== 'submitted'">
                           <button @click.stop="queueUpgrade(doc, 'ocr')"
                                   class="px-2.5 py-1 rounded border border-green-600/50 text-white shadow-sm active:scale-95 text-xs font-semibold cursor-pointer transition-all" style="background-color: oklch(0.47 0.14 149.73 / 0.59)"
                                   title="Upgrade PDF: improve text layer, convert to PDF/A archival format"
@@ -1610,19 +1609,21 @@ function app() {
         }
         this.processingActivity = map;
         if (needsRefresh && !this._pendingRefreshTimer) {
-          this._pendingRefreshTimer = setTimeout(async () => {
+          const watched = new Set(this._queuedUrls);
+          const doRefresh = async (retriesLeft) => {
             this._pendingRefreshTimer = null;
-            const watched = new Set(this._queuedUrls);
-            // Reload docs (not just sites) so card status updates in place
             this.docsPage = 1;
             await Promise.all([this.loadDocs(), this.refreshTabCounts()]);
-            // Check if any watched doc is now done → toast
             const justDone = this.docs.filter(d => watched.has(d.url) && d.status === 'done');
             if (justDone.length) {
               this._queuedUrls = new Set([...this._queuedUrls].filter(u => !justDone.find(d => d.url === u)));
               this._toast(`✓ ${justDone.length === 1 ? (justDone[0].title || 'Document') : justDone.length + ' documents'} upgraded`, 5000);
+            } else if (retriesLeft > 0) {
+              // Server poller may not have written to DB yet — retry in 3s
+              this._pendingRefreshTimer = setTimeout(() => doRefresh(retriesLeft - 1), 3000);
             }
-          }, 1500);
+          };
+          this._pendingRefreshTimer = setTimeout(() => doRefresh(3), 1500);
         }
       } catch {}
     },
