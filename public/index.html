@@ -1609,26 +1609,25 @@ function app() {
         const map = {};
         for (const r of rows) map[r.url] = r;
 
-        // Track which locally-queued URLs have now entered the pipeline (seen in activity feed)
         if (!this._seenInPipeline) this._seenInPipeline = {};
         let needsRefresh = false;
         for (const [url, prior] of Object.entries(this.processingActivity)) {
-          if (prior?.stage === 'queued') {
-            if (map[url]) {
-              // Job appeared in pipeline activity — mark it
-              this._seenInPipeline[url] = true;
-              map[url] = prior; // keep local queued label until stage advances
-            } else if (this._seenInPipeline[url]) {
-              // Was in pipeline, now gone — completed; trigger refresh
-              delete this._seenInPipeline[url];
-              needsRefresh = true;
-            } else {
-              // Not yet seen in pipeline — preserve locally-queued state
-              // but also refresh after 90s in case we missed it
-              if (!prior._queuedAt) prior._queuedAt = Date.now();
-              if (Date.now() - prior._queuedAt > 90000) needsRefresh = true;
-              else map[url] = prior;
-            }
+          if (prior?.stage !== 'queued') continue; // already has real stage from server
+          const doc = this.docs.find(d => d.url === url);
+          // Doc completed/failed without us catching it — drop the queued indicator
+          if (doc && doc.status !== 'pending') { needsRefresh = true; continue; }
+          if (map[url]) {
+            // Job now visible in activity feed — let server stage show through, mark as seen
+            this._seenInPipeline[url] = true;
+          } else if (this._seenInPipeline[url]) {
+            // Was in feed, now gone — job completed; trigger refresh
+            delete this._seenInPipeline[url];
+            needsRefresh = true;
+          } else {
+            // Still waiting for pipeline to pick it up — preserve local queued indicator
+            if (!prior._queuedAt) prior._queuedAt = Date.now();
+            if (Date.now() - prior._queuedAt > 90000) needsRefresh = true; // safety timeout
+            else map[url] = prior;
           }
         }
         this.processingActivity = map;
