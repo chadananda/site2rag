@@ -1360,11 +1360,9 @@ function app() {
       const r = await this.adminFetch(upgradeUrl, { method: 'POST' }).catch(() => null);
       this.upgradingUrls = { ...this.upgradingUrls, [doc.url]: false };
       if (r?.ok) {
-        // Update status to pending; switch to 'original' tab so card stays visible during processing
         const idx2 = this.docs.findIndex(d => d.url === doc.url);
         if (idx2 >= 0) this.docs[idx2] = { ...this.docs[idx2], status: 'pending' };
         if (this.expandedDoc?.url === doc.url) this.expandedDoc = { ...this.expandedDoc, status: 'pending' };
-        if (this.activeTab === 'upgraded') this.switchTab('original');
         this.pollActivity();
       } else if (r) {
         const errText = await r.json().catch(() => ({}));
