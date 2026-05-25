@@ -862,12 +862,12 @@ if ('serviceWorker' in navigator) {
                                     class="px-2 py-0.5 rounded border border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-200 hover:border-violet-400 active:scale-95 text-xs font-semibold cursor-pointer transition-all"
                                     :title="'AI text correction (hyphen-breaks, OCR errors)' + (doc.spell_fix_cost_usd > 0 ? ' ~$' + doc.spell_fix_cost_usd.toFixed(3) : '')">✦ spell-fix</button>
                           </template>
-                          <!-- Re-OCR / OCR button -->
-                          <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending' && (doc.status === 'done' || activeTab==='original' || doc.readable_pages_pct == null || doc.readable_pages_pct < 0.9)">
+                          <!-- Upgrade / Reprocess button -->
+                          <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending'">
                             <button @click.stop="queueUpgrade(doc, 'ocr')"
                                     class="px-2 py-0.5 rounded border text-xs font-semibold transition-all cursor-pointer active:scale-95 border-indigo-200 text-indigo-600 bg-white hover:bg-indigo-100 hover:border-indigo-400"
-                                    title="Run full OCR pipeline to produce searchable text"
-                                    x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ reprocess' : '⬆ OCR'"></button>
+                                    title="Upgrade PDF: improve text layer, convert to PDF/A archival format"
+                                    x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ reprocess' : '⬆ upgrade'"></button>
                           </template>
                           <!-- Skip toggle -->
                           <button @click.stop="toggleSkip(doc)"
@@ -1073,12 +1073,12 @@ if ('serviceWorker' in navigator) {
                               :title="'Fix hyphen-breaks, missing spaces, OCR artifacts via Haiku'"
                               x-text="'✦ Spell-fix' + (expandedDoc.spell_fix_cost_usd > 0 ? ' ~$' + expandedDoc.spell_fix_cost_usd.toFixed(3) : '')"></button>
                     </template>
-                    <!-- Re-OCR: any doc with pages (empty docs excluded) -->
+                    <!-- Upgrade / Reprocess -->
                     <template x-if="!cannotUpgrade(expandedDoc)">
                       <button @click="queueUpgrade(expandedDoc, 'ocr')" :disabled="expandedDoc._upgrading"
                               class="px-3 py-1.5 text-xs rounded-lg border border-indigo-300 text-indigo-700 bg-indigo-50 hover:bg-indigo-100 font-semibold"
-                              :title="'Full OCR with boss vision model' + (expandedDoc.vision_cost_usd > 0 ? ' ~$' + expandedDoc.vision_cost_usd.toFixed(2) : '')"
-                              x-text="expandedDoc.status==='failed' ? '↺ Retry OCR' : expandedDoc.readable_pages_pct >= 0.9 ? '↺ Re-OCR (already readable)' : expandedDoc.status==='done' ? '↺ Re-OCR' : '⬆ Full OCR upgrade'"></button>
+                              :title="'Upgrade PDF: improve text layer, convert to PDF/A archival format'"
+                              x-text="expandedDoc.status==='failed' ? '↺ Retry' : expandedDoc.status==='done' ? '↺ Reprocess' : '⬆ Upgrade'"></button>
                     </template>
                     <!-- Process again at higher importance (for upgraded docs) -->
                     <template x-if="expandedDoc.status === 'done' && (expandedDoc.importance ?? 1) < 5">
@@ -1165,13 +1165,22 @@ function scoreLabel(doc) {
   const s = doc.composite_score;
   const r = doc.readable_pages_pct;
   const w = doc.word_quality_estimate;
+  const hasText = doc.has_text_layer === 1;
   if (s == null) return { label: 'Not scored', cls: 'text-gray-400' };
   if (doc.skip) return { label: 'Skipped', cls: 'text-amber-600' };
-  if (r != null && r < 0.05) return { label: 'No Text Layer', cls: 'text-red-700' };
-  if (r != null && r < 0.2 && (w == null || w < 0.5)) return { label: 'Garbage OCR', cls: 'text-red-700' };
+  // No readable pages: distinguish Image PDF (no text layer) from Garbage Text (custom font encoding)
+  if (r != null && r < 0.05) return hasText
+    ? { label: 'Garbage Text', cls: 'text-red-700' }
+    : { label: 'Image PDF', cls: 'text-red-700' };
+  // Low readability + low word quality: image PDF with bad OCR vs text PDF with garbage encoding
+  if (r != null && r < 0.2 && (w == null || w < 0.5)) return hasText
+    ? { label: 'Garbage Text', cls: 'text-red-700' }
+    : { label: 'Garbage OCR', cls: 'text-red-700' };
   if (r != null && r < 0.3) return { label: 'Mostly Scanned', cls: 'text-orange-700' };
-  if (w != null && w < 0.5) return { label: 'Poor OCR', cls: 'text-orange-700' };
-  if (s < 0.45) return { label: 'Needs OCR', cls: 'text-yellow-700' };
+  if (w != null && w < 0.5) return hasText
+    ? { label: 'Poor Text Quality', cls: 'text-orange-700' }
+    : { label: 'Poor OCR', cls: 'text-orange-700' };
+  if (s < 0.45) return { label: 'Needs Upgrade', cls: 'text-yellow-700' };
   if (s < 0.65) return { label: 'Partly Readable', cls: 'text-yellow-700' };
   if (s < 0.85) return { label: 'Mostly Readable', cls: 'text-blue-700' };
   return { label: 'Good Quality', cls: 'text-green-700' };

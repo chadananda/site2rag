@@ -22,10 +22,23 @@ const SCRIPT_RANGES = {
  * Returns 0-1, or null if lang has no defined ranges or sample is too small.
  * Real text in a script: 60-95%. OCR garbage: 5-30%.
  */
+/**
+ * Fraction of non-whitespace chars that are printable (>= U+0020).
+ * Control chars 0x01-0x1F indicate custom-font-encoded PDFs where glyph IDs
+ * were stored as char codes — the text layer exists but is encoding garbage.
+ * Returns 0-1. Real text: > 0.95. Encoding garbage: < 0.5.
+ */
+export const printableRatio = (text) => {
+  const nonWs = [...text].filter(c => /\S/.test(c));
+  if (nonWs.length < 20) return 1;
+  return nonWs.filter(c => c.codePointAt(0) >= 0x20).length / nonWs.length;
+};
+
 export const scriptConsistency = (text, lang) => {
   const ranges = SCRIPT_RANGES[lang];
   if (!ranges || !text) return null;
-  const chars = [...text].filter(c => c.trim());
+  // Only count printable chars — control chars (0x00-0x1F) are encoding garbage, not script chars
+  const chars = [...text].filter(c => c.trim() && c.codePointAt(0) >= 0x20);
   if (chars.length < 20) return null;
   const inScript = chars.filter(c => {
     const cp = c.codePointAt(0);
@@ -67,13 +80,18 @@ export const ocrNoiseRatio = (text) => {
 /** Estimate word quality from a text sample. Returns 0-1. lang param selects word set. */
 export const wordQuality = (text, lang = 'english') => {
   if (!text || !text.trim()) return 0;
+  // Control-char check: custom-font-encoded PDFs store glyph IDs as char codes 0x01-0x1F.
+  // printableRatio near 0 = encoding garbage regardless of what script chars are present.
+  const pr = printableRatio(text);
+  if (pr < 0.3) return Math.round(pr * 100) / 100; // mostly control chars = near-zero quality
   // Non-Latin scripts: use Unicode script consistency + token distribution
   const sc = scriptConsistency(text, lang);
   if (sc !== null) {
     const td = tokenDistribution(text);
     // sc dominates: Latin OCR garbage on an Arabic scan has sc≈0, so td (which can be decent
     // for any varied token set) cannot rescue the score. Real text in the right script has sc≥0.6.
-    return Math.min(1, Math.round((sc * 0.85 + td * 0.15) * 100) / 100);
+    // Also cap by printableRatio: a text that's 50% control chars can't be 80% quality.
+    return Math.min(pr, Math.min(1, Math.round((sc * 0.85 + td * 0.15) * 100) / 100));
   }
   // Latin scripts: word-list + vowel-ratio heuristic
   const tokens = text.replace(/[^a-zA-ZÀ-ÿ\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && w.length <= 20);
@@ -88,7 +106,7 @@ export const wordQuality = (text, lang = 'english') => {
     return ratio >= 0.2 && ratio <= 0.75 && !/(.)\1{3,}/.test(lower);
   });
   const noise = ocrNoiseRatio(text);
-  return Math.max(0, realWords.length / sample.length - noise * 3);
+  return Math.max(0, Math.min(pr, realWords.length / sample.length - noise * 3));
 };
 /**
  * Score a PDF file for OCR quality. Returns quality metrics object.
