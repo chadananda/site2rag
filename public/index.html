@@ -750,9 +750,12 @@ if ('serviceWorker' in navigator) {
                           </template>
                         </span>
                       </div>
-                      <!-- Processing details row — method steps with per-stage gain -->
+                      <!-- Processing details row — narrative or method steps -->
                       <div class="px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 text-gray-600 border-b border-gray-100">
-                        <template x-if="doc.method_steps">
+                        <template x-if="doc.narrative">
+                          <span class="text-xs text-gray-500 italic" x-text="doc.narrative"></span>
+                        </template>
+                        <template x-if="!doc.narrative && doc.method_steps">
                           <span class="flex items-center gap-1 flex-wrap">
                             <template x-if="doc.method_steps.totalGainPct > 0">
                               <span class="text-green-700 font-bold" x-text="'+'+doc.method_steps.totalGainPct+'%:'"></span>
@@ -768,10 +771,10 @@ if ('serviceWorker' in navigator) {
                             </template>
                           </span>
                         </template>
-                        <template x-if="!doc.method_steps && doc.method_summary">
+                        <template x-if="!doc.narrative && !doc.method_steps && doc.method_summary">
                           <span><span class="font-semibold text-gray-700" x-text="doc.method_summary"></span></span>
                         </template>
-                        <template x-if="!doc.method_steps && !doc.method_summary && doc.method">
+                        <template x-if="!doc.narrative && !doc.method_steps && !doc.method_summary && doc.method">
                           <span><span class="text-gray-400">method</span> <span class="font-semibold text-gray-700" x-text="methodLabel(doc.method)"></span></span>
                         </template>
                         <template x-if="doc.pages_processed">
@@ -828,7 +831,7 @@ if ('serviceWorker' in navigator) {
                   <div class="flex gap-1.5 items-center flex-wrap justify-end mt-auto pt-2">
                     <button @click.stop="openPdfViewer(doc.url, docTitle(doc))"
                        class="px-2.5 py-1 rounded border text-xs font-semibold shadow-sm transition-all active:scale-95 cursor-pointer"
-                       :class="scoreColorCls(doc.composite_score)"
+                       :class="scoreColorCls(doc.effective_before ?? doc.composite_score)"
                        :title="'View original PDF' + ((doc.effective_before ?? doc.composite_score) != null ? ' · '+Math.round((doc.effective_before ?? doc.composite_score)*100)+'%' : '')"
                        x-text="'PDF' + ((doc.effective_before ?? doc.composite_score) != null ? ' '+Math.round((doc.effective_before ?? doc.composite_score)*100)+'%' : '')"></button>
                     <button @click.stop="openMdViewer(doc)"

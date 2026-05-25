@@ -100,6 +100,7 @@ export const mapDoc = (d, domain) => {
   const effective_before = d.before_score ?? historyBefore ?? receiptBaseline ?? d.composite_score ?? calculatedBefore ?? null;
   const effective_improvement = (effective_before != null && effective_after != null) ? effective_after - effective_before : null;
   const method_summary = _receipt?.method_summary ?? null;
+  const narrative = _receipt?.narrative ?? null;
   const method_steps = (() => {
     if (!_receipt) return null;
     const { stages = [], quality = {} } = _receipt;
@@ -153,6 +154,7 @@ export const mapDoc = (d, domain) => {
     effective_improvement,
     method_steps,
     method_summary,
+    narrative,
     receipt_json: undefined,
     spell_fix_cost_usd,
     vision_cost_usd,
