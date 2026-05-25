@@ -246,9 +246,9 @@ if ('serviceWorker' in navigator) {
   <div class="flex gap-4 items-start">
 
   <!-- Left sidebar — site selector -->
-  <div class="flex-shrink-0 sticky top-4" style="width:284px">
+  <div class="flex-shrink-0 sticky top-4" style="width:284px;max-height:calc(100vh - 2rem);overflow-y:auto;scrollbar-width:thin">
   <template x-if="sites.length">
-    <div class="flex flex-col gap-2 items-start">
+    <div class="flex flex-col gap-2 items-start" x-ref="sidebarList">
       <template x-for="s in sites" :key="s.domain">
         <button @click="selectSite(s)" class="site-tab"
           :class="activeSite?.domain===s.domain ? 'active' : ''">
@@ -748,13 +748,9 @@ if ('serviceWorker' in navigator) {
                         <template x-if="doc.readable_pages_pct != null">
                           <span class="text-gray-500" x-text="Math.round(doc.readable_pages_pct*100)+'% of pages with search text'"></span>
                         </template>
-                        <!-- Score: before → after + improvement (or just before if no after yet) -->
+                        <!-- Score: final + improvement (before is already on the left score block) -->
                         <span class="ml-auto flex items-center gap-1.5 font-mono">
-                          <template x-if="doc.effective_before != null">
-                            <span class="score-pill" :class="scorePillCls(doc.effective_before)" x-text="Math.round(doc.effective_before*100)+'%'"></span>
-                          </template>
                           <template x-if="doc.effective_after != null">
-                            <span class="text-gray-300">›</span>
                             <span class="score-pill bg-green-100 text-green-800 font-bold" x-text="Math.round(doc.effective_after*100)+'%'"></span>
                             <template x-if="doc.effective_improvement > 0.01">
                               <span class="text-green-700 font-bold" x-text="'+'+Math.round(doc.effective_improvement*100)+'pts'"></span>
@@ -1559,6 +1555,11 @@ function app() {
       this.tabTotals = { original: null, upgraded: null };
       this.filters = { q: '', status: '', score_max: 1, sort: 'score_asc' };
       localStorage.setItem('selectedDomain', s.domain);
+      // Move selected site to top of sidebar list
+      this.sites = [s, ...this.sites.filter(x => x.domain !== s.domain)];
+      await this.$nextTick();
+      const el = this.$refs.sidebarList?.closest('[style*="overflow"]');
+      if (el) el.scrollTop = 0;
       // Selecting a site in admin mode focuses all upgrade processing on it
       if (this.adminToken) await this.setFocus(s.domain);
       await Promise.all([this.loadDocs(), this.refreshTabCounts()]);
