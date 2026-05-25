@@ -612,18 +612,14 @@ if ('serviceWorker' in navigator) {
                       <div class="flex gap-1 items-center shrink-0">
                         <template x-if="!doc.skip && doc.status==='pending'">
                           <button @click.stop="queueUpgrade(doc)"
-                                  class="px-2 py-0.5 rounded border border-indigo-300 text-indigo-600 bg-indigo-50 hover:bg-indigo-200 hover:border-indigo-400 active:scale-95 text-xs font-semibold cursor-pointer transition-all">↑ boost</button>
+                                  class="px-2.5 py-1 rounded border border-green-700 text-green-50 bg-green-700 hover:bg-green-800 shadow-sm active:scale-95 text-xs font-semibold cursor-pointer transition-all">↑ boost</button>
                         </template>
                         <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending'">
                           <button @click.stop="queueUpgrade(doc, 'ocr')"
-                                  class="px-2 py-0.5 rounded border text-xs font-semibold transition-all cursor-pointer active:scale-95 border-indigo-200 text-indigo-600 bg-white hover:bg-indigo-100 hover:border-indigo-400"
+                                  class="px-2.5 py-1 rounded border border-green-700 text-green-50 bg-green-700 hover:bg-green-800 shadow-sm active:scale-95 text-xs font-semibold cursor-pointer transition-all"
                                   title="Upgrade PDF: improve text layer, convert to PDF/A archival format"
                                   x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ reprocess' : '⬆ upgrade'"></button>
                         </template>
-                        <button @click.stop="toggleSkip(doc)"
-                                class="px-2 py-0.5 rounded border text-xs transition-all cursor-pointer active:scale-95"
-                                :class="doc.skip ? 'border-amber-300 text-amber-700 bg-amber-50 hover:bg-amber-100' : 'border-gray-200 text-gray-400 hover:text-amber-600 hover:border-amber-300 hover:bg-amber-50'"
-                                x-text="doc.skip ? '⊘' : 'skip'"></button>
                       </div>
                     </template>
                     <!-- Status badges -->
