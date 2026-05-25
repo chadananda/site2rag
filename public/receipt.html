@@ -329,7 +329,7 @@ const fmtMs  = ms => {
   if (ms >= 1000)  return (ms / 1000).toFixed(1) + 's';
   return ms + 'ms';
 };
-const fmtCost = c => c > 0 ? '$' + c.toFixed(4) : null;
+const fmtCost = c => c == null ? null : c === 0 ? '$0' : '$' + c.toFixed(2);
 const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
 const STAGE_META = {
@@ -714,13 +714,13 @@ load().then(r => {
   const activeStages = (r.stages ?? []).filter(s => s.pages_affected > 0);
   const perfRows = [
     totals.cost_usd != null
-      ? [['Total cost', fmtCost(totals.cost_usd) ?? '$0.0000'], ['Stages run', activeStages.length]] : null,
+      ? [['Total cost', fmtCost(totals.cost_usd) ?? '$0'], ['Stages run', activeStages.length]] : null,
     totals.duration_ms
       ? [['Processing time', fmtMs(totals.duration_ms)], ['Pages', r.page_count ?? 0]] : null,
     totals.tokens_in
       ? [['Tokens in / out', `${totals.tokens_in.toLocaleString()} / ${(totals.tokens_out ?? 0).toLocaleString()}`]] : null,
     q.cost_per_quality_point > 0
-      ? [['Cost/quality pt', '$' + q.cost_per_quality_point.toFixed(4)]] : null,
+      ? [['Cost/quality pt', '$' + q.cost_per_quality_point.toFixed(2)]] : null,
   ].filter(Boolean);
 
   if (perfRows.length) {

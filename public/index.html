@@ -747,7 +747,7 @@ if ('serviceWorker' in navigator) {
                       <!-- Processing details row — narrative or method steps -->
                       <div class="px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 text-gray-600 border-b border-gray-100">
                         <template x-if="doc.narrative">
-                          <span class="text-xs text-gray-500 italic" :dir="['arabic','persian','hebrew'].includes(doc.lang_key) ? 'rtl' : 'ltr'" x-text="doc.narrative"></span>
+                          <span class="text-xs text-gray-500 italic" x-text="doc.narrative"></span>
                         </template>
                         <template x-if="!doc.narrative && doc.method_steps">
                           <span class="flex items-center gap-1 flex-wrap">
