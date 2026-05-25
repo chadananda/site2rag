@@ -159,7 +159,10 @@ export const scorePdf = async (pdfPath) => {
     // adjustedReadable: just use readablePct directly — no charsScore floor.
     // The old floor (charsScore*0.85) inflated scores for docs with lots of garbage chars.
     const adjustedReadable = readablePct;
-    const composite = Math.min(1, 0.4 * wq + 0.3 * adjustedReadable + 0.2 * charsScore + 0.1 * hasText);
+    // wq dominates: a document with garbage text can't score high regardless of char count.
+    // Readable page fraction and char density scale wq's contribution; small fixed credits
+    // for having chars at all (so image PDFs can still be assessed and queued for OCR).
+    const composite = Math.min(1, wq * (0.6 + 0.3 * adjustedReadable) + 0.07 * charsScore + 0.03 * hasText);
     const excerpt = extractExcerpt(sampleText);
     // Processing difficulty: 0=trivial (text PDF, skip OCR), 1=hardest (dense image scan).
     // Primary driver: no text layer = needs OCR. Secondary: page count. Tertiary: script complexity.
