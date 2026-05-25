@@ -602,11 +602,6 @@ if ('serviceWorker' in navigator) {
                                   title="Upgrade PDF: improve text layer, convert to PDF/A archival format"
                                   x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ reprocess' : '⬆ upgrade'"></button>
                         </template>
-                        <template x-if="doc.status==='done'">
-                          <button @click.stop="resetDoc(doc)"
-                                  class="px-2.5 py-1 rounded border border-red-300 text-red-500 bg-white hover:bg-red-50 active:scale-95 text-xs font-semibold cursor-pointer transition-all"
-                                  title="Reset to original — removes upgrade data so you can test fresh">✕ reset</button>
-                        </template>
                       </div>
                     </template>
                     <!-- Status badges -->
@@ -812,7 +807,14 @@ if ('serviceWorker' in navigator) {
                   </template>
 
                   <!-- Viewer buttons pinned to bottom of content column -->
-                  <div class="flex gap-1.5 items-center flex-wrap justify-end mt-auto pt-2">
+                  <div class="flex gap-1.5 items-center flex-wrap justify-between mt-auto pt-2">
+                    <template x-if="adminToken && doc.status==='done'">
+                      <button @click.stop="resetDoc(doc)"
+                              class="px-2 py-0.5 rounded border border-red-200 text-red-400 bg-white hover:bg-red-50 active:scale-95 text-xs cursor-pointer transition-all"
+                              title="Reset to original — removes all upgrade data">✕ reset</button>
+                    </template>
+                    <template x-if="!(adminToken && doc.status==='done')"><span></span></template>
+                    <div class="flex gap-1.5 items-center flex-wrap">
                     <button @click.stop="openPdfViewer(doc.url, docTitle(doc))"
                        class="px-2.5 py-1 rounded border text-xs font-semibold shadow-sm transition-all active:scale-95 cursor-pointer"
                        :class="scoreColorCls(doc.effective_before ?? doc.composite_score)"
@@ -831,6 +833,7 @@ if ('serviceWorker' in navigator) {
                        :class="doc.status==='done' ? 'border-purple-200 bg-purple-50 text-purple-600 hover:bg-purple-100 active:scale-95 cursor-pointer' : 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'"
                        :title="doc.status==='done' ? 'View upgrade analysis receipt' : 'No receipt until upgraded'"
                        x-text="'Receipt' + (doc.upgrade_cost_usd != null ? ' $'+(doc.upgrade_cost_usd < 0.01 ? doc.upgrade_cost_usd.toFixed(4) : doc.upgrade_cost_usd.toFixed(2)) : '')"></button>
+                    </div>
                   </div>
                 </div>
               </div>
