@@ -361,7 +361,9 @@ createServer(async (req, res) => {
     let row, meta;
     try {
       row  = db.prepare('SELECT md_path FROM exports WHERE url=?').get(docUrl);
-      meta = db.prepare('SELECT title, before_score FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
+      const cols2 = db.prepare("PRAGMA table_info(pdf_upgrade_queue)").all().map(c => c.name);
+      const tc = cols2.includes('title') ? 'title,' : '';
+      meta = db.prepare(`SELECT ${tc} before_score FROM pdf_upgrade_queue WHERE url=?`).get(docUrl);
     } finally { db.close(); }
     if (!row?.md_path || !existsSync(row.md_path)) return err(res, 404, 'original markdown not found');
     let content = readFileSync(row.md_path, 'utf8');
@@ -383,8 +385,11 @@ createServer(async (req, res) => {
     const db = safeOpenDb(domain);
     if (!db) return err(res, 404, 'db unavailable');
     let row;
-    try { row = db.prepare('SELECT marker_md_path, title, after_score, before_score, finished_at, method FROM pdf_upgrade_queue WHERE url=?').get(docUrl); }
-    finally { db.close(); }
+    try {
+      const cols = db.prepare("PRAGMA table_info(pdf_upgrade_queue)").all().map(c => c.name);
+      const titleCol = cols.includes('title') ? 'title,' : '';
+      row = db.prepare(`SELECT marker_md_path, ${titleCol} after_score, before_score, finished_at, method FROM pdf_upgrade_queue WHERE url=?`).get(docUrl);
+    } finally { db.close(); }
     if (!row?.marker_md_path || !existsSync(row.marker_md_path)) return err(res, 404, 'no upgraded markdown');
     let content = readFileSync(row.marker_md_path, 'utf8');
     if (!content.startsWith('---')) {
