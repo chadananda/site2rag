@@ -109,9 +109,11 @@ export const wordQuality = (text, lang = 'english') => {
   // Space-injection detection: broken PDFs produce consonant-cluster fragments as tokens —
   // 'th', 'ph', 'sh', 'wh', 'ts', 'ng', 'ck', 'st' etc. These 2-3 char tokens with no vowels
   // are virtually absent in natural prose but appear at 5-20% in space-injected PDFs.
-  const zvTokens = sample.filter(w => w.length <= 3 && !/[aeiouàáâãäåæèéêëìíîïðòóôõöùúûüý]/i.test(w)).length;
+  // Include 'y' as vowel to avoid false positives on real English words 'by','my','gy' etc.
+  const zvTokens = sample.filter(w => w.length <= 3 && !/[aeiouàáâãäåæèéêëìíîïðòóôõöùúûüýy]/i.test(w)).length;
   const zvRatio = sample.length > 0 ? zvTokens / sample.length : 0;
-  const spaceInjectionPenalty = zvRatio > 0.05 ? (zvRatio - 0.05) * 3 : 0;
+  // Threshold 0.03: virtually no real prose has consonant clusters at this rate
+  const spaceInjectionPenalty = zvRatio > 0.03 ? (zvRatio - 0.03) * 4 : 0;
   const noise = ocrNoiseRatio(text);
   return Math.max(0, Math.round(pr * Math.max(0, realWords.length / sample.length - noise * 3 - spaceInjectionPenalty) * 100) / 100);
 };
