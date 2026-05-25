@@ -134,11 +134,12 @@ const serveStatic = (res, reqPath) => {
   if (!existsSync(filePath)) {
     const index = join(PUBLIC_DIR, 'index.html');
     if (!existsSync(index)) { res.writeHead(404); return res.end('Not found'); }
-    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' });
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'private, no-cache, no-store, must-revalidate', 'Pragma': 'no-cache' });
     return res.end(readFileSync(index));
   }
   const mime = STATIC_MIME[extname(filePath).toLowerCase()] || 'application/octet-stream';
-  res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache, no-store' });
+  const isHtml = mime.startsWith('text/html');
+  res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': isHtml ? 'private, no-cache, no-store, must-revalidate' : 'no-cache, no-store', ...(isHtml ? { 'Pragma': 'no-cache' } : {}) });
   res.end(readFileSync(filePath));
 };
 
