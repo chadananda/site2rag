@@ -542,7 +542,7 @@ if ('serviceWorker' in navigator) {
                         <div class="score-num" x-text="doc.effective_before != null ? Math.round(doc.effective_before*100)+'%' : '—'"></div>
                         <div class="score-sub">original</div>
                       </div>
-                      <div class="score-block bg-green-100 border border-green-300" style="padding:4px 3px;width:56px">
+                      <div class="score-block bg-green-100 border border-green-300 mx-auto" style="padding:4px 3px;width:56px">
                         <div class="score-num text-green-700" style="font-size:1.4rem" x-text="(doc.effective_improvement > 0 ? '+' : '') + Math.round((doc.effective_improvement||0)*100)+'%'"></div>
                         <div class="score-sub text-green-600">gain</div>
                       </div>
