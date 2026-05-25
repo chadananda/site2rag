@@ -9,7 +9,8 @@ import { compileRules } from './rules.js';
 import { scorePdf, saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
 export { addBacklink, assembleDocMd } from './export-doc-utils.js';
 import { addBacklink, assembleDocMd } from './export-doc-utils.js';
-import { wordQuality, detectLanguage, detectLanguageFromUrl } from './pdf-upgrade/score.js';
+import { wordQuality, detectLanguage } from './pdf-upgrade/score.js';
+import { detectLanguageFromUrl } from './language.js';
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const PDF_PARSE_TIMEOUT_MS = 30_000;
