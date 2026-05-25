@@ -512,7 +512,7 @@ if ('serviceWorker' in navigator) {
                 <!-- Thumbnail -->
                 <div class="thumb-wrap hover:opacity-90 transition-opacity"
                      :class="['s3','s4'].includes(processingActivity[doc.url]?.stage) ? 'thumb-scanning' : ''"
-                     @click="openDetail(doc)" title="View details">
+                     @click.stop="window.open(pdfSrc(doc), '_blank')" title="Open PDF">
                   <img :src="thumbSrc(doc, 200)" :alt="docTitle(doc)"
                        class="thumb"
                        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
