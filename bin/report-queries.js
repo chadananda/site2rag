@@ -149,8 +149,8 @@ export const siteDocs = (domain, params) => {
     if (scoreMax < 1) { wheres.push("(q.composite_score IS NULL OR q.composite_score <= ?)"); vals.push(scoreMax); }
 
     const orderMap = {
-      score_asc: 'COALESCE(q.composite_score, 1) ASC',
-      score_desc: 'COALESCE(q.composite_score, 0) DESC',
+      score_asc: 'COALESCE(u.before_score, q.composite_score, 1) ASC',
+      score_desc: 'COALESCE(u.before_score, q.composite_score, 0) DESC',
       pages_desc: 'COALESCE(q.pages, 0) DESC',
       title_asc: 'COALESCE(h.hosted_title, p.url) ASC',
       improved_desc: 'COALESCE(u.score_improvement, 0) DESC'
