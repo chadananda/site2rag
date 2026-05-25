@@ -584,6 +584,10 @@ if ('serviceWorker' in navigator) {
                       <a :href="pdfSrc(doc)" target="_blank" rel="noopener" @click.stop
                          class="font-semibold text-sm text-gray-900 hover:text-blue-600 leading-snug line-clamp-2"
                          x-text="docTitle(doc)"></a>
+                      <!-- English subtitle for non-English docs -->
+                      <template x-if="doc.title_en && doc.title_en !== docTitle(doc)">
+                        <div class="text-xs text-gray-500 truncate italic" x-text="doc.title_en"></div>
+                      </template>
                       <!-- "was: old title" hint when AI upgraded the title -->
                       <template x-if="doc.status==='done' && doc.ai_title && doc.pdf_title && doc.ai_title !== doc.pdf_title">
                         <div class="text-xs text-gray-400 truncate" x-text="'was: ' + doc.pdf_title"></div>
@@ -632,10 +636,14 @@ if ('serviceWorker' in navigator) {
 
                   <!-- Summary (free tier shows italic, haiku shows normal) -->
                   <template x-if="doc.ai_summary">
-                    <p class="text-xs leading-relaxed line-clamp-2 mb-1"
+                    <p class="text-xs leading-relaxed line-clamp-2 mb-0.5"
                        :class="doc.summary_tier==='haiku' ? 'text-gray-600' : 'text-gray-500 italic'"
                        :dir="['arabic','persian','hebrew'].includes(doc.lang_key) ? 'rtl' : 'ltr'"
                        x-text="doc.ai_summary"></p>
+                  </template>
+                  <!-- English description for non-English docs -->
+                  <template x-if="doc.desc_en">
+                    <p class="text-xs leading-relaxed line-clamp-2 mb-1 text-gray-400 italic" x-text="doc.desc_en"></p>
                   </template>
 
 

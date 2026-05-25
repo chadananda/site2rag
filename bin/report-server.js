@@ -797,7 +797,9 @@ if (process.env.PIPELINE_URL) {
               const lang = receipt.document?.language ?? null;
               const cols = [], vals = [];
               const stripQuotes = s => s ? s.replace(/^["«»「」『』"']+|["«»「」『』"']+$/g, '').trim() : s;
-              if (meta.title)   { cols.push('ai_title=?');   vals.push(stripQuotes(meta.title)); }
+              if (meta.title)    { cols.push('ai_title=?');   vals.push(stripQuotes(meta.title)); }
+              if (meta.title_en) { cols.push('title_en=?');   vals.push(stripQuotes(meta.title_en)); }
+              if (meta.desc_en)  { cols.push('desc_en=?');    vals.push(stripQuotes(meta.desc_en)); }
               const LANG_NAMES = new Set(['arabic','persian','hebrew','french','spanish','german','italian','portuguese','dutch','polish','turkish','russian','japanese','chinese','korean','english','unknown']);
               const authorVal = meta.author && !LANG_NAMES.has(meta.author.toLowerCase().trim()) && meta.author.toLowerCase() !== 'unknown' ? meta.author : null;
               if (authorVal) { cols.push('ai_author=?'); vals.push(authorVal); }
