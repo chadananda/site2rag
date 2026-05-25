@@ -336,7 +336,7 @@ const STAGE_META = {
   s0: { label: 'Baseline Assessment',   desc: 'Measures original document quality: character density, text layer integrity, word recognition rate, language detection.' },
   s1: { label: 'Image Preprocessing',   desc: 'Normalizes page orientation, removes scan skew, reduces noise artifacts, binarizes for OCR input.' },
   s2: { label: 'Region Classification', desc: 'Classifies content regions into text blocks, figures, tables, margins and routes each to the appropriate strategy.' },
-  s3: { label: 'Multi-engine OCR',      desc: 'Runs Tesseract + EasyOCR + PaddleOCR + DocTR in parallel per block. Haiku synthesis resolves conflicts and selects the best reading per word.' },
+  s3: { label: 'Multi-engine OCR',      desc: null },  // desc shown dynamically from stage.approach/notes
   s4: { label: 'Quality Escalation',    desc: 'Evaluates per-block OCR confidence; flags dirty regions for vision-model escalation.' },
   s5: { label: 'Vision OCR',            desc: 'Sends low-confidence regions to multimodal vision models. Effective for damaged scans, historical scripts, and mixed-language content.' },
   s6: { label: 'Linguistic Spell Fix',  desc: 'Context-aware correction of fuzzy-confidence words via Claude Haiku. Preserves bounding-box geometry.' },
@@ -442,11 +442,12 @@ function renderStageRows(stage, perStage, prevScore, decisions) {
     ? `<span class="s-name${hasError ? ' s-err' : ''}">${esc(meta.label)}${hasError ? ' [!]' : ''}</span>`
     : `<span class="s-skip">${esc(meta.label)} — skipped</span>`;
 
+  const descText = meta.desc ?? (hasWork ? [stage.approach, stage.notes].filter(Boolean).join(' · ') || null : null);
   const stageRow = `<tr class="stage-row">
     <td class="s-id">[${id}]</td>
     <td>
       ${nameHtml}
-      ${hasWork ? `<div class="s-desc">${esc(meta.desc)}</div>` : ''}
+      ${hasWork && descText ? `<div class="s-desc">${esc(descText)}</div>` : ''}
       ${statsParts ? `<div class="s-stats">${esc(statsParts)}</div>` : ''}
     </td>
     ${scoreCell}
@@ -723,9 +724,9 @@ load().then(r => {
   ].filter(Boolean);
 
   if (perfRows.length) {
-    document.getElementById('perf-table').innerHTML = perfRows.map(pairs =>
-      `<tr>${pairs.map(([k, v]) => `<td class="perf-key">${k}</td><td class="perf-val">${v}</td>`).join('')}</tr>`
-    ).join('');
+    document.getElementById('perf-table').innerHTML = perfRows
+      .flatMap(pairs => pairs.map(([k, v]) => `<tr><td class="perf-key">${k}</td><td class="perf-val">${v}</td></tr>`))
+      .join('');
   } else {
     document.getElementById('perf-block').style.display = 'none';
   }
