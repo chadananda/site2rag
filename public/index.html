@@ -1615,8 +1615,8 @@ function app() {
         for (const [url, prior] of Object.entries(this.processingActivity)) {
           if (prior?.stage !== 'queued') continue; // already has real stage from server
           const doc = this.docs.find(d => d.url === url);
-          // Doc completed/failed without us catching it — drop the queued indicator
-          if (doc && doc.status !== 'pending') { needsRefresh = true; continue; }
+          // Doc completed — drop queued indicator and reload
+          if (doc && doc.status !== 'pending') { delete this._seenInPipeline?.[url]; needsRefresh = true; continue; }
           if (map[url]) {
             // Job now visible in activity feed — let server stage show through, mark as seen
             this._seenInPipeline[url] = true;
@@ -1641,13 +1641,15 @@ function app() {
           this._pendingRefreshTimer = setTimeout(async () => {
             this._pendingRefreshTimer = null;
             const watched = new Set(this._queuedUrls);
-            await this.refresh();
-            // After refresh, check if any watched doc is now done → switch to Upgraded tab
+            // Reload docs (not just sites) so card status updates in place
+            this.docsPage = 1;
+            await Promise.all([this.loadDocs(), this.refreshTabCounts()]);
+            // Check if any watched doc is now done → toast
             const justDone = this.docs.filter(d => watched.has(d.url) && d.status === 'done');
             if (justDone.length) {
               this._queuedUrls = new Set([...this._queuedUrls].filter(u => !justDone.find(d => d.url === u)));
               if (this.activeTab !== 'upgraded') this.switchTab('upgraded');
-              this._toast(`✓ ${justDone.length === 1 ? justDone[0].title || 'Document' : justDone.length + ' documents'} processed — see Upgraded tab`, 5000);
+              this._toast(`✓ ${justDone.length === 1 ? (justDone[0].title || 'Document') : justDone.length + ' documents'} processed`, 5000);
             }
           }, 1500);
         }
