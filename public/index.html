@@ -242,9 +242,13 @@ if ('serviceWorker' in navigator) {
          x-text="toastMsg"></div>
   </template>
 
-  <!-- Site selector — compact mini cards, selected = dark border -->
+  <!-- Two-column layout: left sidebar (sites) + right main -->
+  <div class="flex gap-4 items-start">
+
+  <!-- Left sidebar — site selector -->
+  <div class="flex-shrink-0 sticky top-4" style="width:284px">
   <template x-if="sites.length">
-    <div class="flex flex-wrap gap-2 mb-5">
+    <div class="flex flex-col gap-2">
       <template x-for="s in sites" :key="s.domain">
         <button @click="selectSite(s)" class="site-tab"
           :class="activeSite?.domain===s.domain ? 'active' : ''">
@@ -283,6 +287,10 @@ if ('serviceWorker' in navigator) {
       </template>
     </div>
   </template>
+  </div><!-- end sidebar -->
+
+  <!-- Right main content -->
+  <div class="flex-1 min-w-0">
 
   <!-- H1 domain heading + detail card -->
   <template x-if="activeSite">
@@ -877,6 +885,9 @@ if ('serviceWorker' in navigator) {
       </template>
     </div>
   </template>
+
+  </div><!-- end right main -->
+  </div><!-- end two-column flex -->
 </div>
 
 <!-- PDF detail modal -->
