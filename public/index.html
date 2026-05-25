@@ -645,7 +645,7 @@ if ('serviceWorker' in navigator) {
                         <span class="text-xs font-semibold text-blue-700 tracking-wide uppercase" style="letter-spacing:0.04em">Pipeline Progress</span>
                         <span class="text-xs text-blue-500 font-mono">
                           <template x-if="processingActivity[doc.url].stage === 'queued'">
-                            <span>waiting in queue…</span>
+                            <span>submitted to pipeline…</span>
                           </template>
                           <template x-if="processingActivity[doc.url].stage !== 'queued' && processingActivity[doc.url].estimated_remaining_ms > 0">
                             <span>~<span x-text="fmtDuration(processingActivity[doc.url].estimated_remaining_ms)"></span> left</span>
@@ -659,7 +659,7 @@ if ('serviceWorker' in navigator) {
                       <template x-if="processingActivity[doc.url].stage === 'queued'">
                         <div class="px-3 py-3 flex items-center gap-2 text-xs text-blue-400">
                           <span class="inline-block w-2 h-2 rounded-full bg-amber-400 processing-pulse shrink-0"></span>
-                          <span>Queued — waiting for a worker to pick this up…</span>
+                          <span>Submitted to pipeline — processing will begin shortly…</span>
                         </div>
                       </template>
                       <template x-if="processingActivity[doc.url].stage !== 'queued'">
@@ -898,7 +898,7 @@ if ('serviceWorker' in navigator) {
                 <div>No adequate PDFs found — PDFs scoring ≥70% appear here.</div>
               </template>
               <template x-if="activeTab==='upgraded'">
-                <div>No upgraded PDFs yet. Run the upgrade worker to see results here.</div>
+                <div>No upgraded PDFs yet. Reprocess documents to see results here.</div>
               </template>
             </div>
           </template>
