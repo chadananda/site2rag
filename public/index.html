@@ -1604,18 +1604,31 @@ function app() {
         const rows = await fetch(`${API_BASE}/api/sites/activity?site=${this.activeSite.domain}`).then(r => r.json());
         const map = {};
         for (const r of rows) map[r.url] = r;
-        // Preserve locally-queued docs that haven't reached the pipeline yet
-        let completedQueued = false;
+
+        // Track which locally-queued URLs have now entered the pipeline (seen in activity feed)
+        if (!this._seenInPipeline) this._seenInPipeline = {};
+        let needsRefresh = false;
         for (const [url, prior] of Object.entries(this.processingActivity)) {
-          if (!map[url] && prior?.stage === 'queued') {
-            const doc = this.docs.find(d => d.url === url);
-            if (doc?.status === 'pending') map[url] = prior;
-            else completedQueued = true; // doc status changed — job finished
+          if (prior?.stage === 'queued') {
+            if (map[url]) {
+              // Job appeared in pipeline activity — mark it
+              this._seenInPipeline[url] = true;
+              map[url] = prior; // keep local queued label until stage advances
+            } else if (this._seenInPipeline[url]) {
+              // Was in pipeline, now gone — completed; trigger refresh
+              delete this._seenInPipeline[url];
+              needsRefresh = true;
+            } else {
+              // Not yet seen in pipeline — preserve locally-queued state
+              // but also refresh after 90s in case we missed it
+              if (!prior._queuedAt) prior._queuedAt = Date.now();
+              if (Date.now() - prior._queuedAt > 90000) needsRefresh = true;
+              else map[url] = prior;
+            }
           }
         }
         this.processingActivity = map;
-        // If a queued job just completed, refresh immediately to pick up new status
-        if (completedQueued && !this._pendingRefreshTimer) {
+        if (needsRefresh && !this._pendingRefreshTimer) {
           this._pendingRefreshTimer = setTimeout(() => {
             this._pendingRefreshTimer = null;
             this.refresh();
