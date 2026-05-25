@@ -628,6 +628,10 @@ if ('serviceWorker' in navigator) {
                        :class="doc.summary_tier==='haiku' ? 'text-gray-600' : 'text-gray-500 italic'"
                        x-text="doc.ai_summary"></p>
                   </template>
+                  <!-- Language badge -->
+                  <template x-if="doc.ai_language">
+                    <span class="text-xs text-gray-400 font-medium" x-text="doc.ai_language"></span>
+                  </template>
 
                   <!-- Rich pipeline progress card -->
                   <template x-if="processingActivity[doc.url]?.stage">
