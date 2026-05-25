@@ -106,8 +106,12 @@ export const wordQuality = (text, lang = 'english') => {
     const ratio = vowels / lower.length;
     return ratio >= 0.2 && ratio <= 0.75 && !/(.)\1{3,}/.test(lower);
   });
+  // Space-injection penalty: broken PDFs have systematically short tokens (syllable fragments).
+  // Normal English avg word length ≈ 4.7 chars; space-injected text drops to ≈ 3.0-3.5.
+  const avgTokenLen = sample.length > 0 ? sample.reduce((s, w) => s + w.length, 0) / sample.length : 5;
+  const spaceInjectionPenalty = avgTokenLen < 3.5 ? (3.5 - avgTokenLen) : 0;
   const noise = ocrNoiseRatio(text);
-  return Math.max(0, Math.round(pr * Math.max(0, realWords.length / sample.length - noise * 3) * 100) / 100);
+  return Math.max(0, Math.round(pr * Math.max(0, realWords.length / sample.length - noise * 3 - spaceInjectionPenalty) * 100) / 100);
 };
 /**
  * Score a PDF file for OCR quality. Returns quality metrics object.

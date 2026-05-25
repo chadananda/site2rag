@@ -856,12 +856,6 @@ if ('serviceWorker' in navigator) {
                             <button @click.stop="queueUpgrade(doc)"
                                     class="px-2 py-0.5 rounded border border-indigo-300 text-indigo-600 bg-indigo-50 hover:bg-indigo-200 hover:border-indigo-400 active:scale-95 text-xs font-semibold cursor-pointer transition-all">↑ boost</button>
                           </template>
-                          <!-- Spell-fix: mostly-readable doc with minor OCR errors (≥80% text extractable) -->
-                          <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending' && doc.composite_score >= 0.55 && doc.composite_score < 0.95 && activeTab !== 'failed' && (doc.readable_pages_pct == null || doc.readable_pages_pct >= 0.8)">
-                            <button @click.stop="queueUpgrade(doc, 'spell-fix')"
-                                    class="px-2 py-0.5 rounded border border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-200 hover:border-violet-400 active:scale-95 text-xs font-semibold cursor-pointer transition-all"
-                                    :title="'AI text correction (hyphen-breaks, OCR errors)' + (doc.spell_fix_cost_usd > 0 ? ' ~$' + doc.spell_fix_cost_usd.toFixed(3) : '')">✦ spell-fix</button>
-                          </template>
                           <!-- Upgrade / Reprocess button -->
                           <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending'">
                             <button @click.stop="queueUpgrade(doc, 'ocr')"
@@ -1066,13 +1060,6 @@ if ('serviceWorker' in navigator) {
                 <!-- Upgrade action buttons (when not queued) -->
                 <template x-if="!expandedDoc.skip && expandedDoc.status !== 'processing' && expandedDoc.status !== 'pending'">
                   <span class="flex gap-2 items-center flex-wrap">
-                    <!-- Spell-fix: mostly-readable doc (≥80% text extractable) with minor OCR errors -->
-                    <template x-if="expandedDoc.composite_score >= 0.55 && expandedDoc.composite_score < 0.95 && (expandedDoc.readable_pages_pct == null || expandedDoc.readable_pages_pct >= 0.8)">
-                      <button @click="queueUpgrade(expandedDoc, 'spell-fix')" :disabled="expandedDoc._upgrading"
-                              class="px-3 py-1.5 text-xs rounded-lg border border-violet-300 text-violet-700 bg-violet-50 hover:bg-violet-100 font-semibold"
-                              :title="'Fix hyphen-breaks, missing spaces, OCR artifacts via Haiku'"
-                              x-text="'✦ Spell-fix' + (expandedDoc.spell_fix_cost_usd > 0 ? ' ~$' + expandedDoc.spell_fix_cost_usd.toFixed(3) : '')"></button>
-                    </template>
                     <!-- Upgrade / Reprocess -->
                     <template x-if="!cannotUpgrade(expandedDoc)">
                       <button @click="queueUpgrade(expandedDoc, 'ocr')" :disabled="expandedDoc._upgrading"
