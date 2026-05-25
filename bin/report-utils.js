@@ -62,7 +62,8 @@ export const mapDoc = (d, domain) => {
   const title = isGenericTitle(d.title) ? (titleFromUrl(d.url) || d.title || null) : d.title;
   const ai_summary = d.ai_summary || buildFreeSummary(d) || null;
   const summary_tier = d.summary_tier || (ai_summary && !d.ai_summary ? 'free' : null);
-  const langKey = d.ai_language || detectLanguage([d.excerpt, title].filter(Boolean).join(' ')) || 'unknown';
+  const receiptLang = (() => { try { return JSON.parse(d.receipt_json || 'null')?.document?.language ?? null; } catch { return null; } })();
+  const langKey = receiptLang || d.ai_language || detectLanguage([d.excerpt, title].filter(Boolean).join(' ')) || 'unknown';
   const ai_language = LANG_DISPLAY[langKey] ?? null;
   const lang_cost_mult = LANG_COST[langKey] ?? LANG_COST.unknown;
   const pages = d.pages || 0;

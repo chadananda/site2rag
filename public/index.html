@@ -542,7 +542,7 @@ if ('serviceWorker' in navigator) {
                         <div class="score-num" x-text="doc.effective_before != null ? Math.round(doc.effective_before*100)+'%' : '—'"></div>
                         <div class="score-sub">original</div>
                       </div>
-                      <div class="score-block bg-green-100 border border-green-300">
+                      <div class="score-block bg-green-100 border border-green-300" style="font-size:0.7em;padding:4px 3px;width:56px">
                         <div class="score-num text-green-700" x-text="(doc.effective_improvement > 0 ? '+' : '') + Math.round((doc.effective_improvement||0)*100)+'%'"></div>
                         <div class="score-sub text-green-600">gain</div>
                       </div>
@@ -829,8 +829,8 @@ if ('serviceWorker' in navigator) {
                     <button @click.stop="openPdfViewer(doc.url, docTitle(doc))"
                        class="px-2.5 py-1 rounded border text-xs font-semibold shadow-sm transition-all active:scale-95 cursor-pointer"
                        :class="scoreColorCls(doc.composite_score)"
-                       :title="'View original PDF' + (doc.composite_score != null ? ' · '+Math.round(doc.composite_score*100)+'%' : '')"
-                       x-text="'PDF' + (doc.composite_score != null ? ' '+Math.round(doc.composite_score*100)+'%' : '')"></button>
+                       :title="'View original PDF' + ((doc.effective_before ?? doc.composite_score) != null ? ' · '+Math.round((doc.effective_before ?? doc.composite_score)*100)+'%' : '')"
+                       x-text="'PDF' + ((doc.effective_before ?? doc.composite_score) != null ? ' '+Math.round((doc.effective_before ?? doc.composite_score)*100)+'%' : '')"></button>
                     <button @click.stop="openMdViewer(doc)"
                        class="px-2.5 py-1 rounded border border-indigo-200 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 active:scale-95 text-xs font-semibold shadow-sm transition-all cursor-pointer"
                        title="View extracted markdown">Markdown</button>
