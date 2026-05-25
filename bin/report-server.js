@@ -227,14 +227,14 @@ createServer(async (req, res) => {
           const isActive = job.status === 'processing';
           const pagesDone = job.pages_done ?? 0;
           const pagesTotal = job.pages_total ?? 0;
-          const elapsedMs = job.elapsed_ms ?? null;
+          const elapsedMs = job.started_at ? Date.now() - job.started_at : null;
           const pagesRate = (pagesDone > 0 && elapsedMs > 0) ? pagesDone / elapsedMs : null;
           const pagesRemaining = pagesTotal - pagesDone;
           const estimatedRemainingMs = (pagesRate && pagesRemaining > 0) ? Math.round(pagesRemaining / pagesRate) : null;
           return {
             url: docUrl,
             status: job.status,
-            stage: isActive ? (job.current_stage || job.stage || null) : 'queued',
+            stage: isActive ? (job.current_stage || null) : 'queued',
             elapsed_ms: elapsedMs,
             pages_done: pagesDone,
             total_pages: pagesTotal,
@@ -760,31 +760,32 @@ if (process.env.PIPELINE_URL) {
           try {
             const job = await pipelinePoller.getJob(jobId);
             if (job.status === 'done') {
-              let receipt = job.receipt ?? {};
-              try { const r2 = await pipelinePoller._get(`/jobs/${jobId}/receipt`); if (r2?.quality) receipt = r2; } catch {}
-              const afterScore  = receipt.quality?.after  ?? receipt.quality?.final ?? null;
+              const receipt = job.receipt ?? {};
+              const afterScore  = receipt.quality?.after  ?? null;
               const beforeScore = receipt.quality?.before ?? before_score ?? null;
               const gain        = receipt.quality?.gain   ?? (afterScore != null && beforeScore != null ? afterScore - beforeScore : null);
               const upgradedDir = join(getMirrorRoot(), '..', 'websites_mirror', domain, '.upgraded');
               mkdirSync(upgradedDir, { recursive: true });
               const hash = sha256(url).slice(0, 16);
               let savedPdf = null, savedMd = null;
-              try { const buf = await pipelinePoller.getPdf(jobId); const p = join(upgradedDir, `x${hash}.pdf`); writeFileSync(p, buf); savedPdf = p; } catch (e) { console.warn(`[poll] pdf fetch failed: ${e.message}`); }
-              try { const md = await pipelinePoller.getMarkdown(jobId); if (md?.trim()) { const p = join(upgradedDir, `x${hash}.md`); writeFileSync(p, md); savedMd = p; } } catch {}
+              // Use download paths from API response if available, else fall back to standard routes
+              const pdfPath = job.downloads?.pdf ?? `/jobs/${jobId}/pdf`;
+              const mdPath  = job.downloads?.md  ?? `/jobs/${jobId}/md`;
+              try { const buf = await pipelinePoller._getRaw(pdfPath, 'buffer'); const p = join(upgradedDir, `x${hash}.pdf`); writeFileSync(p, buf); savedPdf = p; } catch (e) { console.warn(`[poll] pdf fetch failed: ${e.message}`); }
+              try { const md = await pipelinePoller._getRaw(mdPath, 'text'); if (md?.trim()) { const p = join(upgradedDir, `x${hash}.md`); writeFileSync(p, md); savedMd = p; } } catch {}
               db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, marker_md_path=?, before_score=COALESCE(before_score,?), after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?`)
                 .run(new Date().toISOString(), savedPdf, savedMd, beforeScore, afterScore, gain, receipt.document?.page_count ?? null, 'pipeline-v2', JSON.stringify(receipt), url);
               if (afterScore != null) db.prepare('UPDATE pdf_quality SET composite_score=? WHERE url=?').run(afterScore, url);
-              // Write metadata from receipt back to pdf_quality if present
+              // Write metadata + language from receipt to pdf_quality
               const meta = receipt.metadata ?? {};
-              if (meta.meta_title || meta.meta_author || meta.meta_subject) {
-                const cols = []; const vals = [];
-                if (meta.meta_title)   { cols.push('ai_title=?');   vals.push(meta.meta_title); }
-                if (meta.meta_author)  { cols.push('ai_author=?');  vals.push(meta.meta_author); }
-                if (meta.meta_subject) { cols.push('ai_summary=?'); vals.push(meta.meta_subject); }
-                vals.push(url);
-                db.prepare(`UPDATE pdf_quality SET ${cols.join(', ')} WHERE url=?`).run(...vals);
-              }
-              console.log(`[poll] done: ${url.split('/').pop()} before=${beforeScore?.toFixed(2)} after=${afterScore?.toFixed(2)} gain=${gain?.toFixed(2)}`);
+              const lang = receipt.document?.language ?? null;
+              const cols = [], vals = [];
+              if (meta.title)   { cols.push('ai_title=?');   vals.push(meta.title); }
+              if (meta.author)  { cols.push('ai_author=?');  vals.push(meta.author); }
+              if (meta.subject) { cols.push('ai_summary=?'); vals.push(meta.subject); }
+              if (lang)         { cols.push('ai_language=?'); vals.push(lang); }
+              if (cols.length)  { vals.push(url); db.prepare(`UPDATE pdf_quality SET ${cols.join(', ')} WHERE url=?`).run(...vals); }
+              console.log(`[poll] done: ${url.split('/').pop()} lang=${lang} before=${beforeScore?.toFixed(2)} after=${afterScore?.toFixed(2)} gain=${gain?.toFixed(2)}`);
             } else if (job.status === 'failed') {
               db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=?, pipeline_job_id=NULL WHERE url=?").run(new Date().toISOString(), (job.error || 'failed').slice(0, 300), url);
             }
