@@ -636,10 +636,7 @@ if ('serviceWorker' in navigator) {
                        :class="doc.summary_tier==='haiku' ? 'text-gray-600' : 'text-gray-500 italic'"
                        x-text="doc.ai_summary"></p>
                   </template>
-                  <!-- Language badge -->
-                  <template x-if="doc.ai_language">
-                    <span class="text-xs text-gray-400 font-medium" x-text="doc.ai_language"></span>
-                  </template>
+
 
                   <!-- Rich pipeline progress card -->
                   <template x-if="processingActivity[doc.url]?.stage">
@@ -764,18 +761,6 @@ if ('serviceWorker' in navigator) {
                         </template>
                         <template x-if="!doc.narrative && !doc.method_steps && !doc.method_summary && doc.method">
                           <span><span class="text-gray-400">method</span> <span class="font-semibold text-gray-700" x-text="methodLabel(doc.method)"></span></span>
-                        </template>
-                        <template x-if="doc.pages_processed">
-                          <span><span class="font-semibold text-gray-700 mono" x-text="fmt(doc.pages_processed)"></span><span class="text-gray-400"> / <span x-text="fmt(doc.pages)"></span> pp OCR'd</span></span>
-                        </template>
-                        <template x-if="!doc.pages_processed && doc.pages">
-                          <span class="text-gray-500 mono"><span x-text="fmt(doc.pages)"></span> pages</span>
-                        </template>
-                        <template x-if="doc.ai_language && doc.lang_key !== 'english' && doc.lang_key !== 'unknown'">
-                          <span class="text-gray-500" x-text="doc.ai_language"></span>
-                        </template>
-                        <template x-if="doc.finished_at">
-                          <span class="text-gray-400 ml-auto" x-text="relTime(doc.finished_at)"></span>
                         </template>
                       </div>
                     </div>
