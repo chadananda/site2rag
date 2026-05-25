@@ -452,7 +452,7 @@ createServer(async (req, res) => {
       const quality = db.prepare('SELECT composite_score, content_hash FROM pdf_quality WHERE url=?').get(docUrl);
       if (!quality) return err(res, 404, 'doc not scored yet');
       const upgradeMethod = url.searchParams.get('method') || 'ocr'; // 'spell-fix' | 'ocr'
-      const existing = db.prepare('SELECT status FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
+      const existing = db.prepare('SELECT status, before_score FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
       const now = new Date().toISOString();
       const imp = 999; // user-triggered reprocess always jumps the queue
 
@@ -486,7 +486,8 @@ createServer(async (req, res) => {
         const page = db.prepare('SELECT local_path FROM pages WHERE url=?').get(docUrl);
         if (page?.local_path && existsSync(page.local_path)) {
           const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: process.env.PIPELINE_API_KEY });
-          const beforeScore = quality.composite_score ?? null;
+          // Preserve original before_score on reprocess — don't overwrite with current (post-upgrade) score
+          const beforeScore = existing?.before_score ?? quality.composite_score ?? null;
           pClient.submitJob({ pdfPath: page.local_path, sourceUrl: docUrl, importance: imp, meta: {} })
             .then(jobId => {
               const db3 = safeOpenDb(domain);
@@ -773,7 +774,7 @@ if (process.env.PIPELINE_URL) {
               const mdPath  = job.downloads?.md  ?? `/jobs/${jobId}/md`;
               try { const buf = await pipelinePoller._getRaw(pdfPath, 'buffer'); const p = join(upgradedDir, `x${hash}.pdf`); writeFileSync(p, buf); savedPdf = p; } catch (e) { console.warn(`[poll] pdf fetch failed: ${e.message}`); }
               try { const md = await pipelinePoller._getRaw(mdPath, 'text'); if (md?.trim()) { const p = join(upgradedDir, `x${hash}.md`); writeFileSync(p, md); savedMd = p; } } catch {}
-              db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, marker_md_path=?, before_score=COALESCE(before_score,?), after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?`)
+              db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=COALESCE(?,upgraded_pdf_path), marker_md_path=COALESCE(?,marker_md_path), before_score=COALESCE(before_score,?), after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?`)
                 .run(new Date().toISOString(), savedPdf, savedMd, beforeScore, afterScore, gain, receipt.document?.page_count ?? null, 'pipeline-v2', JSON.stringify(receipt), url);
               if (afterScore != null) db.prepare('UPDATE pdf_quality SET composite_score=? WHERE url=?').run(afterScore, url);
               // Write metadata + language from receipt to pdf_quality
@@ -781,7 +782,9 @@ if (process.env.PIPELINE_URL) {
               const lang = receipt.document?.language ?? null;
               const cols = [], vals = [];
               if (meta.title)   { cols.push('ai_title=?');   vals.push(meta.title); }
-              if (meta.author)  { cols.push('ai_author=?');  vals.push(meta.author); }
+              const LANG_NAMES = new Set(['arabic','persian','hebrew','french','spanish','german','italian','portuguese','dutch','polish','turkish','russian','japanese','chinese','korean','english','unknown']);
+              const authorVal = meta.author && !LANG_NAMES.has(meta.author.toLowerCase().trim()) && meta.author.toLowerCase() !== 'unknown' ? meta.author : null;
+              if (authorVal) { cols.push('ai_author=?'); vals.push(authorVal); }
               if (meta.subject) { cols.push('ai_summary=?'); vals.push(meta.subject); }
               if (lang)         { cols.push('ai_language=?'); vals.push(lang); }
               if (cols.length)  { vals.push(url); db.prepare(`UPDATE pdf_quality SET ${cols.join(', ')} WHERE url=?`).run(...vals); }
