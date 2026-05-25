@@ -118,7 +118,7 @@ const STATIC_MIME = {
 
 const corsHeaders = { 'Access-Control-Allow-Origin': CORS_ORIGIN, 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type, Authorization' };
 const noCacheHeaders = { ...corsHeaders, 'Cache-Control': 'no-cache, no-store' };
-const cacheHeaders = (maxAge = 86400) => ({ ...corsHeaders, 'Cache-Control': `public, max-age=${maxAge}` });
+const cacheHeaders = () => ({ ...corsHeaders, 'Cache-Control': 'no-cache, no-store' });
 const json = (res, data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json', ...noCacheHeaders }); res.end(JSON.stringify(data)); };
 const err = (res, status, msg) => json(res, { error: msg }, status);
 
@@ -137,8 +137,7 @@ const serveStatic = (res, reqPath) => {
     return res.end(readFileSync(index));
   }
   const mime = STATIC_MIME[extname(filePath).toLowerCase()] || 'application/octet-stream';
-  const noCache = filePath.endsWith('sw.js') || filePath.endsWith('version.json');
-  res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': noCache ? 'no-cache, no-store' : 'public, max-age=3600' });
+  res.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'no-cache, no-store' });
   res.end(readFileSync(filePath));
 };
 
