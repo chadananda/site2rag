@@ -754,17 +754,29 @@ if (process.env.PIPELINE_URL) {
             if (job.status === 'done') {
               let receipt = job.receipt ?? {};
               try { const r2 = await pipelinePoller._get(`/jobs/${jobId}/receipt`); if (r2?.quality) receipt = r2; } catch {}
-              const afterScore = receipt.quality?.final ?? null;
+              const afterScore  = receipt.quality?.after  ?? receipt.quality?.final ?? null;
+              const beforeScore = receipt.quality?.before ?? before_score ?? null;
+              const gain        = receipt.quality?.gain   ?? (afterScore != null && beforeScore != null ? afterScore - beforeScore : null);
               const upgradedDir = join(getMirrorRoot(), '..', 'websites_mirror', domain, '.upgraded');
               mkdirSync(upgradedDir, { recursive: true });
               const hash = sha256(url).slice(0, 16);
               let savedPdf = null, savedMd = null;
-              try { const buf = await pipelinePoller.getPdf(jobId); const p = join(upgradedDir, `x${hash}.pdf`); writeFileSync(p, buf); savedPdf = p; } catch {}
+              try { const buf = await pipelinePoller.getPdf(jobId); const p = join(upgradedDir, `x${hash}.pdf`); writeFileSync(p, buf); savedPdf = p; } catch (e) { console.warn(`[poll] pdf fetch failed: ${e.message}`); }
               try { const md = await pipelinePoller.getMarkdown(jobId); if (md?.trim()) { const p = join(upgradedDir, `x${hash}.md`); writeFileSync(p, md); savedMd = p; } } catch {}
-              db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, marker_md_path=?, after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?`)
-                .run(new Date().toISOString(), savedPdf, savedMd, afterScore, receipt.quality?.gain ?? null, receipt.document?.page_count ?? null, 'pipeline-v2', JSON.stringify(receipt), url);
+              db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=?, marker_md_path=?, before_score=COALESCE(before_score,?), after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?`)
+                .run(new Date().toISOString(), savedPdf, savedMd, beforeScore, afterScore, gain, receipt.document?.page_count ?? null, 'pipeline-v2', JSON.stringify(receipt), url);
               if (afterScore != null) db.prepare('UPDATE pdf_quality SET composite_score=? WHERE url=?').run(afterScore, url);
-              console.log(`[poll] done: ${url.split('/').pop()} score=${afterScore}`);
+              // Write metadata from receipt back to pdf_quality if present
+              const meta = receipt.metadata ?? {};
+              if (meta.meta_title || meta.meta_author || meta.meta_subject) {
+                const cols = []; const vals = [];
+                if (meta.meta_title)   { cols.push('ai_title=?');   vals.push(meta.meta_title); }
+                if (meta.meta_author)  { cols.push('ai_author=?');  vals.push(meta.meta_author); }
+                if (meta.meta_subject) { cols.push('ai_summary=?'); vals.push(meta.meta_subject); }
+                vals.push(url);
+                db.prepare(`UPDATE pdf_quality SET ${cols.join(', ')} WHERE url=?`).run(...vals);
+              }
+              console.log(`[poll] done: ${url.split('/').pop()} before=${beforeScore?.toFixed(2)} after=${afterScore?.toFixed(2)} gain=${gain?.toFixed(2)}`);
             } else if (job.status === 'failed') {
               db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=?, pipeline_job_id=NULL WHERE url=?").run(new Date().toISOString(), (job.error || 'failed').slice(0, 300), url);
             }
@@ -775,6 +787,6 @@ if (process.env.PIPELINE_URL) {
       } finally { db.close(); }
     }
   };
-  const runPoller = () => pollPipelineJobs().catch(e => console.error('[poll] error:', e.message)).finally(() => setTimeout(runPoller, 10000));
+  const runPoller = () => pollPipelineJobs().catch(e => console.error('[poll] error:', e.message)).finally(() => setTimeout(runPoller, 3000));
   setTimeout(runPoller, 5000);
 }
