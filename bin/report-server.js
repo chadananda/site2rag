@@ -506,6 +506,20 @@ createServer(async (req, res) => {
     } finally { db.close(); }
   }
 
+  // Reset a doc to original state — clears all upgrade queue data for testing
+  if (path === '/api/docs/reset' && req.method === 'POST') {
+    if (!isAdmin(req)) return err(res, 401, 'Admin password required');
+    const domain = url.searchParams.get('site');
+    const docUrl = url.searchParams.get('url');
+    if (!domain || !docUrl) return err(res, 400, 'site and url params required');
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, 'db unavailable');
+    try {
+      db.prepare('DELETE FROM pdf_upgrade_queue WHERE url=?').run(docUrl);
+      return json(res, { ok: true });
+    } catch (e) { return err(res, 500, e?.message); } finally { db.close(); }
+  }
+
   // Focus mode — tells the upgrade daemon to concentrate on one site until done
   if (path === '/api/focus') {
     if (!isAdmin(req)) return err(res, 401, 'Admin password required');

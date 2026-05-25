@@ -602,6 +602,11 @@ if ('serviceWorker' in navigator) {
                                   title="Upgrade PDF: improve text layer, convert to PDF/A archival format"
                                   x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ reprocess' : '⬆ upgrade'"></button>
                         </template>
+                        <template x-if="doc.status==='done'">
+                          <button @click.stop="resetDoc(doc)"
+                                  class="px-2.5 py-1 rounded border border-red-300 text-red-500 bg-white hover:bg-red-50 active:scale-95 text-xs font-semibold cursor-pointer transition-all"
+                                  title="Reset to original — removes upgrade data so you can test fresh">✕ reset</button>
+                        </template>
                       </div>
                     </template>
                     <!-- Status badges -->
@@ -825,7 +830,7 @@ if ('serviceWorker' in navigator) {
                        class="px-2.5 py-1 rounded border text-xs font-semibold shadow-sm transition-all"
                        :class="doc.status==='done' ? 'border-purple-200 bg-purple-50 text-purple-600 hover:bg-purple-100 active:scale-95 cursor-pointer' : 'border-gray-100 bg-gray-50 text-gray-300 cursor-not-allowed'"
                        :title="doc.status==='done' ? 'View upgrade analysis receipt' : 'No receipt until upgraded'"
-                       x-text="'Receipt' + (doc.upgrade_cost_usd > 0 ? ' $'+(doc.upgrade_cost_usd < 0.01 ? doc.upgrade_cost_usd.toFixed(4) : doc.upgrade_cost_usd.toFixed(2)) : '')"></button>
+                       x-text="'Receipt' + (doc.upgrade_cost_usd != null ? ' $'+(doc.upgrade_cost_usd < 0.01 ? doc.upgrade_cost_usd.toFixed(4) : doc.upgrade_cost_usd.toFixed(2)) : '')"></button>
                   </div>
                 </div>
               </div>
@@ -1363,6 +1368,17 @@ function app() {
       }
     },
 
+    async resetDoc(doc) {
+      if (!confirm(`Reset "${doc.title || doc.url.split('/').pop()}" to original? This removes all upgrade data.`)) return;
+      const r = await this.adminFetch(`${API_BASE}/api/docs/reset?site=${this.activeSite.domain}&url=${encodeURIComponent(doc.url)}`, { method: 'POST' }).catch(() => null);
+      if (r?.ok) {
+        this._toast('✓ Reset to original', 3000);
+        await this.loadDocs();
+      } else {
+        this._toast('✗ Reset failed', 4000);
+      }
+    },
+
     upgradeProgressLabel(s) {
       const total = s.total_pdfs || 0;
       if (!total) return 'no PDFs';
@@ -1697,11 +1713,13 @@ function app() {
     },
 
     overallPct(a) {
-      if (!a) return 0;
-      const TOTAL_STAGES = 8;
-      const done = (a.completed || []).length;
-      const stageFraction = (a.total_pages > 0 && a.pages_done > 0) ? a.pages_done / a.total_pages : (a.stage ? 0.1 : 0);
-      return Math.min(99, Math.round((done + stageFraction) / TOTAL_STAGES * 100));
+      if (!a || a.stage === 'queued') return 0;
+      // Use page-level progress if SLP reports it
+      if (a.total_pages > 0 && a.pages_done > 0) return Math.min(99, Math.round(a.pages_done / a.total_pages * 100));
+      // SLP usually reports pages_total=0; estimate from elapsed time (cap at 90%)
+      const elapsedMs = a.elapsed_ms || 0;
+      const estimatedMs = 90000; // ~90s typical for a few pages
+      return Math.min(90, Math.round(elapsedMs / estimatedMs * 100));
     },
 
     async refreshTabCounts() {
