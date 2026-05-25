@@ -796,11 +796,12 @@ if (process.env.PIPELINE_URL) {
               const meta = receipt.metadata ?? {};
               const lang = receipt.document?.language ?? null;
               const cols = [], vals = [];
-              if (meta.title)   { cols.push('ai_title=?');   vals.push(meta.title); }
+              const stripQuotes = s => s ? s.replace(/^["«»「」『』"']+|["«»「」『』"']+$/g, '').trim() : s;
+              if (meta.title)   { cols.push('ai_title=?');   vals.push(stripQuotes(meta.title)); }
               const LANG_NAMES = new Set(['arabic','persian','hebrew','french','spanish','german','italian','portuguese','dutch','polish','turkish','russian','japanese','chinese','korean','english','unknown']);
               const authorVal = meta.author && !LANG_NAMES.has(meta.author.toLowerCase().trim()) && meta.author.toLowerCase() !== 'unknown' ? meta.author : null;
               if (authorVal) { cols.push('ai_author=?'); vals.push(authorVal); }
-              if (meta.subject) { cols.push('ai_summary=?'); vals.push(meta.subject); }
+              if (meta.subject) { cols.push('ai_summary=?'); vals.push(stripQuotes(meta.subject)); }
               if (lang)         { cols.push('ai_language=?'); vals.push(lang); }
               if (cols.length)  { vals.push(url); db.prepare(`UPDATE pdf_quality SET ${cols.join(', ')} WHERE url=?`).run(...vals); }
               console.log(`[poll] done: ${url.split('/').pop()} lang=${lang} before=${beforeScore?.toFixed(2)} after=${afterScore?.toFixed(2)} gain=${gain?.toFixed(2)}`);
