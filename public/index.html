@@ -612,11 +612,11 @@ if ('serviceWorker' in navigator) {
                       <div class="flex gap-1 items-center shrink-0">
                         <template x-if="!doc.skip && doc.status==='pending'">
                           <button @click.stop="queueUpgrade(doc)"
-                                  class="px-2.5 py-1 rounded border border-green-700 text-green-50 bg-green-700 hover:bg-green-800 shadow-sm active:scale-95 text-xs font-semibold cursor-pointer transition-all">↑ boost</button>
+                                  class="px-2.5 py-1 rounded border border-green-600/50 text-white shadow-sm active:scale-95 text-xs font-semibold cursor-pointer transition-all" style="background-color: oklch(0.47 0.14 149.73 / 0.59)">↑ boost</button>
                         </template>
                         <template x-if="!doc.skip && doc.status !== 'processing' && doc.status !== 'pending'">
                           <button @click.stop="queueUpgrade(doc, 'ocr')"
-                                  class="px-2.5 py-1 rounded border border-green-700 text-green-50 bg-green-700 hover:bg-green-800 shadow-sm active:scale-95 text-xs font-semibold cursor-pointer transition-all"
+                                  class="px-2.5 py-1 rounded border border-green-600/50 text-white shadow-sm active:scale-95 text-xs font-semibold cursor-pointer transition-all" style="background-color: oklch(0.47 0.14 149.73 / 0.59)"
                                   title="Upgrade PDF: improve text layer, convert to PDF/A archival format"
                                   x-text="doc.status==='failed' ? '↺ retry' : doc.status==='done' ? '↺ reprocess' : '⬆ upgrade'"></button>
                         </template>
