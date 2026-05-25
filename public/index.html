@@ -738,26 +738,6 @@ if ('serviceWorker' in navigator) {
                   <!-- Full upgrade report panel for done docs -->
                   <template x-if="doc.status==='done'">
                     <div class="mt-2 rounded-lg border border-green-200 bg-white overflow-hidden text-xs">
-                      <!-- Header row: PDF type + score trail -->
-                      <div class="flex items-center gap-2 px-3 py-2 bg-green-50 border-b border-green-100 flex-wrap">
-                        <!-- PDF type badge -->
-                        <span class="font-semibold px-2 py-0.5 rounded-full"
-                              :class="doc.pdf_type==='image' ? 'bg-amber-100 text-amber-800' : doc.pdf_type==='mixed' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'"
-                              x-text="doc.pdf_type==='image' ? 'Image PDF' : doc.pdf_type==='mixed' ? 'Mixed PDF' : 'Text PDF'"></span>
-                        <!-- Readable pages before -->
-                        <template x-if="doc.readable_pages_pct != null">
-                          <span class="text-gray-500" x-text="Math.round(doc.readable_pages_pct*100)+'% of pages with search text'"></span>
-                        </template>
-                        <!-- Score: final + improvement (before is already on the left score block) -->
-                        <span class="ml-auto flex items-center gap-1.5 font-mono">
-                          <template x-if="doc.effective_after != null">
-                            <span class="score-pill bg-green-100 text-green-800 font-bold" x-text="Math.round(doc.effective_after*100)+'%'"></span>
-                            <template x-if="doc.effective_improvement > 0.01">
-                              <span class="text-green-700 font-bold" x-text="'+'+Math.round(doc.effective_improvement*100)+'pts'"></span>
-                            </template>
-                          </template>
-                        </span>
-                      </div>
                       <!-- Processing details row — narrative or method steps -->
                       <div class="px-3 py-2 flex flex-wrap gap-x-4 gap-y-1 text-gray-600 border-b border-gray-100">
                         <template x-if="doc.narrative">
@@ -812,6 +792,11 @@ if ('serviceWorker' in navigator) {
                   <!-- Metadata row -->
                   <div class="flex items-center gap-3 text-xs text-gray-400 flex-wrap mt-1">
                     <span x-show="doc.pages" class="mono font-medium text-gray-500" x-text="fmt(doc.pages)+' pp'"></span>
+                    <template x-if="doc.pdf_type">
+                      <span class="font-semibold px-1.5 py-0.5 rounded-full"
+                            :class="doc.pdf_type==='image' ? 'bg-amber-100 text-amber-800' : doc.pdf_type==='mixed' ? 'bg-orange-100 text-orange-800' : 'bg-blue-100 text-blue-800'"
+                            x-text="doc.pdf_type==='image' ? 'Image PDF' : doc.pdf_type==='mixed' ? 'Mixed PDF' : 'Text PDF'"></span>
+                    </template>
                     <template x-if="doc.lang_key && doc.lang_key !== 'english'">
                       <span class="px-1.5 py-0.5 rounded font-medium"
                             :class="langBadgeCls(doc)"
