@@ -62,7 +62,7 @@ if ('serviceWorker' in navigator) {
   .seg-fill-rest{height:100%;transition:flex .4s;flex:1}
 
   /* Site tabs — compact cards, selected state only */
-  .site-tab{display:flex;flex-direction:column;padding:10px 14px;color:#9ca3af;transition:border-color .15s,box-shadow .15s,color .15s;border-radius:8px;width:260px;flex:none;text-align:left;background:white;border:2px solid #e5e7eb}
+  .site-tab{display:flex;flex-direction:column;justify-content:flex-start;padding:10px 14px;color:#9ca3af;transition:border-color .15s,box-shadow .15s,color .15s;border-radius:8px;width:260px;flex:none;text-align:left;background:white;border:2px solid #e5e7eb}
   .site-tab.active{color:#111827;border-color:#111827;box-shadow:0 2px 8px rgba(0,0,0,.12)}
   .site-tab:hover:not(.active){color:#374151;border-color:#9ca3af}
 
@@ -248,7 +248,7 @@ if ('serviceWorker' in navigator) {
   <!-- Left sidebar — site selector -->
   <div class="flex-shrink-0 sticky top-4" style="width:284px">
   <template x-if="sites.length">
-    <div class="flex flex-col gap-2">
+    <div class="flex flex-col gap-2 items-start">
       <template x-for="s in sites" :key="s.domain">
         <button @click="selectSite(s)" class="site-tab"
           :class="activeSite?.domain===s.domain ? 'active' : ''">
