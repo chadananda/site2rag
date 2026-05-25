@@ -449,7 +449,7 @@ createServer(async (req, res) => {
     const db = safeOpenDb(domain);
     if (!db) return err(res, 404, 'db unavailable');
     try {
-      const quality = db.prepare('SELECT composite_score, content_hash FROM pdf_quality WHERE url=?').get(docUrl);
+      const quality = db.prepare('SELECT composite_score, content_hash, has_text_layer, readable_pages_pct FROM pdf_quality WHERE url=?').get(docUrl);
       if (!quality) return err(res, 404, 'doc not scored yet');
       const upgradeMethod = url.searchParams.get('method') || 'ocr'; // 'spell-fix' | 'ocr'
       const existing = db.prepare('SELECT status, before_score FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
@@ -486,8 +486,10 @@ createServer(async (req, res) => {
         const page = db.prepare('SELECT local_path FROM pages WHERE url=?').get(docUrl);
         if (page?.local_path && existsSync(page.local_path)) {
           const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: process.env.PIPELINE_API_KEY });
-          // Preserve original before_score on reprocess — don't overwrite with current (post-upgrade) score
-          const beforeScore = existing?.before_score ?? quality.composite_score ?? null;
+          // For image PDFs (no text layer), before_score is effectively 0 — the stored before_score may be
+          // corrupted from earlier bugs, and composite_score is now the post-upgrade value.
+          const isImagePdf = !quality.has_text_layer || (quality.readable_pages_pct != null && quality.readable_pages_pct < 0.3);
+          const beforeScore = isImagePdf ? 0 : (existing?.before_score ?? quality.composite_score ?? null);
           pClient.submitJob({ pdfPath: page.local_path, sourceUrl: docUrl, importance: imp, meta: {} })
             .then(jobId => {
               const db3 = safeOpenDb(domain);
