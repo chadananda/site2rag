@@ -62,7 +62,8 @@ export const mapDoc = (d, domain) => {
   const title = isGenericTitle(d.title) ? (titleFromUrl(d.url) || d.title || null) : d.title;
   const ai_summary = d.ai_summary || buildFreeSummary(d) || null;
   const summary_tier = d.summary_tier || (ai_summary && !d.ai_summary ? 'free' : null);
-  const receiptLang = (() => { try { return JSON.parse(d.receipt_json || 'null')?.document?.language ?? null; } catch { return null; } })();
+  const ISO_TO_KEY = { ar:'arabic', fa:'persian', he:'hebrew', fr:'french', es:'spanish', de:'german', it:'italian', pt:'portuguese', nl:'dutch', pl:'polish', tr:'turkish', ru:'russian', ja:'japanese', zh:'chinese', ko:'korean', en:'english' };
+  const receiptLang = (() => { try { const l = JSON.parse(d.receipt_json || 'null')?.document?.language ?? null; return l ? (ISO_TO_KEY[l] ?? l) : null; } catch { return null; } })();
   const langKey = receiptLang || d.ai_language || detectLanguage([d.excerpt, title].filter(Boolean).join(' ')) || 'unknown';
   const ai_language = LANG_DISPLAY[langKey] ?? null;
   const lang_cost_mult = LANG_COST[langKey] ?? LANG_COST.unknown;
