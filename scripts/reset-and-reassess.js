@@ -32,7 +32,7 @@ const reocrDir = join(metaDir, 'reocr');
 if (existsSync(reocrDir)) {
   const files = readdirSync(reocrDir);
   console.log(`Deleting ${files.length} upgraded PDF files from ${reocrDir}...`);
-  for (const f of files) rmSync(join(reocrDir, f));
+  for (const f of files) rmSync(join(reocrDir, f), { recursive: true, force: true });
 }
 
 // 2. Clear upgrade queue and quality scores
