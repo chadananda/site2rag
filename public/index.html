@@ -134,6 +134,21 @@ if ('serviceWorker' in navigator) {
       </div>
     </div>
   </template>
+  <!-- PDF viewer modal -->
+  <template x-if="pdfViewerUrl">
+    <div class="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" @click.self="pdfViewerUrl=null">
+      <div class="bg-white rounded-xl shadow-2xl w-full max-w-5xl h-[92vh] flex flex-col overflow-hidden">
+        <div class="flex items-center justify-between px-4 py-2 border-b bg-gray-50 rounded-t-xl shrink-0">
+          <span class="text-sm font-semibold text-gray-700 truncate" x-text="pdfViewerTitle || 'PDF Viewer'"></span>
+          <div class="flex items-center gap-3">
+            <a :href="pdfViewerUrl" target="_blank" class="text-xs text-indigo-600 hover:underline">open in new tab ↗</a>
+            <button @click="pdfViewerUrl=null" class="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
+          </div>
+        </div>
+        <iframe :src="pdfViewerUrl" class="flex-1 w-full border-0 rounded-b-xl"></iframe>
+      </div>
+    </div>
+  </template>
   <!-- Markdown viewer modal: single pane if not upgraded, dual pane if upgraded -->
   <template x-if="mdViewerDoc">
     <div class="fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4" @click.self="mdViewerDoc=null;mdViewerOld=null;mdViewerNew=null">
@@ -405,15 +420,56 @@ if ('serviceWorker' in navigator) {
   <template x-if="activeSite">
     <div class="ml-3 pl-4 border-l-2 border-gray-200">
 
-      <!-- Sticky context bar: domain breadcrumb -->
-      <div class="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-gray-200 -mx-4 px-4 pt-2 pb-2 mb-4">
-        <div class="flex items-center gap-2 text-xs text-gray-400">
+      <!-- Sticky context + filter bar (unified) -->
+      <div class="sticky top-0 z-10 bg-white/95 backdrop-blur-sm border-b border-gray-200 -mx-4 px-4 pt-2 pb-3 mb-4">
+        <!-- Breadcrumb row -->
+        <div class="flex items-center gap-2 text-xs text-gray-400 mb-2">
           <span class="status-dot flex-shrink-0"
             :class="activeSite.last_run?.status==='running'?'bg-blue-400 processing-pulse':activeSite.last_run?.status==='failed'?'bg-red-400':'bg-gray-300'"></span>
           <span class="mono font-semibold text-gray-700" x-text="activeSite.domain"></span>
           <span class="text-gray-300 mx-1">›</span>
           <span class="text-gray-500">PDF Documents</span>
           <span class="mono text-gray-400 ml-1" x-text="docsTotal ? '('+fmt(docsTotal)+')' : ''"></span>
+        </div>
+        <!-- Filter controls row -->
+        <div class="flex flex-wrap gap-3 items-end">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Search</label>
+            <input type="search" x-model="filters.q" @input="debouncedSearch()"
+              placeholder="title, URL or text…"
+              class="border border-gray-200 rounded px-3 py-1.5 text-sm w-52 focus:outline-none focus:ring-1 focus:ring-gray-400">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Status</label>
+            <select x-model="filters.status" @change="loadDocs()"
+              class="border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400">
+              <option value="">All</option>
+              <option value="done">Upgraded</option>
+              <option value="pending">Queued</option>
+              <option value="processing">Processing</option>
+              <option value="failed">Failed</option>
+              <option value="unscored">Unscored</option>
+            </select>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Max score</label>
+            <div class="flex items-center gap-1.5">
+              <input type="range" x-model="filters.score_max" min="0" max="1" step="0.05" @change="loadDocs()"
+                class="w-20 accent-gray-700">
+              <span class="text-xs mono text-gray-500 w-8" x-text="'≤'+Number(filters.score_max).toFixed(2)"></span>
+            </div>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Sort</label>
+            <select x-model="filters.sort" @change="loadDocs()"
+              class="border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400">
+              <option value="score_asc">Worst first</option>
+              <option value="score_desc">Best first</option>
+              <option value="improved_desc">Most improved</option>
+              <option value="pages_desc">Most pages</option>
+              <option value="title_asc">Title A–Z</option>
+            </select>
+          </div>
         </div>
       </div><!-- end sticky bar -->
 
@@ -449,46 +505,6 @@ if ('serviceWorker' in navigator) {
         </div>
       </template>
 
-      <!-- Filter bar -->
-      <div class="bg-white border border-gray-200 rounded-lg px-4 py-3 mb-4 flex flex-wrap gap-3 items-end shadow-sm">
-        <div>
-          <label class="block text-xs text-gray-400 mb-1">Search</label>
-          <input type="search" x-model="filters.q" @input="debouncedSearch()"
-            placeholder="title, URL or text…"
-            class="border border-gray-200 rounded px-3 py-1.5 text-sm w-52 focus:outline-none focus:ring-1 focus:ring-gray-400">
-        </div>
-        <div>
-          <label class="block text-xs text-gray-400 mb-1">Status</label>
-          <select x-model="filters.status" @change="loadDocs()"
-            class="border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400">
-            <option value="">All</option>
-            <option value="done">Upgraded</option>
-            <option value="pending">Queued</option>
-            <option value="processing">Processing</option>
-            <option value="failed">Failed</option>
-            <option value="unscored">Unscored</option>
-          </select>
-        </div>
-        <div>
-          <label class="block text-xs text-gray-400 mb-1">Max score</label>
-          <div class="flex items-center gap-1.5">
-            <input type="range" x-model="filters.score_max" min="0" max="1" step="0.05" @change="loadDocs()"
-              class="w-20 accent-gray-700">
-            <span class="text-xs mono text-gray-500 w-8" x-text="'≤'+Number(filters.score_max).toFixed(2)"></span>
-          </div>
-        </div>
-        <div>
-          <label class="block text-xs text-gray-400 mb-1">Sort</label>
-          <select x-model="filters.sort" @change="loadDocs()"
-            class="border border-gray-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-gray-400">
-            <option value="score_asc">Worst first</option>
-            <option value="score_desc">Best first</option>
-            <option value="improved_desc">Most improved</option>
-            <option value="pages_desc">Most pages</option>
-            <option value="title_asc">Title A–Z</option>
-          </select>
-        </div>
-      </div>
 
       <template x-if="loading && !docs.length">
         <div class="text-center py-12 text-gray-400 text-sm">Loading…</div>
@@ -630,6 +646,32 @@ if ('serviceWorker' in navigator) {
                     <template x-if="doc.status==='done'">
                       <span class="shrink-0 text-xs font-semibold text-green-700 bg-green-50 px-2 py-0.5 rounded-full">✓ upgraded</span>
                     </template>
+                  </div>
+
+                  <!-- Viewer buttons: PDF / Markdown / PDF/A / Receipt -->
+                  <div class="flex gap-1.5 items-center flex-wrap mt-1 mb-1">
+                    <!-- PDF (original) — colored by composite_score -->
+                    <button @click.stop="openPdfViewer(doc.url, docTitle(doc))"
+                       class="px-2 py-0.5 rounded border text-xs font-semibold transition-all active:scale-95 cursor-pointer"
+                       :class="scoreColorCls(doc.composite_score)"
+                       :title="'View original PDF' + (doc.composite_score != null ? ' · '+Math.round(doc.composite_score*100)+'%' : '')"
+                       x-text="'PDF' + (doc.composite_score != null ? ' '+Math.round(doc.composite_score*100)+'%' : '')"></button>
+                    <!-- Markdown viewer -->
+                    <button @click.stop="openMdViewer(doc)"
+                       class="px-2 py-0.5 rounded border border-indigo-200 text-indigo-600 hover:bg-indigo-50 active:scale-95 text-xs font-semibold transition-all cursor-pointer"
+                       title="View extracted markdown">Markdown</button>
+                    <!-- PDF/A (upgraded) — colored by after_score, grayed if not upgraded -->
+                    <button @click.stop="doc.status==='done' && doc.upgraded_pdf_path && openPdfViewer(`${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`, docTitle(doc)+' (upgraded)')"
+                       class="px-2 py-0.5 rounded border text-xs font-semibold transition-all"
+                       :class="(doc.status==='done' && doc.upgraded_pdf_path) ? scoreColorCls(doc.effective_after ?? doc.after_score) + ' active:scale-95 cursor-pointer' : 'border-gray-100 text-gray-300 cursor-not-allowed'"
+                       :title="(doc.status==='done' && doc.upgraded_pdf_path) ? 'View upgraded PDF/A' + (doc.effective_after != null ? ' · '+Math.round(doc.effective_after*100)+'%' : '') : 'Not yet upgraded'"
+                       x-text="'PDF/A' + ((doc.status==='done' && doc.effective_after != null) ? ' '+Math.round(doc.effective_after*100)+'%' : '')"></button>
+                    <!-- Receipt — grayed if not upgraded; shows actual cost when available -->
+                    <button @click.stop="doc.status==='done' && (receiptUrl=`/receipt.html?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`)"
+                       class="px-2 py-0.5 rounded border text-xs font-semibold transition-all"
+                       :class="doc.status==='done' ? 'border-purple-200 text-purple-600 hover:bg-purple-50 active:scale-95 cursor-pointer' : 'border-gray-100 text-gray-300 cursor-not-allowed'"
+                       :title="doc.status==='done' ? 'View upgrade analysis receipt' : 'No receipt until upgraded'"
+                       x-text="'Receipt' + (doc.upgrade_cost_usd > 0 ? ' $'+doc.upgrade_cost_usd.toFixed(2) : '')"></button>
                   </div>
 
                   <!-- Author -->
@@ -849,33 +891,6 @@ if ('serviceWorker' in navigator) {
                     <a x-show="doc.source_url" :href="doc.source_url" target="_blank" rel="noopener" @click.stop
                        class="hover:text-blue-500 truncate max-w-xs"
                        x-text="'↗ '+(doc.source_url||'').replace(/^https?:\/\//,'').split('/')[0]"></a>
-                    <!-- Card viewer links + admin action buttons -->
-                    <div class="ml-auto flex gap-1.5 items-center flex-shrink-0 flex-wrap">
-                      <!-- Viewer links (always visible) -->
-                      <!-- PDF (original) — colored by composite_score -->
-                      <a :href="doc.url" target="_blank" rel="noopener" @click.stop
-                         class="px-2 py-0.5 rounded border text-xs font-semibold transition-all active:scale-95"
-                         :class="scoreColorCls(doc.composite_score)"
-                         :title="'Open original PDF' + (doc.composite_score != null ? ' · '+Math.round(doc.composite_score*100)+'%' : '')"
-                         x-text="'PDF' + (doc.composite_score != null ? ' '+Math.round(doc.composite_score*100)+'%' : '')"></a>
-                      <!-- Markdown viewer -->
-                      <button @click.stop="openMdViewer(doc)"
-                         class="px-2 py-0.5 rounded border border-indigo-200 text-indigo-600 hover:bg-indigo-50 active:scale-95 text-xs font-semibold transition-all cursor-pointer"
-                         title="View extracted markdown">Markdown</button>
-                      <!-- PDF/A (upgraded) — colored by after_score, grayed if not upgraded -->
-                      <a :href="(doc.status==='done' && doc.upgraded_pdf_path) ? `${API_BASE}/api/docs/download?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}` : null"
-                         target="_blank" rel="noopener" @click.stop
-                         class="px-2 py-0.5 rounded border text-xs font-semibold transition-all"
-                         :class="(doc.status==='done' && doc.upgraded_pdf_path) ? scoreColorCls(doc.effective_after ?? doc.after_score) + ' active:scale-95' : 'border-gray-100 text-gray-300 cursor-not-allowed pointer-events-none'"
-                         :title="(doc.status==='done' && doc.upgraded_pdf_path) ? 'Open upgraded PDF/A' + (doc.effective_after != null ? ' · '+Math.round(doc.effective_after*100)+'%' : '') : 'Not yet upgraded'"
-                         x-text="'PDF/A' + ((doc.status==='done' && doc.effective_after != null) ? ' '+Math.round(doc.effective_after*100)+'%' : '')"></a>
-                      <!-- Receipt — grayed if not upgraded; shows actual cost when available -->
-                      <button @click.stop="doc.status==='done' && (receiptUrl=`/receipt.html?site=${activeSite.domain}&url=${encodeURIComponent(doc.url)}`)"
-                         class="px-2 py-0.5 rounded border text-xs font-semibold transition-all"
-                         :class="doc.status==='done' ? 'border-purple-200 text-purple-600 hover:bg-purple-50 active:scale-95 cursor-pointer' : 'border-gray-100 text-gray-300 cursor-not-allowed'"
-                         :title="doc.status==='done' ? 'View upgrade analysis receipt' : 'No receipt until upgraded'"
-                         x-text="'Receipt' + (doc.upgrade_cost_usd > 0 ? ' $'+doc.upgrade_cost_usd.toFixed(2) : '')"></button>
-                    </div>
                   </div>
 
                   <!-- Error (failed docs) -->
@@ -1235,6 +1250,7 @@ function app() {
     adminToken: localStorage.getItem('adminToken') || '',
     showLoginModal: false, loginPassword: '', loginError: '',
     receiptUrl: null,
+    pdfViewerUrl: null, pdfViewerTitle: '',
     mdViewerDoc: null, mdViewerOld: null, mdViewerNew: null,
     focusDomain: null,
     upgradingUrls: {},
@@ -1244,6 +1260,11 @@ function app() {
       if (s < 60) return s + 's';
       if (s < 3600) return Math.floor(s / 60) + 'm';
       return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+    },
+
+    openPdfViewer(url, title) {
+      this.pdfViewerUrl = url;
+      this.pdfViewerTitle = title || '';
     },
 
     async openMdViewer(doc) {

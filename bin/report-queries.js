@@ -26,7 +26,20 @@ const dirSizeBytes = (path) => {
 const safeOpenDb = (domain) => {
   const dbPath = join(getMirrorRoot(), domain, '_meta', 'site.sqlite');
   if (!existsSync(dbPath)) return null;
-  try { return openDb(domain); } catch { return null; }
+  try {
+    const db = openDb(domain);
+    db.pragma('journal_mode = WAL');
+    db.pragma('cache_size = -8000'); // 8MB read cache
+    // Ensure indexes for the hot list query join paths
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_pages_mime_gone ON pages(mime_type, gone);
+      CREATE INDEX IF NOT EXISTS idx_pq_url ON pdf_quality(url);
+      CREATE INDEX IF NOT EXISTS idx_puq_url ON pdf_upgrade_queue(url);
+      CREATE INDEX IF NOT EXISTS idx_hosts_hosted_url ON hosts(hosted_url);
+      CREATE INDEX IF NOT EXISTS idx_pq_score ON pdf_quality(composite_score);
+    `);
+    return db;
+  } catch { return null; }
 };
 
 /** Aggregate stats for one site domain. */
@@ -84,7 +97,11 @@ export const siteSummary = (domain, siteUrl, description = null) => {
   } finally { db.close(); }
 };
 
-const DOC_SELECT = `
+// CTE factored out so hosts GROUP BY runs once per query (not as a correlated derived table per row).
+// upgrade_history correlated subquery removed — it ran 50× per page; u.before_score covers the fallback need.
+const HOST_CTE = `WITH h AS (SELECT hosted_url, MIN(host_url) AS host_url, MIN(hosted_title) AS hosted_title FROM hosts GROUP BY hosted_url)`;
+
+const DOC_COLS = `
   SELECT p.url, p.path_slug, p.last_seen_at,
          q.composite_score, q.pages, q.word_quality_estimate, q.readable_pages_pct,
          q.avg_chars_per_page, q.has_text_layer, q.skip,
@@ -93,13 +110,15 @@ const DOC_SELECT = `
          q.thumbnail_path, q.summary_tier, q.ai_language,
          h.host_url as source_url,
          u.status, u.before_score, u.after_score, u.score_improvement,
-         u.upgraded_pdf_path, u.pages_processed, u.method, u.finished_at, u.started_at, u.queued_at, u.error, u.importance, u.receipt_json,
-         (SELECT json_group_array(json_object('attempt', uh.attempt, 'method', uh.method, 'score_before', uh.score_before, 'score_after', uh.score_after, 'error', uh.error))
-          FROM pdf_upgrade_history uh WHERE uh.url=p.url ORDER BY uh.attempt) as upgrade_history
+         u.upgraded_pdf_path, u.pages_processed, u.method, u.finished_at, u.started_at, u.queued_at, u.error, u.importance, u.receipt_json`;
+
+const DOC_JOINS = `
   FROM pages p
   LEFT JOIN pdf_quality q ON p.url=q.url
   LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
-  LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title FROM hosts GROUP BY hosted_url) h ON p.url=h.hosted_url`;
+  LEFT JOIN h ON p.url=h.hosted_url`;
+
+const DOC_SELECT = `${HOST_CTE} ${DOC_COLS} ${DOC_JOINS}`;
 
 /** Server-side filtered + paginated doc list. */
 export const siteDocs = (domain, params) => {
@@ -146,10 +165,7 @@ export const siteDocs = (domain, params) => {
         : `CASE WHEN u.status='processing' THEN 0 ELSE 1 END ASC, COALESCE(u.priority, COALESCE(q.composite_score,0.5)*100) DESC`;
     const where = wheres.join(' AND ');
 
-    const total = db.prepare(`SELECT COUNT(*) as n FROM pages p
-      LEFT JOIN pdf_quality q ON p.url=q.url LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
-      LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title FROM hosts GROUP BY hosted_url) h ON p.url=h.hosted_url
-      WHERE ${where}`).get(...vals).n;
+    const total = db.prepare(`${HOST_CTE} SELECT COUNT(*) as n ${DOC_JOINS} WHERE ${where}`).get(...vals).n;
     const rows = db.prepare(`${DOC_SELECT} WHERE ${where} ORDER BY ${orderBy} LIMIT ${PER_PAGE} OFFSET ${offset}`).all(...vals);
     return { docs: rows.map(d => mapDoc(d, domain)), total, page, pages: Math.ceil(total / PER_PAGE), per_page: PER_PAGE };
   } finally { db.close(); }
