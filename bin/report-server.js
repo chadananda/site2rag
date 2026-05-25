@@ -403,6 +403,21 @@ createServer(async (req, res) => {
     return res.end(content);
   }
 
+  if (path === '/api/docs/download-pdf-upgraded') {
+    const domain = url.searchParams.get('site');
+    const docUrl = url.searchParams.get('url');
+    if (!domain || !docUrl) return err(res, 400, 'site and url params required');
+    const db = safeOpenDb(domain);
+    if (!db) return err(res, 404, 'db unavailable');
+    let row;
+    try { row = db.prepare('SELECT upgraded_pdf_path FROM pdf_upgrade_queue WHERE url=?').get(docUrl); }
+    finally { db.close(); }
+    if (!row?.upgraded_pdf_path || !existsSync(row.upgraded_pdf_path)) return err(res, 404, 'no upgraded PDF');
+    const filename = row.upgraded_pdf_path.split('/').pop() || 'upgraded.pdf';
+    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${filename}"` });
+    return res.end(readFileSync(row.upgraded_pdf_path));
+  }
+
   if (path === '/api/docs/upgrade' && req.method === 'POST') {
     if (!isAdmin(req)) return err(res, 401, 'Admin password required');
     const domain = url.searchParams.get('site');

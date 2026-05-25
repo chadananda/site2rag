@@ -141,9 +141,15 @@ if ('serviceWorker' in navigator) {
         <div class="flex items-center justify-between px-4 py-2 border-b bg-gray-50 rounded-t-xl shrink-0">
           <span class="text-sm font-semibold text-gray-700" x-text="mdViewerDoc?.title || 'Markdown'"></span>
           <div class="flex items-center gap-3">
-            <template x-if="mdViewerNew">
-              <a :href="`${API_BASE}/api/docs/download-md?site=${activeSite?.domain}&url=${encodeURIComponent(mdViewerDoc?.url||'')}`"
-                 download class="text-xs text-blue-600 hover:underline">↓ download upgraded</a>
+            <template x-if="mdViewerDoc">
+              <div class="flex items-center gap-2 text-xs">
+                <a :href="`${API_BASE}/api/docs/download-pdf-upgraded?site=${activeSite?.domain}&url=${encodeURIComponent(mdViewerDoc?.url||'')}`"
+                   download class="text-green-700 hover:underline font-medium">↓ PDF</a>
+                <a :href="`${API_BASE}/api/docs/download-md?site=${activeSite?.domain}&url=${encodeURIComponent(mdViewerDoc?.url||'')}`"
+                   download class="text-blue-600 hover:underline font-medium">↓ Markdown</a>
+                <a :href="`${API_BASE}/api/docs/receipt?site=${activeSite?.domain}&url=${encodeURIComponent(mdViewerDoc?.url||'')}`"
+                   download="receipt.json" class="text-indigo-600 hover:underline font-medium">↓ Receipt</a>
+              </div>
             </template>
             <button @click="mdViewerDoc=null;mdViewerOld=null;mdViewerNew=null" class="text-gray-400 hover:text-gray-700 text-xl leading-none">&times;</button>
           </div>
@@ -1212,7 +1218,7 @@ function app() {
     docsTotal: 0, docsPage: 1, docsPages: 1,
     tabTotals: { original: null, upgraded: null },
     filters: { q: '', status: '', score_max: 1, sort: 'score_asc' },
-    loading: false, apiStatus: '', apiError: '', lastRefresh: '', toastMsg: '', _toastTimer: null,
+    loading: false, apiStatus: '', apiError: '', lastRefresh: '', toastMsg: '', _toastTimer: null, _pendingRefreshTimer: null,
     sumDisplay: {},   // domain -> interpolated summarized count for smooth bar
     _sumRates: {},    // domain -> { value, rate, ts }
     crawlDisplay: {}, // domain -> interpolated crawled count for smooth bar
@@ -1243,21 +1249,26 @@ function app() {
       this.mdViewerDoc = doc;
       this.mdViewerOld = null;
       this.mdViewerNew = null;
-      const domain = this.activeSite.domain;
-      const urlEnc = encodeURIComponent(doc.url);
-      const fetchMd = async (endpoint) => {
-        try {
-          const r = await fetch(`${API_BASE}${endpoint}?site=${domain}&url=${urlEnc}`);
-          return r.ok ? await r.text() : '';
-        } catch { return ''; }
-      };
-      // Fetch both in parallel
-      const [oldMd, newMd] = await Promise.all([
-        fetchMd('/api/docs/download-md-original'),
-        fetchMd('/api/docs/download-md-upgraded'),
-      ]);
-      this.mdViewerOld = oldMd;
-      this.mdViewerNew = newMd;
+      try {
+        const domain = this.activeSite?.domain;
+        if (!domain) { this.mdViewerOld = ''; this.mdViewerNew = ''; return; }
+        const urlEnc = encodeURIComponent(doc.url);
+        const fetchMd = async (endpoint) => {
+          try {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), 12000);
+            const r = await fetch(`${API_BASE}${endpoint}?site=${domain}&url=${urlEnc}`, { signal: ctrl.signal });
+            clearTimeout(timer);
+            return r.ok ? await r.text() : '';
+          } catch { return ''; }
+        };
+        const [oldMd, newMd] = await Promise.all([
+          fetchMd('/api/docs/download-md-original'),
+          fetchMd('/api/docs/download-md-upgraded'),
+        ]);
+        this.mdViewerOld = oldMd;
+        this.mdViewerNew = newMd;
+      } catch { this.mdViewerOld = ''; this.mdViewerNew = ''; }
     },
 
     /** fetch() wrapper that adds admin token and intercepts 401 with a login prompt. */
@@ -1594,13 +1605,22 @@ function app() {
         const map = {};
         for (const r of rows) map[r.url] = r;
         // Preserve locally-queued docs that haven't reached the pipeline yet
+        let completedQueued = false;
         for (const [url, prior] of Object.entries(this.processingActivity)) {
           if (!map[url] && prior?.stage === 'queued') {
             const doc = this.docs.find(d => d.url === url);
             if (doc?.status === 'pending') map[url] = prior;
+            else completedQueued = true; // doc status changed — job finished
           }
         }
         this.processingActivity = map;
+        // If a queued job just completed, refresh immediately to pick up new status
+        if (completedQueued && !this._pendingRefreshTimer) {
+          this._pendingRefreshTimer = setTimeout(() => {
+            this._pendingRefreshTimer = null;
+            this.refresh();
+          }, 1500);
+        }
       } catch {}
     },
 
