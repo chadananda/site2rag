@@ -90,8 +90,9 @@ export const wordQuality = (text, lang = 'english') => {
     const td = tokenDistribution(text);
     // sc dominates: Latin OCR garbage on an Arabic scan has sc≈0, so td (which can be decent
     // for any varied token set) cannot rescue the score. Real text in the right script has sc≥0.6.
-    // Also cap by printableRatio: a text that's 50% control chars can't be 80% quality.
-    return Math.min(pr, Math.min(1, Math.round((sc * 0.85 + td * 0.15) * 100) / 100));
+    // Multiply by printableRatio: if 40% of chars are control-char garbage, max quality is 60%.
+    const scriptScore = Math.min(1, sc * 0.85 + td * 0.15);
+    return Math.round(pr * scriptScore * 100) / 100;
   }
   // Latin scripts: word-list + vowel-ratio heuristic
   const tokens = text.replace(/[^a-zA-ZÀ-ÿ\s]/g, ' ').split(/\s+/).filter(w => w.length >= 2 && w.length <= 20);
@@ -106,7 +107,7 @@ export const wordQuality = (text, lang = 'english') => {
     return ratio >= 0.2 && ratio <= 0.75 && !/(.)\1{3,}/.test(lower);
   });
   const noise = ocrNoiseRatio(text);
-  return Math.max(0, Math.min(pr, realWords.length / sample.length - noise * 3));
+  return Math.max(0, Math.round(pr * Math.max(0, realWords.length / sample.length - noise * 3) * 100) / 100);
 };
 /**
  * Score a PDF file for OCR quality. Returns quality metrics object.
@@ -139,22 +140,26 @@ export const scorePdf = async (pdfPath) => {
     let data;
     try { data = await pdfParse(buf, { max: sampleMax }); } catch { return empty; }
     const sampleText = data.text || '';
+    // Split on form feed to find page segments; pdf-parse may produce more \f splits than actual
+    // pages (e.g. 9 segments for a 2-page PDF), so use segment count as denominator, not sampleMax.
     const pageTexts = sampleText.split('\f');
+    const segCount = Math.max(pageTexts.length, 1);
     const readableInSample = pageTexts.filter(p => p.replace(/\s/g, '').length >= 50).length;
-    const readablePct = sampleMax > 0 ? readableInSample / sampleMax : 0;
+    const readablePct = Math.min(1, readableInSample / segCount);
     const avgChars = sampleText.length / sampleMax;
     const hasText = avgChars > 5 ? 1 : 0;
     // Detect language first so wordQuality uses the correct word set
     const langSample = [pdf_title, sampleText.slice(0, 2000)].join(' ');
     const language = detectLanguage(langSample);
     const wq = wordQuality(sampleText.slice(0, 5000), language);
-    const charsScore = Math.min(avgChars / 500, 1);
-    // pdf-parse cannot decode Persian/Arabic/CJK scripts → pages with non-Latin text appear empty,
-    // making readablePct artificially low for text-layer PDFs. Use charsScore as a floor when
-    // has_text_layer=1: high avg_chars proves content exists even if the script is undecodable.
-    const adjustedReadable = hasText === 1 ? Math.max(readablePct, charsScore * 0.85) : readablePct;
-    // wordQuality() now handles non-Latin scripts via scriptConsistency() — no substitution needed.
-    const composite = 0.4 * wq + 0.3 * adjustedReadable + 0.2 * charsScore + 0.1 * hasText;
+    // Printable char ratio: custom-encoded PDFs may have many control chars (pdf-parse decoding)
+    // or ASCII-substituted glyphs. Use as a scaling factor on charsScore.
+    const pr = printableRatio(sampleText);
+    const charsScore = Math.min(avgChars * pr / 500, 1);
+    // adjustedReadable: just use readablePct directly — no charsScore floor.
+    // The old floor (charsScore*0.85) inflated scores for docs with lots of garbage chars.
+    const adjustedReadable = readablePct;
+    const composite = Math.min(1, 0.4 * wq + 0.3 * adjustedReadable + 0.2 * charsScore + 0.1 * hasText);
     const excerpt = extractExcerpt(sampleText);
     // Processing difficulty: 0=trivial (text PDF, skip OCR), 1=hardest (dense image scan).
     // Primary driver: no text layer = needs OCR. Secondary: page count. Tertiary: script complexity.
