@@ -586,7 +586,7 @@ if ('serviceWorker' in navigator) {
                          x-text="docTitle(doc)"></a>
                       <!-- English subtitle for non-English docs -->
                       <template x-if="doc.title_en && doc.title_en !== docTitle(doc)">
-                        <div class="text-xs text-gray-500 truncate italic" x-text="doc.title_en"></div>
+                        <div class="text-xs text-gray-500 truncate italic" dir="ltr" x-text="doc.title_en"></div>
                       </template>
                       <!-- "was: old title" hint when AI upgraded the title -->
                       <template x-if="doc.status==='done' && doc.ai_title && doc.pdf_title && doc.ai_title !== doc.pdf_title">
