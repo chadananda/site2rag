@@ -1,6 +1,6 @@
 // Worker thread: scores a single PDF and returns metrics via postMessage.
 import { workerData, parentPort } from 'worker_threads';
-import { scorePdf } from './pdf-upgrade/score.js';
+import { scorePdf } from './score.js';
 
 try {
   const metrics = await scorePdf(workerData.pdfPath);

@@ -1,5 +1,5 @@
-// HTTP client for the pipeline service. Change baseUrl to move the service anywhere.
-// Exports: PipelineClient. Deps: node:http, node:https
+// SLP service client — submits PDF upgrade jobs to the SLP pipeline (http://localhost:49900).
+// Exports: PipelineClient. Usage: new PipelineClient({baseUrl, apiKey}) → submitJob({pdfPath,sourceUrl,importance}) → jobId
 //
 // Usage:
 //   const client = new PipelineClient({ baseUrl: process.env.PIPELINE_URL ?? 'http://localhost:4000' });

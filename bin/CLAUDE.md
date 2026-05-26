@@ -1,11 +1,25 @@
-# bin/ — Entry points and servers
+# bin/ — HTTP servers, workers, daemons
 
-- **site2rag.js** — CLI entry point: parses commands, opens DB, runs pipeline stages
-- **report-server.js** — HTTP API routes only; delegates to report-queries, report-utils, thumb-worker-pool
-- **report-queries.js** — siteSummary(), siteDocs(), recentRuns() (SQL → API data shapes)
-- **report-utils.js** — stripHtml(), getLinkContext(), buildFreeSummary(), mapDoc(), buildSummaryPrompt()
-- **thumb-worker-pool.js** — generateThumb() via Worker thread pool (pdfjs+canvas)
-- **thumb-worker.js** — Worker thread: renders PDF page to JPEG thumbnail
-- **worker-agent.py** — Universal worker agent (Python 3, no external deps); runs on any machine; GET /health, GET /capacity, POST /tools/run; auto-detects CPU/GPU/tools; self-registers with pipeline-server registry
-- **worker-agent.js** — Node.js version of worker agent (same interface; for machines with Node but not Python)
-- **install-worker.sh** — One-command deploy: `bin/install-worker.sh <host> [--registry URL]`; installs as LaunchAgent (macOS) or systemd unit (Linux)
+| File | Entry / Port | Purpose |
+|------|-------------|---------|
+| **report-server.js** | HTTP :7840 (127.0.0.1) | API + static file server. Routes: /api/sites /api/docs /api/docs/upgrade /api/docs/reset /api/thumbnail /api/runs /api/pdf /api/focus /api/activity. Serves public/ as static. Admin auth via REPORT_ADMIN_PASSWORD. Polls SLP pipeline for job status every 3s. |
+| **report-queries.js** | — | SQL → API shapes. Exports: `siteSummary`, `siteDocs`, `siteTabCounts`, `recentRuns`. Dir-size cache (5min TTL, async so requests never block). |
+| **report-utils.js** | — | Response transforms. Exports: `stripHtml`, `getLinkContext`, `buildFreeSummary`, `mapDoc`, `buildSummaryPrompt`. `mapDoc` is the central row→API shape transform; includes cost estimates, score trails, receipt parsing, narrative. |
+| **thumb-worker-pool.js** | — | Exports: `generateThumb(pdfPath,outPath)`. Worker thread pool (4–8 threads) for PDF→JPEG via pdfjs+canvas. |
+| **thumb-worker.js** | Worker thread | pdfjs render at 2× → downscale. Falls back to pdftoppm for scanned PDFs that render blank. |
+| **lnker-server.js** | HTTP :7841 | Archive mirror server. Maps `{domain}.lnker.com` Host header → `websites_mirror/{domain}/`. Rewrites internal links. robots: noindex. |
+| **worker-agent.js** | HTTP :49910 | Node.js tool-runner agent. Auto-detects: tesseract, easyocr, paddleocr, doctr, kraken, surya_ocr, marker, ollama. Warm serve pools (30–60s cold-start elimination). Endpoints: GET /health, GET /capacity, POST /tools/run. Self-registers with SLP pipeline registry. |
+| **worker-agent.py** | HTTP :49910 | Python equiv of worker-agent.js. Same interface, no external deps beyond stdlib. |
+| **setup.js** | postinstall | Idempotent PM2 registration. Safe to re-run. |
+| **updater.js** | PM2 daemon | Polls GitHub, fast-forward pull, `pm2 reload` on update. Interval: UPDATE_CHECK_INTERVAL_MIN (default 15). |
+
+## Deploy
+
+- **UI (Cloudflare Pages)**: `npm run deploy:ui` or `npm run deploy:all`
+- **Backend (tower-nas)**: `npm run deploy:backend` → git push + SSH pull + pm2 reload site2rag + pdf-report-server
+
+## Key env vars (report-server)
+
+`PIPELINE_URL` — SLP service URL (http://127.0.0.1:49900). Without it, upgrade/polling is disabled.
+`REPORT_ADMIN_PASSWORD` — enables admin endpoints (upgrade, reset, focus).
+`SITE_SESSIONS_FILE` — path to sessions JSON for multi-site UI.

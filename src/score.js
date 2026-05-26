@@ -1,7 +1,9 @@
-// PDF quality scoring -- heuristics only, no AI. Exports: scorePdf, saveQualityScore, maybeQueue, extractBadSample, ocrNoiseRatio. Re-exports: detectLanguage, LANG_COST, LANG_PRIORITY. Deps: pdf-parse, language
-import pdfParse from 'pdf-parse';
+// PDF quality scoring — heuristics only, no AI. Scores readability, text density, language.
+// Exports: scorePdf, saveQualityScore, maybeQueue, wordQuality, extractBadSample, ocrNoiseRatio, detectLanguage, LANG_COST, LANG_PRIORITY
+// maybeQueue: inserts into pdf_upgrade_queue if composite_score < threshold (used by mirror + export-doc)
+import pdfParse from 'pdf-parse';                                                  // text extraction from PDF
 import { readFileSync, existsSync } from 'fs';
-import { detectLanguage, detectLanguageFromUrl, LANG_COST, LANG_PRIORITY, LANG_WORDS } from '../language.js';
+import { detectLanguage, detectLanguageFromUrl, LANG_COST, LANG_PRIORITY, LANG_WORDS } from './language.js'; // lang detection + cost tables
 export { detectLanguage, LANG_COST, LANG_PRIORITY };
 // Common English function words for word quality estimation (baseline when lang unknown)
 const COMMON_WORDS = new Set(['the','of','and','to','a','in','is','it','you','that','he','was','for','on','are','as','with','his','they','at','be','this','from','or','had','by','not','but','have','an','were','we','their','one','all','would','there','what','so','up','out','if','about','who','get','which','go','me','when','make','can','like','time','no','just','him','know','take','into','year','your','good','some','could','them','see','other','than','then','now','look','only','come','its','over','think','also','back','after','use','two','how','our','first','well','way','even','new','want','because','any','these','give','day','most','us']);

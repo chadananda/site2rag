@@ -4,7 +4,7 @@ import { cpus } from 'os';
 import { existsSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
+import { saveQualityScore, maybeQueue } from './score.js';
 
 const WORKER_SCRIPT = join(dirname(fileURLToPath(import.meta.url)), 'score-worker.js');
 const CONCURRENCY = Math.max(1, Math.min(4, cpus().length - 2)); // cap at 4 to avoid OOM

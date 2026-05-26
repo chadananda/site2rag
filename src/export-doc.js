@@ -6,10 +6,10 @@ import { createHash } from 'crypto';
 import { mdDir } from './config.js';
 import { upsertExport } from './db.js';
 import { compileRules } from './rules.js';
-import { scorePdf, saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
+import { scorePdf, saveQualityScore, maybeQueue } from './score.js';
 export { addBacklink, assembleDocMd } from './export-doc-utils.js';
 import { addBacklink, assembleDocMd } from './export-doc-utils.js';
-import { wordQuality, detectLanguage } from './pdf-upgrade/score.js';
+import { wordQuality, detectLanguage } from './score.js';
 import { detectLanguageFromUrl } from './language.js';
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');

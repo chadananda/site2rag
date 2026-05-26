@@ -1,17 +1,18 @@
-// Crawl orchestration: queue setup, concurrent fetch loop. Exports: runMirror. Re-exports: urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks. Deps: mirror-crawl, db, rules, pdf-upgrade/score, export-doc, fetch-adapters
+// Crawl orchestration: builds queue from sitemap+recheck, runs concurrent fetch loop with per-URL classify+export.
+// Exports: runMirror. Re-exports crawl utils from mirror-crawl.js.
 import { createHash } from 'crypto';
 import { mkdirSync, writeFileSync, readFileSync } from 'fs';
 import { dirname, join, extname } from 'path';
-import * as cheerio from 'cheerio';
-import { upsertPage, markGoneUrls } from './db.js';
-import { compileRules, applyFollowOverride, stripQueryParams } from './rules.js';
-import { scorePdf, saveQualityScore, maybeQueue } from './pdf-upgrade/score.js';
-import { classifyPage } from './classify.js';
-import { exportTextPdf, exportDocx } from './export-doc.js';
-import { getAdapter } from './fetch-adapters.js';
+import * as cheerio from 'cheerio';                                                // link extraction from HTML
+import { upsertPage, markGoneUrls } from './db.js';                               // persist crawled pages
+import { compileRules, applyFollowOverride, stripQueryParams } from './rules.js'; // per-site crawl rules
+import { scorePdf, saveQualityScore, maybeQueue } from './score.js';              // score PDFs inline, queue low-scorers
+import { classifyPage } from './classify.js';                                     // classify page role after crawl
+import { exportTextPdf, exportDocx } from './export-doc.js';                     // export docs to MD inline
+import { getAdapter } from './fetch-adapters.js';                                 // pluggable HTTP/MediaWiki/WP-RSS fetch
 export { urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks } from './mirror-crawl.js';
-import { urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks } from './mirror-crawl.js';
-import { fetch } from 'undici';
+import { urlToMirrorPath, urlPathToSlug, inScope, parseRobots, extractLinks } from './mirror-crawl.js'; // pure URL/path utils
+import { fetch } from 'undici';                                                    // fast HTTP client
 
 const sha256 = (buf) => createHash('sha256').update(buf).digest('hex');
 const SCORE_TIMEOUT_MS = 30000;

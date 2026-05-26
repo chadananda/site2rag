@@ -1,10 +1,11 @@
-// SQL query functions for API routes: site summaries, doc lists, recent runs. Exports: siteSummary, siteDocs, siteTabCounts, recentRuns. Deps: db, config, report-utils
+// SQL → API shapes for report-server routes. Exports: siteSummary, siteDocs, siteTabCounts, recentRuns.
+// Sort always uses composite_score (original, never overwritten) so docs don't jump on process/reset.
 import { existsSync } from 'fs';
 import { join } from 'path';
-import { execSync, exec } from 'child_process';
-import { getMirrorRoot, mdDir } from '../src/config.js';
-import { openDb } from '../src/db.js';
-import { mapDoc } from './report-utils.js';
+import { execSync, exec } from 'child_process';                // exec for async dir-size (never blocks requests)
+import { getMirrorRoot, mdDir } from '../src/config.js';       // root paths
+import { openDb } from '../src/db.js';                         // per-site SQLite
+import { mapDoc } from './report-utils.js';                    // DB row → API doc shape
 
 const PER_PAGE = 50;
 

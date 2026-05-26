@@ -1,20 +1,23 @@
-// HTTP API + static file server. Routes: /api/sites, /api/docs, /api/thumbnail, /api/runs, /api/docs/*, /api/pdf, /api/focus; static public/. Deps: report-queries, report-utils, thumb-worker-pool, db, config, Anthropic
+// HTTP API + static file server for the PDF report dashboard.
+// Routes: /api/sites /api/docs /api/docs/upgrade /api/docs/reset /api/thumbnail /api/runs /api/pdf /api/focus /api/activity
+// Serves public/ as static files. Admin auth via REPORT_ADMIN_PASSWORD env var.
+// Polls SLP pipeline (PIPELINE_URL) every 3s for job progress; saves receipts to pdf_upgrade_queue.
 import { createServer } from 'http';
 import { execFile } from 'child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync } from 'fs';
 import { join, extname, dirname, resolve } from 'path';
 import { createHash } from 'crypto';
 import { fileURLToPath } from 'url';
-import Database from 'better-sqlite3';
-import { loadConfig, getMirrorRoot } from '../src/config.js';
-import { openDb } from '../src/db.js';
-import { detectLanguage } from '../src/language.js';
-import { siteSummary, siteDocs, siteTabCounts, recentRuns } from './report-queries.js';
-import { stripHtml, getLinkContext, buildSummaryPrompt } from './report-utils.js';
-import { generateThumb } from './thumb-worker-pool.js';
-import { runScorePdfs } from '../src/score-pdfs.js';
-import { maybeQueue } from '../src/pdf-upgrade/score.js';
-import { PipelineClient } from '../src/pipeline/client.js';
+import Database from 'better-sqlite3';                                        // direct SQLite for admin ops (upgrade, reset)
+import { loadConfig, getMirrorRoot } from '../src/config.js';                 // site list + root path
+import { openDb } from '../src/db.js';                                        // per-site DB with migrations
+import { detectLanguage } from '../src/language.js';                          // language detection for inline summarization
+import { siteSummary, siteDocs, siteTabCounts, recentRuns } from './report-queries.js'; // SQL → API shapes
+import { stripHtml, getLinkContext, buildSummaryPrompt } from './report-utils.js';      // response transforms
+import { generateThumb } from './thumb-worker-pool.js';                       // PDF → JPEG thumbnail worker pool
+import { runScorePdfs } from '../src/score-pdfs.js';                          // re-score PDFs on demand
+import { maybeQueue } from '../src/score.js';                                 // check score → insert upgrade queue
+import { PipelineClient } from '../src/slp-client.js';                       // SLP HTTP client for job submission
 
 // Prevent crashes from unhandled DB errors — log and keep serving
 process.on('unhandledRejection', (err) => console.error('[server] unhandled rejection:', err?.message ?? err));

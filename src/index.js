@@ -1,19 +1,19 @@
-// site2rag -- PM2 entry point. 15-min tick scheduler; runs pipeline per due site.
+// site2rag — PM2 entry point. 15-min tick loop; runs full pipeline per due site.
+// Pipeline order: sitemap → mirror → classify → export-html → export-doc → score-pdfs → archive → retain
 import { writeFileSync, mkdirSync, existsSync } from 'fs';
 import { join } from 'path';
-import yaml from 'js-yaml';
-import { loadConfig, getSiteRoot, getMirrorRoot, getMdRoot, getLogsRoot, mirrorDir, mdDir, metaDir } from './config.js';
-import { openDb, startRun, finishRun } from './db.js';
-import { runSitemap } from './sitemap.js';
-import { runMirror } from './mirror.js';
-import { runAssets } from './assets.js';
-import { runClassify } from './classify.js';
-import { runExportHtml } from './export-html.js';
-import { runExportDoc } from './export-doc.js';
-import { runArchive } from './archive.js';
-import { runRetain } from './retain.js';
-import { runScorePdfs } from './score-pdfs.js';
-import { getMeta, setMeta } from './db.js';
+import yaml from 'js-yaml';                                                        // parse websites.yaml
+import { loadConfig, getSiteRoot, getMirrorRoot, getMdRoot, getLogsRoot, mirrorDir, mdDir, metaDir } from './config.js'; // site config + paths
+import { openDb, startRun, finishRun, getMeta, setMeta } from './db.js';           // per-site SQLite
+import { runSitemap } from './sitemap.js';                                         // discover/diff sitemap
+import { runMirror } from './mirror.js';                                           // crawl + download
+import { runAssets } from './assets.js';                                           // download linked images/docs
+import { runClassify } from './classify.js';                                       // classify page roles
+import { runExportHtml } from './export-html.js';                                  // HTML → Markdown
+import { runExportDoc } from './export-doc.js';                                    // PDF/DOCX → Markdown
+import { runArchive } from './archive.js';                                         // S3 Wayback sync
+import { runRetain } from './retain.js';                                           // cleanup gone pages
+import { runScorePdfs } from './score-pdfs.js';                                   // score PDFs, queue low-scorers for SLP
 const TICK_MS = 15 * 60 * 1000; // 15 minutes
 /** Ensure all top-level directories exist. */
 const ensureDirs = () => {
