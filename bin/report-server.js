@@ -228,17 +228,19 @@ createServer(async (req, res) => {
       const activity = (await Promise.all(jobs.map(async ({ url: docUrl, pipeline_job_id: jobId }) => {
         try {
           const job = await pClient.getJob(jobId);
-          const isActive = job.status === 'processing';
+          // Treat any non-terminal status as active — SLP may use 'submitted', 'running', etc.
+          const isActive = !['done', 'failed'].includes(job.status);
           const pagesDone = job.pages_done ?? 0;
           const pagesTotal = job.pages_total ?? 0;
-          const elapsedMs = job.started_at ? Date.now() - job.started_at : null;
+          const startedAt = job.started_at ? (typeof job.started_at === 'number' ? job.started_at : new Date(job.started_at).getTime()) : null;
+          const elapsedMs = startedAt ? Date.now() - startedAt : null;
           const pagesRate = (pagesDone > 0 && elapsedMs > 0) ? pagesDone / elapsedMs : null;
           const pagesRemaining = pagesTotal - pagesDone;
           const estimatedRemainingMs = (pagesRate && pagesRemaining > 0) ? Math.round(pagesRemaining / pagesRate) : null;
           return {
             url: docUrl,
             status: job.status,
-            stage: isActive ? (job.current_stage || null) : 'queued',
+            stage: isActive ? (job.current_stage || job.status || 'processing') : 'queued',
             elapsed_ms: elapsedMs,
             pages_done: pagesDone,
             total_pages: pagesTotal,
