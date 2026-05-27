@@ -24,7 +24,9 @@ if ('serviceWorker' in navigator) {
   /* Thumbnail — letter/A4 ratio (8.5:11 ≈ 0.773) */
   .thumb-wrap{position:relative;width:100px;flex-shrink:0;border-radius:3px;
     box-shadow:0 1px 3px rgba(0,0,0,.18),0 0 0 1px rgba(0,0,0,.06);
-    aspect-ratio:8.5/11;max-height:130px;overflow:hidden;cursor:pointer;}
+    aspect-ratio:8.5/11;max-height:130px;overflow:hidden;cursor:pointer;
+    transition:width .4s ease,max-height .4s ease;}
+  .thumb-wrap--processing{width:200px;max-height:260px;}
   .thumb{width:100%;height:100%;object-fit:cover;object-position:top;background:#f3f4f6;display:block;}
   .thumb-placeholder{display:flex;align-items:center;justify-content:center;color:#9ca3af;font-size:2rem;
     width:100%;height:100%;background:#f3f4f6;}
@@ -528,12 +530,24 @@ if ('serviceWorker' in navigator) {
                    ]">
                 <!-- Thumbnail -->
                 <div class="thumb-wrap hover:opacity-90 transition-opacity"
-                     :class="['s3','s4'].includes(processingActivity[doc.url]?.stage) ? 'thumb-scanning' : ''"
+                     :class="{
+                       'thumb-scanning': ['s3','s4'].includes(processingActivity[doc.url]?.stage),
+                       'thumb-wrap--processing': processingActivity[doc.url]?.total_pages > 0
+                     }"
                      @click.stop="window.open(pdfSrc(doc), '_blank')" title="Open PDF">
-                  <img :src="thumbSrc(doc, 200)" :alt="docTitle(doc)"
+                  <img :src="processingActivity[doc.url]?.pages_done > 0
+                         ? thumbSrc(doc, 400, processingActivity[doc.url].pages_done, null)
+                         : thumbSrc(doc, 200)"
+                       :alt="docTitle(doc)"
                        class="thumb"
                        onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
                   <div class="thumb-placeholder" style="display:none">📄</div>
+                  <!-- Page counter overlay during processing -->
+                  <template x-if="processingActivity[doc.url]?.total_pages > 0">
+                    <div class="absolute bottom-0 left-0 right-0 py-0.5 text-center pointer-events-none"
+                         style="background:rgba(0,0,0,0.6);font-size:10px;font-family:ui-monospace,monospace;font-weight:700;color:white;letter-spacing:0.05em"
+                         x-text="processingActivity[doc.url].pages_done + '/' + processingActivity[doc.url].total_pages"></div>
+                  </template>
                 </div>
 
                 <!-- Score block(s) -->
