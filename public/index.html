@@ -491,8 +491,8 @@ if ('serviceWorker' in navigator) {
 
             <div class="bg-gray-50 rounded-lg p-3 mb-4 text-xs text-gray-600 space-y-1.5">
               <div class="font-semibold text-gray-700 text-sm mb-2">Two-stage upgrade pipeline</div>
-              <div class="flex gap-2"><span class="font-medium text-gray-700 w-5 shrink-0">1.</span><div><strong>Vision AI transcription</strong> — Each page is rasterized at high resolution and sent to a local vision language model (LLaVA). The model reads the page as a human would, outputting structured Markdown that preserves headings, paragraphs, lists, and tables — far more context-aware than traditional character-recognition OCR.</div></div>
-              <div class="flex gap-2"><span class="font-medium text-gray-700 w-5 shrink-0">2.</span><div><strong>OCRmyPDF PDF/A rebuild</strong> — The transcribed text is embedded as an invisible layer using OCRmyPDF (ISO 19005-3 compliant), which also deskews pages, corrects rotation, and cleans scan artifacts. If OCRmyPDF is unavailable the pdf-lib fallback uses the vision AI text directly.</div></div>
+              <div class="flex gap-2"><span class="font-medium text-gray-700 w-5 shrink-0">1.</span><div><strong>OCR transcription</strong> — Each page is rasterized and processed by the best available engine (EasyOCR, DocTR, PaddleOCR, Tesseract, or a vision language model). The result is structured Markdown preserving headings, paragraphs, lists, and tables.</div></div>
+              <div class="flex gap-2"><span class="font-medium text-gray-700 w-5 shrink-0">2.</span><div><strong>OCRmyPDF PDF/A rebuild</strong> — The transcribed text is embedded as an invisible layer using OCRmyPDF (ISO 19005-3 compliant), which also deskews pages, corrects rotation, and cleans scan artifacts.</div></div>
               <div class="flex gap-2"><span class="font-medium text-gray-700 w-5 shrink-0">3.</span><div><strong>Metadata enrichment</strong> — Claude Haiku analyzes the hosting page and document excerpt to infer title, author, and a one-sentence description. These are embedded as standard PDF document properties (/Title, /Author, /Subject, /Keywords) readable by any PDF viewer or cataloging tool.</div></div>
             </div>
 
@@ -647,12 +647,12 @@ if ('serviceWorker' in navigator) {
                   <template x-if="doc.ai_summary">
                     <p class="text-xs leading-relaxed line-clamp-2 mb-0.5"
                        :class="doc.summary_tier==='haiku' ? 'text-gray-600' : 'text-gray-500 italic'"
-                       :dir="['arabic','persian','hebrew'].includes(doc.lang_key) ? 'rtl' : 'ltr'"
+                       dir="ltr" style="direction:ltr;unicode-bidi:isolate"
                        x-text="doc.ai_summary"></p>
                   </template>
                   <!-- English description for non-English docs -->
                   <template x-if="doc.desc_en">
-                    <p class="text-xs leading-relaxed line-clamp-2 mb-1 text-gray-400 italic" dir="ltr" x-text="doc.desc_en"></p>
+                    <p class="text-xs leading-relaxed line-clamp-2 mb-1 text-gray-400 italic" dir="ltr" style="direction:ltr;unicode-bidi:isolate" x-text="doc.desc_en"></p>
                   </template>
 
 
@@ -1669,19 +1669,19 @@ function app() {
     activityLabel(docUrl) {
       const a = this.processingActivity[docUrl];
       if (!a?.stage || a.stage === 'queued') return null;
-      const labels = { s0:'scoring', s1:'preprocessing', s2:'classifying', s3:'OCR', s4:'re-OCR', s5:'vision', s6:'spell-fixing', s7:'rebuilding', s8:'exporting' };
+      const labels = { s0:'scoring', s1:'preprocessing', s2:'classifying', s3:'OCR', s4:'re-OCR', s5:'transcribing', s6:'spell-fixing', s7:'rebuilding', s8:'exporting' };
       const label = labels[a.stage] || a.stage;
-      if ((a.stage === 's3' || a.stage === 's4') && a.total_pages > 0) return `${label} ${a.pages_done}/${a.total_pages}`;
+      if ((a.stage === 's3' || a.stage === 's4' || a.stage === 's5') && a.total_pages > 0) return `${label} ${a.pages_done}/${a.total_pages}`;
       return label;
     },
 
     stageLabel(s) {
-      return { s0:'score', s1:'prep', s2:'class', s3:'OCR', s4:'reOCR', s5:'vision', s6:'spell', s7:'build', s8:'export' }[s] || s;
+      return { s0:'score', s1:'prep', s2:'class', s3:'OCR', s4:'reOCR', s5:'transcribe', s6:'spell', s7:'build', s8:'export' }[s] || s;
     },
 
     stageProgressText(a) {
       if (!a?.stage) return '';
-      const labels = { s0:'Scoring', s1:'Preprocessing', s2:'Classifying', s3:'OCR', s4:'Re-OCR 600dpi', s5:'Vision AI', s6:'Spell-fix', s7:'Rebuilding PDF', s8:'Exporting markdown' };
+      const labels = { s0:'Scoring', s1:'Preprocessing', s2:'Classifying', s3:'OCR', s4:'Re-OCR 600dpi', s5:'Transcribing', s6:'Spell-fix', s7:'Rebuilding PDF', s8:'Exporting markdown' };
       const label = labels[a.stage] || a.stage;
       let text = label;
       if (a.total_pages > 0 && (a.stage === 's3' || a.stage === 's4')) {
@@ -1699,23 +1699,23 @@ function app() {
 
     stageRows(a) {
       const allStages = ['s0','s1','s2','s3','s4','s5','s6','s7','s8'];
-      const labels = { s0:'Baseline score', s1:'Preprocess', s2:'Classify regions', s3:'OCR', s4:'Re-OCR 600dpi', s5:'Vision AI', s6:'Spell-fix', s7:'Rebuild PDF', s8:'Export markdown' };
-      const icons  = { s0:'◎', s1:'⚙', s2:'⊞', s3:'T', s4:'T⁺', s5:'👁', s6:'✦', s7:'⬡', s8:'↗' };
+      const labels = { s0:'Baseline score', s1:'Preprocess', s2:'Classify regions', s3:'OCR', s4:'Re-OCR 600dpi', s5:'Transcription', s6:'Spell-fix', s7:'Rebuild PDF', s8:'Export markdown' };
+      const icons  = { s0:'◎', s1:'⚙', s2:'⊞', s3:'T', s4:'T⁺', s5:'Ⓣ', s6:'✦', s7:'⬡', s8:'↗' };
       const completed = a?.completed || [];
       const completedSet = new Set(completed.map(c => c.stage));
       const active = a?.stage;
-      return allStages.map(s => {
-        if (completedSet.has(s)) {
-          const c = completed.find(c => c.stage === s);
-          return { stage: s, icon: icons[s], label: labels[s], status: 'done', pages: c.pages || 0, ms: c.ms || 0 };
-        }
-        if (s === active) {
+      // Only show stages that have actually run or are running — never show pending future stages
+      return allStages
+        .filter(s => completedSet.has(s) || s === active)
+        .map(s => {
+          if (completedSet.has(s)) {
+            const c = completed.find(c => c.stage === s);
+            return { stage: s, icon: icons[s], label: labels[s], status: 'done', pages: c.pages || 0, ms: c.ms || 0 };
+          }
           return { stage: s, icon: icons[s], label: labels[s], status: 'active',
                    pages: a.pages_done || 0, total_pages: a.total_pages || 0,
                    elapsed_ms: a.elapsed_ms || 0 };
-        }
-        return { stage: s, icon: icons[s], label: labels[s], status: 'pending', pages: 0, ms: 0 };
-      });
+        });
     },
 
     fmtDuration(ms) {
