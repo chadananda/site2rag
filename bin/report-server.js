@@ -456,7 +456,11 @@ createServer(async (req, res) => {
     if (!db) return err(res, 404, 'db unavailable');
     try {
       const quality = db.prepare('SELECT composite_score, content_hash FROM pdf_quality WHERE url=?').get(docUrl);
-      if (!quality) return err(res, 404, 'doc not scored yet');
+      // Allow upgrade even if unscored — quality may be null for extension-less PDFs
+      const page = db.prepare('SELECT local_path FROM pages WHERE url=?').get(docUrl);
+      if (!page) return err(res, 404, 'doc not found in mirror');
+      if (!page.local_path || !existsSync(page.local_path)) return err(res, 400, `PDF file not on disk: ${page.local_path || '(no path)'}`);
+
       const upgradeMethod = url.searchParams.get('method') || 'ocr'; // 'spell-fix' | 'ocr'
       const existing = db.prepare('SELECT status, before_score FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
       const now = new Date().toISOString();
@@ -468,41 +472,37 @@ createServer(async (req, res) => {
         try {
           const pdb = new Database(pipelineDb);
           const job = pdb.prepare(`SELECT id FROM jobs WHERE source_url=? AND status IN ('processing','pending') ORDER BY id DESC LIMIT 1`).get(docUrl);
-          if (job) {
-            pdb.prepare(`UPDATE jobs SET status='failed', error='Cancelled — re-queued by user' WHERE id=?`).run(job.id);
-          }
+          if (job) pdb.prepare(`UPDATE jobs SET status='failed', error='Cancelled — re-queued by user' WHERE id=?`).run(job.id);
           pdb.close();
         } catch {}
       }
 
       if (existing) {
         // Keep upgraded_pdf_path/after_score/receipt so the card stays visible in the upgraded tab while reprocessing.
-        // The poller overwrites them when the new job completes.
         db.prepare(`UPDATE pdf_upgrade_queue SET status='pending', priority=999, pass=1,
           started_at=NULL, finished_at=NULL, error=NULL, requested_method=?, importance=?, queued_at=?, pipeline_job_id=NULL
           WHERE url=?`).run(upgradeMethod, imp, now, docUrl);
       } else {
         db.prepare(`INSERT INTO pdf_upgrade_queue (url, content_hash, priority, status, requested_method, importance, queued_at) VALUES (?,?,999,'pending',?,?,?)`)
-          .run(docUrl, quality.content_hash || null, upgradeMethod, imp, now);
+          .run(docUrl, quality?.content_hash || null, upgradeMethod, imp, now);
       }
 
-      // Immediately submit to pipeline (don't wait for upgrade worker tick)
+      // Immediately submit to pipeline
       const pipelineUrl = process.env.PIPELINE_URL;
       if (pipelineUrl) {
-        const page = db.prepare('SELECT local_path FROM pages WHERE url=?').get(docUrl);
-        if (page?.local_path && existsSync(page.local_path)) {
-          const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: process.env.PIPELINE_API_KEY });
-          // before_score is set once (at first submission) and never overwritten on reprocess.
-          // Use COALESCE so existing before_score is preserved; only set it if currently NULL.
-          const firstSubmitScore = quality.composite_score ?? null;
-          pClient.submitJob({ pdfPath: page.local_path, sourceUrl: docUrl, importance: imp, meta: {} })
-            .then(jobId => {
-              const db3 = safeOpenDb(domain);
-              if (db3) { try { db3.prepare("UPDATE pdf_upgrade_queue SET status='submitted', started_at=?, pipeline_job_id=?, before_score=COALESCE(before_score,?) WHERE url=?").run(new Date().toISOString(), jobId, firstSubmitScore, docUrl); } finally { db3.close(); } }
-              console.log(`[upgrade] submitted ${docUrl.split('/').pop()} → pipeline job ${jobId}`);
-            })
-            .catch(e => console.error(`[upgrade] pipeline submit failed for ${docUrl.split('/').pop()}: ${e.message}`));
-        }
+        const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: process.env.PIPELINE_API_KEY });
+        const firstSubmitScore = quality?.composite_score ?? null;
+        pClient.submitJob({ pdfPath: page.local_path, sourceUrl: docUrl, importance: imp, meta: {} })
+          .then(jobId => {
+            const db3 = safeOpenDb(domain);
+            if (db3) { try { db3.prepare("UPDATE pdf_upgrade_queue SET status='submitted', started_at=?, pipeline_job_id=?, before_score=COALESCE(before_score,?) WHERE url=?").run(new Date().toISOString(), jobId, firstSubmitScore, docUrl); } finally { db3.close(); } }
+            console.log(`[upgrade] submitted ${docUrl.split('/').pop()} → pipeline job ${jobId}`);
+          })
+          .catch(e => {
+            console.error(`[upgrade] pipeline submit failed for ${docUrl.split('/').pop()}: ${e.message}`);
+            const db4 = safeOpenDb(domain);
+            if (db4) { try { db4.prepare("UPDATE pdf_upgrade_queue SET status='failed', error=? WHERE url=?").run(e.message?.slice(0, 300) || 'submit failed', docUrl); } finally { db4.close(); } }
+          });
       }
 
       return json(res, { ok: true, status: 'pending', queued: !existing, method: upgradeMethod, importance: imp, message: existing ? 'Restarted from scratch' : 'Added to front of queue' });
