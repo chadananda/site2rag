@@ -125,6 +125,12 @@ const noCacheHeaders = { ...corsHeaders, 'Cache-Control': 'no-cache, no-store' }
 const cacheHeaders = () => ({ ...corsHeaders, 'Cache-Control': 'no-cache, no-store' });
 const json = (res, data, status = 200) => { res.writeHead(status, { 'Content-Type': 'application/json', ...noCacheHeaders }); res.end(JSON.stringify(data)); };
 const err = (res, status, msg) => json(res, { error: msg }, status);
+// RFC 5987 encoded filename for Content-Disposition — handles non-ASCII/special chars safely
+const contentDisposition = (filename, inline = false) => {
+  const safe = filename.replace(/[^\w.\-]/g, '_');
+  const encoded = encodeURIComponent(filename);
+  return `${inline ? 'inline' : 'attachment'}; filename="${safe}"; filename*=UTF-8''${encoded}`;
+};
 
 const safeOpenDb = (domain) => {
   const dbPath = join(getMirrorRoot(), domain, '_meta', 'site.sqlite');
@@ -341,7 +347,7 @@ createServer(async (req, res) => {
     finally { db.close(); }
     if (!row?.upgraded_pdf_path || !existsSync(row.upgraded_pdf_path)) return err(res, 404, 'upgraded pdf not found');
     const filename = decodeURIComponent(docUrl.split('/').pop()) || 'document.pdf';
-    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `inline; filename="${filename}"`, ...cacheHeaders(3600) });
+    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': contentDisposition(filename, true), ...cacheHeaders(3600) });
     return res.end(readFileSync(row.upgraded_pdf_path));
   }
 
@@ -362,7 +368,7 @@ createServer(async (req, res) => {
       : (exportRow?.md_path && existsSync(exportRow.md_path)) ? exportRow.md_path : null;
     if (!mdPath) return err(res, 404, 'markdown not found');
     const filename = mdPath.split('/').pop() || 'document.md';
-    res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Disposition': `attachment; filename="${filename}"`, ...cacheHeaders(3600) });
+    res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Content-Disposition': contentDisposition(filename), ...cacheHeaders(3600) });
     return res.end(readFileSync(mdPath));
   }
 
@@ -375,9 +381,7 @@ createServer(async (req, res) => {
     let row, meta, page;
     try {
       row  = db.prepare('SELECT md_path FROM exports WHERE url=?').get(docUrl);
-      const cols2 = db.prepare("PRAGMA table_info(pdf_upgrade_queue)").all().map(c => c.name);
-      const tc = cols2.includes('title') ? 'title,' : '';
-      meta = db.prepare(`SELECT ${tc} before_score FROM pdf_upgrade_queue WHERE url=?`).get(docUrl);
+      meta = db.prepare(`SELECT before_score FROM pdf_upgrade_queue WHERE url=?`).get(docUrl);
       page = db.prepare('SELECT local_path FROM pages WHERE url=?').get(docUrl);
     } finally { db.close(); }
 
@@ -410,9 +414,7 @@ createServer(async (req, res) => {
     if (!db) return err(res, 404, 'db unavailable');
     let row;
     try {
-      const cols = db.prepare("PRAGMA table_info(pdf_upgrade_queue)").all().map(c => c.name);
-      const titleCol = cols.includes('title') ? 'title,' : '';
-      row = db.prepare(`SELECT marker_md_path, ${titleCol} after_score, before_score, finished_at, method FROM pdf_upgrade_queue WHERE url=?`).get(docUrl);
+      row = db.prepare(`SELECT marker_md_path, after_score, before_score, finished_at, method FROM pdf_upgrade_queue WHERE url=?`).get(docUrl);
     } finally { db.close(); }
     if (!row?.marker_md_path || !existsSync(row.marker_md_path)) return err(res, 404, 'no upgraded markdown');
     let content = readFileSync(row.marker_md_path, 'utf8');
@@ -420,7 +422,6 @@ createServer(async (req, res) => {
       const gain = (row.after_score != null && row.before_score != null)
         ? `+${Math.round((row.after_score - row.before_score) * 100)}%` : null;
       const fm = ['---', `source_url: ${docUrl}`, `domain: ${domain}`,
-        row.title ? `title: ${row.title}` : null,
         row.after_score != null ? `quality_score: ${Math.round(row.after_score * 100)}%` : null,
         gain ? `quality_gain: ${gain}` : null,
         row.finished_at ? `upgraded_at: ${row.finished_at}` : null,
@@ -443,7 +444,7 @@ createServer(async (req, res) => {
     finally { db.close(); }
     if (!row?.upgraded_pdf_path || !existsSync(row.upgraded_pdf_path)) return err(res, 404, 'no upgraded PDF');
     const filename = row.upgraded_pdf_path.split('/').pop() || 'upgraded.pdf';
-    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': `attachment; filename="${filename}"` });
+    res.writeHead(200, { 'Content-Type': 'application/pdf', 'Content-Disposition': contentDisposition(filename) });
     return res.end(readFileSync(row.upgraded_pdf_path));
   }
 
