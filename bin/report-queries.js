@@ -168,9 +168,11 @@ export const siteDocs = (domain, params) => {
         : `COALESCE(u.priority, COALESCE(q.composite_score,0.5)*100) DESC`;
     const where = wheres.join(' AND ');
 
-    // COUNT skips the HOST_CTE — h columns never appear in WHERE, so it's a pure waste
-    const COUNT_JOINS = `FROM pages p LEFT JOIN pdf_quality q ON p.url=q.url LEFT JOIN pdf_upgrade_queue u ON p.url=u.url`;
-    const total = db.prepare(`SELECT COUNT(*) as n ${COUNT_JOINS} WHERE ${where}`).get(...vals).n;
+    // COUNT uses the CTE only when search query references h.hosted_title; skip it otherwise
+    const countSql = q
+      ? `${HOST_CTE} SELECT COUNT(*) as n ${DOC_JOINS} WHERE ${where}`
+      : `SELECT COUNT(*) as n FROM pages p LEFT JOIN pdf_quality q ON p.url=q.url LEFT JOIN pdf_upgrade_queue u ON p.url=u.url WHERE ${where}`;
+    const total = db.prepare(countSql).get(...vals).n;
     const rows = db.prepare(`${DOC_SELECT} WHERE ${where} ORDER BY ${orderBy} LIMIT ${PER_PAGE} OFFSET ${offset}`).all(...vals);
     return { docs: rows.map(d => mapDoc(d, domain)), total, page, pages: Math.ceil(total / PER_PAGE), per_page: PER_PAGE };
   } finally { db.close(); }
