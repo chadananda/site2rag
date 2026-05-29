@@ -110,7 +110,7 @@ const DOC_COLS = `
          q.avg_chars_per_page, q.has_text_layer, q.skip,
          COALESCE(q.ai_title, q.pdf_title) as title, q.ai_title, q.pdf_title,
          q.excerpt, q.ai_summary, q.ai_author, q.ai_summarized_at,
-         q.thumbnail_path, q.summary_tier, q.ai_language, q.title_en, q.desc_en,
+         q.thumbnail_path, q.summary_tier, q.ai_language, q.title_en,
          h.host_url as source_url,
          u.status, u.before_score, u.after_score, u.score_improvement,
          u.upgraded_pdf_path, u.pages_processed, u.method, u.finished_at, u.started_at, u.queued_at, u.error, u.importance,
