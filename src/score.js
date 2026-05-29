@@ -1,5 +1,5 @@
 // PDF quality scoring — heuristics only, no AI. Scores readability, text density, language.
-// Exports: scorePdf, saveQualityScore, maybeQueue, wordQuality, extractBadSample, ocrNoiseRatio, detectLanguage, LANG_COST, LANG_PRIORITY
+// Exports: scorePdf, saveQualityScore, maybeQueue, wordQuality, extractBadSample, ocrNoiseRatio, isGarbledTextLayer, detectLanguage, LANG_COST, LANG_PRIORITY
 // maybeQueue: inserts into pdf_upgrade_queue if composite_score < threshold (used by mirror + export-doc)
 import pdfParse from 'pdf-parse';                                                  // text extraction from PDF
 import { readFileSync, existsSync } from 'fs';
@@ -34,6 +34,41 @@ export const printableRatio = (text) => {
   const nonWs = [...text].filter(c => /\S/.test(c));
   if (nonWs.length < 20) return 1;
   return nonWs.filter(c => c.codePointAt(0) >= 0x20).length / nonWs.length;
+};
+
+/**
+ * Detect garbled text layers from legacy font encoding (legacy Persian/Arabic fonts, PUA slots).
+ * Mirrors SLP's four-check heuristic. Any one trigger = garbled.
+ * Key signal: Latin Extended (U+00C0–U+02FF) > 15% saturates in garbled output; real docs < 1%.
+ */
+export const isGarbledTextLayer = (text, lang = null) => {
+  if (!text) return false;
+  const nonWs = [...text].filter(c => /\S/.test(c));
+  if (nonWs.length < 50) return false;
+
+  // Latin Extended density — most reliable single signal for legacy Persian/Arabic font output
+  const latinExt = nonWs.filter(c => { const cp = c.codePointAt(0); return cp >= 0x00C0 && cp <= 0x02FF; }).length;
+  if (latinExt / nonWs.length > 0.15) return true;
+
+  // Private Use Area — older Arabic fonts store glyph IDs in PUA slots
+  const pua = nonWs.filter(c => { const cp = c.codePointAt(0); return cp >= 0xE000 && cp <= 0xF8FF; }).length;
+  if (pua / nonWs.length > 0.05) return true;
+
+  // RTL/ASCII mismatch — Arabic/Hebrew script present but mostly ASCII letters (BDavat, old Farsi fonts)
+  const rtl = nonWs.filter(c => { const cp = c.codePointAt(0); return (cp >= 0x0590 && cp <= 0x05FF) || (cp >= 0x0600 && cp <= 0x06FF) || (cp >= 0xFB50 && cp <= 0xFEFF); }).length;
+  if (rtl > nonWs.length * 0.05) {
+    const ascii = nonWs.filter(c => { const cp = c.codePointAt(0); return (cp >= 0x41 && cp <= 0x5A) || (cp >= 0x61 && cp <= 0x7A); }).length;
+    if (ascii / (rtl + ascii) > 0.25) return true;
+  }
+
+  // Script density — expected script chars < 50% of nonWs when lang is non-Latin
+  if (lang && SCRIPT_RANGES[lang]) {
+    const ranges = SCRIPT_RANGES[lang];
+    const inScript = nonWs.filter(c => { const cp = c.codePointAt(0); return cp >= 0x20 && ranges.some(([lo, hi]) => cp >= lo && cp <= hi); }).length;
+    if (inScript / nonWs.length < 0.50) return true;
+  }
+
+  return false;
 };
 
 export const scriptConsistency = (text, lang) => {
@@ -188,15 +223,19 @@ export const scorePdf = async (pdfPath) => {
     const readableInSample = pageTexts.filter(p => p.replace(/\s/g, '').length >= 50).length;
     const readablePct = Math.min(1, readableInSample / segCount);
     const avgChars = sampleText.length / sampleMax;
-    const hasText = avgChars > 5 ? 1 : 0;
+    const hasTextRaw = avgChars > 5 ? 1 : 0;
     // Detect language first so wordQuality uses the correct word set
     const langSample = [pdf_title, sampleText.slice(0, 2000)].join(' ');
     const language = detectLanguage(langSample);
-    const wq = wordQuality(sampleText.slice(0, 5000), language);
+    // Garbled text layer detection: legacy font encoding produces Latin Extended / PUA chars
+    // at high density even though the PDF claims to have a text layer. Treat as image PDF.
+    const garbled = hasTextRaw === 1 && isGarbledTextLayer(sampleText.slice(0, 5000), language);
+    const hasText = garbled ? 0 : hasTextRaw;
+    const wq = garbled ? 0 : wordQuality(sampleText.slice(0, 5000), language);
     // Printable char ratio: custom-encoded PDFs may have many control chars (pdf-parse decoding)
     // or ASCII-substituted glyphs. Use as a scaling factor on charsScore.
     const pr = printableRatio(sampleText);
-    const charsScore = Math.min(avgChars * pr / 500, 1);
+    const charsScore = garbled ? 0 : Math.min(avgChars * pr / 500, 1);
     // adjustedReadable: just use readablePct directly — no charsScore floor.
     // The old floor (charsScore*0.85) inflated scores for docs with lots of garbage chars.
     const adjustedReadable = readablePct;

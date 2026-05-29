@@ -12,6 +12,9 @@ if (fs.existsSync(envFile)) {
 }
 const ANTHROPIC_API_KEY = envVars.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '';
 const MISTRAL_API_KEY   = envVars.MISTRAL_API_KEY   || process.env.MISTRAL_API_KEY   || '';
+const DEEPSEEK_API_KEY  = envVars.DEEPSEEK_API_KEY  || process.env.DEEPSEEK_API_KEY  || '';
+const SITE_ADMIN_EMAIL  = envVars.SITE_ADMIN_EMAIL  || process.env.SITE_ADMIN_EMAIL  || '';
+const SITE_ADMIN_PASS   = envVars.SITE_ADMIN_PASS   || process.env.SITE_ADMIN_PASS   || '';
 const SURYA_PATH = envVars.SURYA_PATH || process.env.SURYA_PATH || 'surya_ocr';
 const TMPDIR = path.join(SITE2RAG_ROOT, 'tmp'); // all processes write temp files to the data drive, never the OS drive
 module.exports = {
@@ -58,6 +61,9 @@ module.exports = {
         REPORT_PORT: '7840',
         CORS_ORIGIN: 'https://site2rag.lnker.com',
         ANTHROPIC_API_KEY,
+        DEEPSEEK_API_KEY,
+        SITE_ADMIN_EMAIL,
+        SITE_ADMIN_PASS,
         UPGRADE_REPORT_PATH: path.join(SITE2RAG_ROOT, 'report'),
         PIPELINE_DB: path.join(SITE2RAG_ROOT, 'pipeline-jobs.db'),
         PIPELINE_URL: 'http://localhost:49900'
