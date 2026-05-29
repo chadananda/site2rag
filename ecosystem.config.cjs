@@ -7,7 +7,7 @@ const envFile = path.join(SITE2RAG_ROOT, '.env');
 if (fs.existsSync(envFile)) {
   fs.readFileSync(envFile, 'utf8').split('\n').forEach(line => {
     const m = line.match(/^([A-Z_]+)=(.*)$/);
-    if (m) envVars[m[1]] = m[2].trim();
+    if (m) envVars[m[1]] = m[2].trim().replace(/^["']|["']$/g, '');
   });
 }
 const ANTHROPIC_API_KEY = envVars.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '';
