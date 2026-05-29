@@ -813,6 +813,9 @@ if ('serviceWorker' in navigator) {
                     <template x-if="doc.readable_pages_pct!=null && doc.status !== 'done'">
                       <span x-text="Math.round(doc.readable_pages_pct*100)+'% readable'"></span>
                     </template>
+                    <span class="mono text-gray-300 truncate max-w-xs"
+                          x-text="decodeURIComponent(doc.url.split('/').pop() || doc.url.split('/').slice(-2,-1)[0] || '')"
+                          :title="doc.url"></span>
                     <a x-show="doc.source_url" :href="doc.source_url" target="_blank" rel="noopener" @click.stop
                        class="hover:text-blue-500 truncate max-w-xs"
                        x-text="'↗ '+(doc.source_url||'').replace(/^https?:\/\//,'').split('/')[0]"></a>
