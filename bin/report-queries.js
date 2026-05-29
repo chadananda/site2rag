@@ -30,14 +30,16 @@ const safeOpenDb = (domain) => {
   try {
     const db = openDb(domain);
     db.pragma('journal_mode = WAL');
-    db.pragma('cache_size = -8000'); // 8MB read cache
-    // Ensure indexes for the hot list query join paths
+    db.pragma('cache_size = -16000'); // 16MB read cache
+    db.pragma('temp_store = MEMORY');
+    // Covering indexes for the hot list query
     db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_pages_mime_gone ON pages(mime_type, gone);
+      CREATE INDEX IF NOT EXISTS idx_pages_pdf ON pages(mime_type, gone, url);
       CREATE INDEX IF NOT EXISTS idx_pq_url ON pdf_quality(url);
+      CREATE INDEX IF NOT EXISTS idx_pq_score_url ON pdf_quality(composite_score, url);
       CREATE INDEX IF NOT EXISTS idx_puq_url ON pdf_upgrade_queue(url);
+      CREATE INDEX IF NOT EXISTS idx_puq_status ON pdf_upgrade_queue(status, url);
       CREATE INDEX IF NOT EXISTS idx_hosts_hosted_url ON hosts(hosted_url);
-      CREATE INDEX IF NOT EXISTS idx_pq_score ON pdf_quality(composite_score);
     `);
     return db;
   } catch { return null; }
@@ -111,7 +113,8 @@ const DOC_COLS = `
          q.thumbnail_path, q.summary_tier, q.ai_language, q.title_en, q.desc_en,
          h.host_url as source_url,
          u.status, u.before_score, u.after_score, u.score_improvement,
-         u.upgraded_pdf_path, u.pages_processed, u.method, u.finished_at, u.started_at, u.queued_at, u.error, u.importance, u.receipt_json`;
+         u.upgraded_pdf_path, u.pages_processed, u.method, u.finished_at, u.started_at, u.queued_at, u.error, u.importance,
+         u.receipt_json`; // kept for narrative/costs — fetched only for 50 rows per page
 
 const DOC_JOINS = `
   FROM pages p
@@ -165,7 +168,9 @@ export const siteDocs = (domain, params) => {
         : `COALESCE(u.priority, COALESCE(q.composite_score,0.5)*100) DESC`;
     const where = wheres.join(' AND ');
 
-    const total = db.prepare(`${HOST_CTE} SELECT COUNT(*) as n ${DOC_JOINS} WHERE ${where}`).get(...vals).n;
+    // COUNT skips the HOST_CTE — h columns never appear in WHERE, so it's a pure waste
+    const COUNT_JOINS = `FROM pages p LEFT JOIN pdf_quality q ON p.url=q.url LEFT JOIN pdf_upgrade_queue u ON p.url=u.url`;
+    const total = db.prepare(`SELECT COUNT(*) as n ${COUNT_JOINS} WHERE ${where}`).get(...vals).n;
     const rows = db.prepare(`${DOC_SELECT} WHERE ${where} ORDER BY ${orderBy} LIMIT ${PER_PAGE} OFFSET ${offset}`).all(...vals);
     return { docs: rows.map(d => mapDoc(d, domain)), total, page, pages: Math.ceil(total / PER_PAGE), per_page: PER_PAGE };
   } finally { db.close(); }
