@@ -796,6 +796,23 @@ if (process.env.PIPELINE_URL) {
               const mdPath  = job.downloads?.md  ?? `/jobs/${jobId}/md`;
               try { const buf = await pipelinePoller._getRaw(pdfPath, 'buffer'); const p = join(upgradedDir, `x${hash}.pdf`); writeFileSync(p, buf); savedPdf = p; } catch (e) { console.warn(`[poll] pdf fetch failed: ${e.message}`); }
               try { const md = await pipelinePoller._getRaw(mdPath, 'text'); if (md?.trim()) { const p = join(upgradedDir, `x${hash}.md`); writeFileSync(p, md); savedMd = p; } } catch {}
+              // Completeness check — SLP should never return an incomplete job.
+              // Validate before accepting as done; flag anything missing so it can be resubmitted.
+              const meta0 = receipt.metadata ?? {};
+              const mdBody = savedMd ? readFileSync(savedMd, 'utf8').replace(/^---[\s\S]*?---\n?/, '').replace(/\{pdf=\d+\}/g, '').trim() : '';
+              const pageCount0 = receipt.document?.page_count ?? 1;
+              const missing = [];
+              if (!savedMd)                                      missing.push('no_markdown');
+              else if (mdBody.length < 300 && pageCount0 > 2)   missing.push('empty_markdown');
+              if (!meta0.title)                                  missing.push('no_title');
+              if (!meta0.subject)                                missing.push('no_summary');
+              if (missing.length) {
+                const errMsg = `incomplete: ${missing.join(', ')}`;
+                console.warn(`[poll] ${errMsg}: ${url.split('/').pop()}`);
+                db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?")
+                  .run(new Date().toISOString(), errMsg, JSON.stringify(receipt), url);
+                continue;
+              }
               db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=COALESCE(?,upgraded_pdf_path), marker_md_path=COALESCE(?,marker_md_path), before_score=COALESCE(before_score,?), after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?`)
                 .run(new Date().toISOString(), savedPdf, savedMd, beforeScore, afterScore, gain, receipt.document?.page_count ?? null, 'pipeline-v2', JSON.stringify(receipt), url);
               // Never overwrite pdf_quality.composite_score — it holds the original pre-upgrade score.
