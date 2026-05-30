@@ -59,7 +59,9 @@ export const titleFromUrl = (url) => {
 export const isGenericTitle = (t) => !t || t.length <= 5 || /^pdf$/i.test(t.trim());
 
 export const mapDoc = (d, domain) => {
-  const title = isGenericTitle(d.title) ? (titleFromUrl(d.url) || d.title || null) : d.title;
+  // Prefer English translation for display; fall back to native ai_title, then url-derived title
+  const rawTitle = d.title_en || d.title || null;
+  const title = isGenericTitle(rawTitle) ? (titleFromUrl(d.url) || rawTitle || null) : rawTitle;
   const ai_summary = d.ai_summary || buildFreeSummary(d) || null;
   const summary_tier = d.summary_tier || (ai_summary && !d.ai_summary ? 'free' : null);
   const ISO_TO_KEY = { ar:'arabic', fa:'persian', he:'hebrew', fr:'french', es:'spanish', de:'german', it:'italian', pt:'portuguese', nl:'dutch', pl:'polish', tr:'turkish', ru:'russian', ja:'japanese', zh:'chinese', ko:'korean', en:'english' };
