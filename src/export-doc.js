@@ -154,6 +154,11 @@ export const runExportDoc = async (db, siteConfig) => {
 
   for (const page of pdfPages) {
     if (!existsSync(page.local_path)) { stats.failed++; continue; }
+    // Reject non-PDF files (HTML error pages saved as .pdf, empty stubs, etc.)
+    try {
+      const header = readFileSync(page.local_path).slice(0, 5).toString('ascii');
+      if (header !== '%PDF-') { db.prepare("UPDATE pages SET gone=1 WHERE url=?").run(page.url); stats.failed++; continue; }
+    } catch { stats.failed++; continue; }
     // Skip if already exported at same hash, UNLESS it was low-quality (re-attempt after OCR)
     const reprocessMethods = ['stub', 'pdf-text-garbled', 'pdf-text-sparse'];
     if (page.exp_hash && page.exp_hash === page.content_hash && !reprocessMethods.includes(page.exp_method)) { stats.skipped++; continue; }

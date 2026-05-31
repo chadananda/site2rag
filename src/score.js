@@ -297,6 +297,14 @@ export const maybeQueue = (db, url, contentHash, score, threshold = 0.7, languag
   if (score >= threshold) return false;
   const localPath = db.prepare('SELECT local_path FROM pages WHERE url=?').get(url)?.local_path;
   if (!localPath || !existsSync(localPath)) return false;
+  // Reject non-PDF files (HTML error pages saved as .pdf, empty stubs, etc.)
+  try {
+    const header = readFileSync(localPath).slice(0, 5).toString('ascii');
+    if (header !== '%PDF-') {
+      db.prepare("UPDATE pages SET gone=1 WHERE url=?").run(url);
+      return false;
+    }
+  } catch { return false; }
   const existing = db.prepare('SELECT status FROM pdf_upgrade_queue WHERE url=?').get(url);
   if (existing && existing.status !== 'pending') return false; // already processed or in progress
   // Prefer the DB-stored language (corrected by detectLanguageForImagePdfs) over the

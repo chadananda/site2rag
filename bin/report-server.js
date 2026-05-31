@@ -461,6 +461,10 @@ createServer(async (req, res) => {
       const page = db.prepare('SELECT local_path FROM pages WHERE url=?').get(docUrl);
       if (!page) return err(res, 404, 'doc not found in mirror');
       if (!page.local_path || !existsSync(page.local_path)) return err(res, 400, `PDF file not on disk: ${page.local_path || '(no path)'}`);
+      try {
+        const pdfHeader = readFileSync(page.local_path).slice(0, 5).toString('ascii');
+        if (pdfHeader !== '%PDF-') return err(res, 400, `Not a valid PDF: ${page.local_path.split('/').pop()}`);
+      } catch (e) { return err(res, 400, `Cannot read PDF: ${e.message}`); }
 
       const upgradeMethod = url.searchParams.get('method') || 'ocr'; // 'spell-fix' | 'ocr'
       const existing = db.prepare('SELECT status, before_score FROM pdf_upgrade_queue WHERE url=?').get(docUrl);
