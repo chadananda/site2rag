@@ -67,6 +67,8 @@ export const siteSummary = (domain, siteUrl, description = null) => {
       FROM pdf_quality q
       LEFT JOIN pdf_upgrade_queue u ON q.url=u.url
       JOIN pages p ON q.url=p.url AND p.gone=0`).get();
+    // Count all done PDFs including those without pdf_quality entries (e.g. unscored INBA/BJUK)
+    const upgradedCount = db.prepare(`SELECT COUNT(*) as n FROM pdf_upgrade_queue u JOIN pages p ON u.url=p.url WHERE u.status='done' AND p.gone=0 AND p.mime_type='application/pdf'`).get()?.n || 0;
     const exp = db.prepare(`SELECT SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) as ok, SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) as failed FROM exports`).get();
     const lastRun = db.prepare(`SELECT started_at, finished_at, status, message FROM runs ORDER BY id DESC LIMIT 1`).get();
     const recentFails = db.prepare(`SELECT COUNT(*) as cnt FROM runs WHERE status='failed' AND started_at > datetime('now','-1 day')`).get()?.cnt || 0;
@@ -81,7 +83,7 @@ export const siteSummary = (domain, siteUrl, description = null) => {
       total_pages: totals.total_pages || 0, total_html: totals.total_html || 0, total_pdfs: totals.total_pdfs || 0, total_docs: totals.total_docs || 0,
       pages_classified: classify.classified || 0, pages_content: classify.content || 0,
       pages_index: classify.index_pages || 0, pages_host: classify.host_pages || 0,
-      scored: pdf.scored || 0, upgraded: pdf.upgraded || 0,
+      scored: pdf.scored || 0, upgraded: upgradedCount,
       pending: pdf.pending || 0, processing: pdf.processing || 0,
       failed: pdf.failed || 0, skipped: pdf.skipped || 0, already_ok: pdf.already_ok || 0,
       summarized_haiku: pdf.summarized_haiku || 0, summarized_any: pdf.summarized_any || 0,

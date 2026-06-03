@@ -782,7 +782,7 @@ if (process.env.PIPELINE_URL) {
       const db = safeOpenDb(domain);
       if (!db) continue;
       try {
-        const jobs = db.prepare("SELECT url, pipeline_job_id, before_score FROM pdf_upgrade_queue WHERE pipeline_job_id IS NOT NULL AND status NOT IN ('done','failed')").all();
+        const jobs = db.prepare("SELECT url, pipeline_job_id, before_score, status FROM pdf_upgrade_queue WHERE pipeline_job_id IS NOT NULL AND status != 'done'").all();
         for (const { url, pipeline_job_id: jobId, before_score } of jobs) {
           try {
             const job = await pipelinePoller.getJob(jobId);
