@@ -26,6 +26,11 @@ process.on('uncaughtException',  (err) => console.error('[server] uncaught excep
 const PORT = parseInt(process.env.REPORT_PORT || '7840', 10);
 const FOCUS_FILE = join(getMirrorRoot(), '.focused_domain');
 
+// Transient SLP/network errors that mean "retry later", not a real failure.
+// Docs hitting these are dropped back to unqueued so the batch resubmits them.
+const isTransientErr = (msg) =>
+  /no workers available|fetch failed|socket hang up|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|timed out|job expired|HTTP 408|HTTP 429|HTTP 5\d\d/i.test(msg || '');
+
 const getFocusDomain = () => {
   try { const d = readFileSync(FOCUS_FILE, 'utf8').trim(); return d || null; } catch { return null; }
 };
@@ -508,11 +513,10 @@ createServer(async (req, res) => {
             console.error(`[upgrade] pipeline submit failed for ${docUrl.split('/').pop()}: ${msg}`);
             // Transient SLP/network errors aren't real failures — drop the queue row so the
             // doc returns to unqueued and the batch retries it, instead of marking it failed.
-            const transient = /no workers available|fetch failed|socket hang up|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|timed out|job expired|HTTP 5\d\d/i.test(msg);
             const db4 = safeOpenDb(domain);
             if (db4) {
               try {
-                if (transient) db4.prepare("DELETE FROM pdf_upgrade_queue WHERE url=? AND status NOT IN ('done','submitted')").run(docUrl);
+                if (isTransientErr(msg)) db4.prepare("DELETE FROM pdf_upgrade_queue WHERE url=? AND status NOT IN ('done','submitted')").run(docUrl);
                 else db4.prepare("UPDATE pdf_upgrade_queue SET status='failed', error=? WHERE url=?").run(msg.slice(0, 300), docUrl);
               } finally { db4.close(); }
             }
@@ -845,7 +849,9 @@ if (process.env.PIPELINE_URL) {
               if (cols.length)  { vals.push(url); db.prepare(`UPDATE pdf_quality SET ${cols.join(', ')} WHERE url=?`).run(...vals); }
               console.log(`[poll] done: ${url.split('/').pop()} lang=${lang} before=${beforeScore?.toFixed(2)} after=${afterScore?.toFixed(2)} gain=${gain?.toFixed(2)}`);
             } else if (job.status === 'failed') {
-              db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=?, pipeline_job_id=NULL WHERE url=?").run(new Date().toISOString(), (job.error || 'failed').slice(0, 300), url);
+              // Transient SLP failures (no workers, timeouts) → drop row so batch retries; don't mark failed.
+              if (isTransientErr(job.error)) db.prepare("DELETE FROM pdf_upgrade_queue WHERE url=? AND status NOT IN ('done','submitted')").run(url);
+              else db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=?, pipeline_job_id=NULL WHERE url=?").run(new Date().toISOString(), (job.error || 'failed').slice(0, 300), url);
             }
           } catch (e) {
             if (e.message?.includes('404')) db.prepare("UPDATE pdf_upgrade_queue SET status='failed', error='job expired', pipeline_job_id=NULL WHERE url=?").run(url);
