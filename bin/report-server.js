@@ -504,9 +504,18 @@ createServer(async (req, res) => {
             console.log(`[upgrade] submitted ${docUrl.split('/').pop()} → pipeline job ${jobId}`);
           })
           .catch(e => {
-            console.error(`[upgrade] pipeline submit failed for ${docUrl.split('/').pop()}: ${e.message}`);
+            const msg = e.message || 'submit failed';
+            console.error(`[upgrade] pipeline submit failed for ${docUrl.split('/').pop()}: ${msg}`);
+            // Transient SLP/network errors aren't real failures — drop the queue row so the
+            // doc returns to unqueued and the batch retries it, instead of marking it failed.
+            const transient = /no workers available|fetch failed|socket hang up|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|timed out|job expired|HTTP 5\d\d/i.test(msg);
             const db4 = safeOpenDb(domain);
-            if (db4) { try { db4.prepare("UPDATE pdf_upgrade_queue SET status='failed', error=? WHERE url=?").run(e.message?.slice(0, 300) || 'submit failed', docUrl); } finally { db4.close(); } }
+            if (db4) {
+              try {
+                if (transient) db4.prepare("DELETE FROM pdf_upgrade_queue WHERE url=? AND status NOT IN ('done','submitted')").run(docUrl);
+                else db4.prepare("UPDATE pdf_upgrade_queue SET status='failed', error=? WHERE url=?").run(msg.slice(0, 300), docUrl);
+              } finally { db4.close(); }
+            }
           });
       }
 
