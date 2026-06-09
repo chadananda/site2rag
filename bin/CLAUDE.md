@@ -8,15 +8,20 @@
 | **thumb-worker-pool.js** | — | Exports: `generateThumb(pdfPath,outPath)`. Worker thread pool (4–8 threads) for PDF→JPEG via pdfjs+canvas. |
 | **thumb-worker.js** | Worker thread | pdfjs render at 2× → downscale. Falls back to pdftoppm for scanned PDFs that render blank. |
 | **lnker-server.js** | HTTP :7841 | Archive mirror server. Maps `{domain}.lnker.com` Host header → `websites_mirror/{domain}/`. Rewrites internal links. robots: noindex. |
-| **worker-agent.js** | HTTP :49910 | Node.js tool-runner agent. Auto-detects: tesseract, easyocr, paddleocr, doctr, kraken, surya_ocr, marker, ollama. Warm serve pools (30–60s cold-start elimination). Endpoints: GET /health, GET /capacity, POST /tools/run. Self-registers with SLP pipeline registry. |
-| **worker-agent.py** | HTTP :49910 | Python equiv of worker-agent.js. Same interface, no external deps beyond stdlib. |
 | **setup.js** | postinstall | Idempotent PM2 registration. Safe to re-run. |
 | **updater.js** | PM2 daemon | Polls GitHub, fast-forward pull, `pm2 reload` on update. Interval: UPDATE_CHECK_INTERVAL_MIN (default 15). |
+
+> OCR/upgrade processing lives entirely in the separate **SLP** service. site2rag has
+> no local OCR workers — it submits jobs to SLP (`PIPELINE_URL`) and polls results.
+
+## PM2 processes (all site2rag-owned, prefixed for clear ownership)
+
+`site2rag` (crawler) · `site2rag-report` (report-server :7840) · `site2rag-lnker` (lnker-server :7841) · `site2rag-updater`.
 
 ## Deploy
 
 - **UI (Cloudflare Pages)**: `npm run deploy:ui` or `npm run deploy:all`
-- **Backend (tower-nas)**: `npm run deploy:backend` → git push + SSH pull + pm2 reload site2rag + pdf-report-server
+- **Backend (tower-nas)**: `npm run deploy:backend` → git push + SSH pull + pm2 reload ecosystem
 
 ## Key env vars (report-server)
 

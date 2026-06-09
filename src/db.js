@@ -73,17 +73,6 @@ CREATE TABLE IF NOT EXISTS exports (
   status TEXT,
   error TEXT
 );
-CREATE TABLE IF NOT EXISTS ocr_pages (
-  doc_url TEXT NOT NULL,
-  page_no INT NOT NULL,
-  engine TEXT NOT NULL,
-  text_md TEXT,
-  confidence REAL,
-  bboxes_json TEXT,
-  cached_at TEXT,
-  bytes INT,
-  PRIMARY KEY (doc_url, page_no, engine)
-);
 CREATE TABLE IF NOT EXISTS assets (
   hash TEXT PRIMARY KEY,
   path TEXT NOT NULL,
@@ -281,14 +270,6 @@ export const upsertExport = (db, exp) => {
   db.prepare(`INSERT OR REPLACE INTO exports (url, md_path, source_hash, md_hash, exported_at, conversion_method, word_count, ocr_used, ocr_engines, reconciler, pages, agreement_avg, flagged_pages, host_page_url, status, error)
     VALUES (@url, @md_path, @source_hash, @md_hash, @exported_at, @conversion_method, @word_count, @ocr_used, @ocr_engines, @reconciler, @pages, @agreement_avg, @flagged_pages, @host_page_url, @status, @error)`)
     .run(exp);
-};
-/** Get or cache OCR page result. Returns cached result or null. */
-export const getOcrPage = (db, docUrl, pageNo, engine) =>
-  db.prepare('SELECT * FROM ocr_pages WHERE doc_url=? AND page_no=? AND engine=?').get(docUrl, pageNo, engine);
-/** Save OCR page result to cache. */
-export const saveOcrPage = (db, { docUrl, pageNo, engine, text_md, confidence, bboxes_json, bytes }) => {
-  db.prepare('INSERT OR REPLACE INTO ocr_pages (doc_url, page_no, engine, text_md, confidence, bboxes_json, cached_at, bytes) VALUES (?,?,?,?,?,?,?,?)')
-    .run(docUrl, pageNo, engine, text_md, confidence, bboxes_json, new Date().toISOString(), bytes);
 };
 /** Log an LLM call. */
 export const logLlmCall = (db, call) => {

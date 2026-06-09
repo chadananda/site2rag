@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest';
 import { stripHtml, getLinkContext, buildFreeSummary, mapDoc, buildSummaryPrompt, titleFromUrl, isGenericTitle } from '../bin/report-utils.js';
-import { spellFixCost } from '../src/pdf-upgrade/spell-fix.js';
 
 describe('stripHtml', () => {
   it('removes HTML tags leaving plain text', () => {
@@ -300,29 +299,6 @@ describe('mapDoc — method_steps from receipt_json', () => {
     const doc = { ...baseDoc, receipt_json: JSON.stringify(receipt) };
     const result = mapDoc(doc, 'example.com');
     expect(result.method_steps).toBeNull();
-  });
-});
-
-describe('spellFixCost', () => {
-  it('returns a positive cost for any pages > 0', () => {
-    expect(spellFixCost(1)).toBeGreaterThan(0);
-    expect(spellFixCost(10)).toBeGreaterThan(0);
-  });
-
-  it('cost scales linearly with page count', () => {
-    const cost1 = spellFixCost(1, 1000);
-    const cost10 = spellFixCost(10, 1000);
-    expect(cost10).toBeCloseTo(cost1 * 10, 10);
-  });
-
-  it('higher avg chars per page increases cost', () => {
-    expect(spellFixCost(5, 3000)).toBeGreaterThan(spellFixCost(5, 1000));
-  });
-
-  it('uses 2000 chars/page as default', () => {
-    const explicit = spellFixCost(5, 2000);
-    const defaulted = spellFixCost(5);
-    expect(defaulted).toBeCloseTo(explicit, 10);
   });
 });
 

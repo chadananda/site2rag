@@ -11,11 +11,9 @@ if (fs.existsSync(envFile)) {
   });
 }
 const ANTHROPIC_API_KEY = envVars.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '';
-const MISTRAL_API_KEY   = envVars.MISTRAL_API_KEY   || process.env.MISTRAL_API_KEY   || '';
 const DEEPSEEK_API_KEY  = envVars.DEEPSEEK_API_KEY  || process.env.DEEPSEEK_API_KEY  || '';
 const SITE_ADMIN_EMAIL  = envVars.SITE_ADMIN_EMAIL  || process.env.SITE_ADMIN_EMAIL  || '';
 const SITE_ADMIN_PASS   = envVars.SITE_ADMIN_PASS   || process.env.SITE_ADMIN_PASS   || '';
-const SURYA_PATH = envVars.SURYA_PATH || process.env.SURYA_PATH || 'surya_ocr';
 const TMPDIR = path.join(SITE2RAG_ROOT, 'tmp'); // all processes write temp files to the data drive, never the OS drive
 module.exports = {
   apps: [
@@ -37,7 +35,7 @@ module.exports = {
       merge_logs: true
     },
     {
-      name: 'lnker-server',
+      name: 'site2rag-lnker',
       script: './bin/lnker-server.js',
       cwd: __dirname,
       interpreter: 'node',
@@ -50,7 +48,7 @@ module.exports = {
       merge_logs: true
     },
     {
-      name: 'pdf-report-server',
+      name: 'site2rag-report',
       script: './bin/report-server.js',
       cwd: __dirname,
       interpreter: 'node',
@@ -65,7 +63,6 @@ module.exports = {
         SITE_ADMIN_EMAIL,
         SITE_ADMIN_PASS,
         UPGRADE_REPORT_PATH: path.join(SITE2RAG_ROOT, 'report'),
-        PIPELINE_DB: path.join(SITE2RAG_ROOT, 'pipeline-jobs.db'),
         PIPELINE_URL: 'http://localhost:49900'
       },
       autorestart: true,
@@ -73,84 +70,6 @@ module.exports = {
       max_memory_restart: '8G',
       out_file: '../logs/report-server.out.log',
       error_file: '../logs/report-server.err.log',
-      merge_logs: true
-    },
-    {
-      name: 'pipeline-server',
-      script: './bin/pipeline-server.js',
-      cwd: __dirname,
-      interpreter: 'node',
-      env: {
-        NODE_ENV: 'production',
-        TMPDIR,
-        SITE2RAG_ROOT,
-        ANTHROPIC_API_KEY,
-        MISTRAL_API_KEY,
-        PIPELINE_PORT: '49900',
-        PIPELINE_DB: path.join(SITE2RAG_ROOT, 'pipeline-jobs.db'),
-        PIPELINE_CONCURRENCY: '1',
-        LOCAL_LLM: process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:49800/v1',
-        SURYA_PATH: SURYA_PATH,
-        AZURE_KEY: envVars.AZURE_KEY || '',
-        AZURE_ENDPOINT: envVars.AZURE_ENDPOINT || '',
-        GOOGLE_KEY: envVars.GOOGLE_KEY || '',
-        // Worker agents: comma-separated http://host:port URLs; seeded at startup, self-register on connect
-        WORKER_URLS: envVars.WORKER_URLS || 'http://localhost:49910',
-        KRAKEN_ENDPOINT: 'http://boss:8093',
-      },
-      autorestart: true,
-      watch: false,
-      min_uptime: '30s',
-      restart_delay: 30000,
-      max_memory_restart: '8G',
-      out_file: '../logs/pipeline-server.out.log',
-      error_file: '../logs/pipeline-server.err.log',
-      merge_logs: true
-    },
-    {
-      name: 'pdf-upgrade-worker',
-      script: './bin/pdf-upgrade-worker.js',
-      cwd: __dirname,
-      interpreter: 'node',
-      env: {
-        NODE_ENV: 'production',
-        TMPDIR,
-        SITE2RAG_ROOT,
-        ANTHROPIC_API_KEY,
-        LOCAL_LLM: process.env.LOCAL_LLM || 'http://boss.taile945b3.ts.net:49800/v1',
-        LOCAL_LLM_MODEL: process.env.LOCAL_LLM_MODEL || 'vision',
-        MARKER_URL: process.env.MARKER_URL || 'http://localhost:7842',
-        PIPELINE_URL: 'http://localhost:49900',
-        SURYA_PATH: SURYA_PATH,
-      },
-      autorestart: true,
-      watch: false,
-      min_uptime: '30s',
-      restart_delay: 60000,
-      max_memory_restart: '8G',
-      out_file: '../logs/pdf-upgrade.out.log',
-      error_file: '../logs/pdf-upgrade.err.log',
-      merge_logs: true
-    },
-    {
-      name: 'marker-service',
-      script: './bin/marker-service.py',
-      cwd: __dirname,
-      interpreter: '/tank/site2rag/marker-venv/bin/python',
-      env: {
-        NODE_ENV: 'production',
-        TMPDIR,
-        SITE2RAG_ROOT,
-        MARKER_PORT: '7842',
-        MARKER_WORKERS: '8'
-      },
-      autorestart: true,
-      watch: false,
-      min_uptime: '60s',
-      restart_delay: 30000,
-      max_memory_restart: '60G',
-      out_file: '../logs/marker-service.out.log',
-      error_file: '../logs/marker-service.err.log',
       merge_logs: true
     },
     {

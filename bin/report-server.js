@@ -476,17 +476,6 @@ createServer(async (req, res) => {
       const now = new Date().toISOString();
       const imp = 999; // user-triggered reprocess always jumps the queue
 
-      // Cancel any in-flight pipeline job for this URL
-      const pipelineDb = process.env.PIPELINE_DB;
-      if (pipelineDb && existsSync(pipelineDb)) {
-        try {
-          const pdb = new Database(pipelineDb);
-          const job = pdb.prepare(`SELECT id FROM jobs WHERE source_url=? AND status IN ('processing','pending') ORDER BY id DESC LIMIT 1`).get(docUrl);
-          if (job) pdb.prepare(`UPDATE jobs SET status='failed', error='Cancelled — re-queued by user' WHERE id=?`).run(job.id);
-          pdb.close();
-        } catch {}
-      }
-
       if (existing) {
         // Keep upgraded_pdf_path/after_score/receipt so the card stays visible in the upgraded tab while reprocessing.
         db.prepare(`UPDATE pdf_upgrade_queue SET status='pending', priority=999, pass=1,
@@ -691,7 +680,7 @@ createServer(async (req, res) => {
     const db = safeOpenDb(domain);
     if (!db) return err(res, 404, 'db unavailable');
 
-    let row, ocrText;
+    let row;
     try {
       row = db.prepare(`
         SELECT q.url, q.pdf_title, q.excerpt, q.ai_summary, q.ai_author, q.ai_summarized_at,
@@ -702,7 +691,6 @@ createServer(async (req, res) => {
         LEFT JOIN (SELECT hosted_url, MIN(host_url) as host_url, MIN(hosted_title) as hosted_title FROM hosts GROUP BY hosted_url) h ON q.url=h.hosted_url
         LEFT JOIN pages hp ON h.host_url=hp.url
         WHERE q.url=?`).get(docUrl);
-      ocrText = db.prepare(`SELECT text_md FROM ocr_pages WHERE doc_url=? AND page_no=1 ORDER BY COALESCE(confidence,0) DESC LIMIT 1`).get(docUrl)?.text_md || null;
     } catch (e) { db.close(); return err(res, 500, e.message); } finally { db.close(); }
 
     if (!row) return err(res, 404, 'doc not found in pdf_quality');
@@ -737,7 +725,7 @@ createServer(async (req, res) => {
       } catch {}
     }
 
-    const sampleText = [ocrText, row.excerpt, row.title].filter(Boolean).join(' ');
+    const sampleText = [row.excerpt, row.title].filter(Boolean).join(' ');
     const language = detectLanguage(sampleText) || 'English';
     const slug = docUrl.split('/').pop().replace(/\.pdf$/i,'').replace(/[_-]/g,' ').trim();
     const title = row.title || (slug.length > 3 ? slug : null);
@@ -747,9 +735,8 @@ createServer(async (req, res) => {
     if (row.source_url) parts.push(`Found on: ${row.source_url}`);
     if (linkContext) parts.push(`\nContext on host page:\n${linkContext}`);
     else if (hostPageText) parts.push(`\nHost page text:\n${hostPageText.slice(0, 400)}`);
-    if (ocrText && ocrText.length > 40) parts.push(`\nDocument text (first page):\n${ocrText.slice(0, 600)}`);
-    else if (row.excerpt && row.excerpt.length > 40) parts.push(`\nDocument excerpt:\n${row.excerpt.slice(0, 400)}`);
-    if (!title && !linkContext && !ocrText && !row.excerpt) {
+    if (row.excerpt && row.excerpt.length > 40) parts.push(`\nDocument excerpt:\n${row.excerpt.slice(0, 400)}`);
+    if (!title && !linkContext && !row.excerpt) {
       return json(res, { summary: null, author: null, language, tier: 'free' });
     }
 

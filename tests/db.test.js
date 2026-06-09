@@ -5,7 +5,7 @@ import { tmpdir } from 'os';
 // Patch SITE2RAG_ROOT for tests
 const testRoot = join(tmpdir(), `site2rag-test-${Date.now()}`);
 process.env.SITE2RAG_ROOT = testRoot;
-import { openDb, startRun, finishRun, upsertPage, getMeta, setMeta, upsertSitemap, markGoneUrls, logLlmCall, llmCost, getOcrPage, saveOcrPage, upsertAsset, addAssetRef, markSitemapRemoved, upsertExport } from '../src/db.js';
+import { openDb, startRun, finishRun, upsertPage, getMeta, setMeta, upsertSitemap, markGoneUrls, logLlmCall, llmCost, upsertAsset, addAssetRef, markSitemapRemoved, upsertExport } from '../src/db.js';
 const TEST_DOMAIN = 'test.example.com';
 describe('db', () => {
   let db;
@@ -18,7 +18,7 @@ describe('db', () => {
   });
   it('creates all tables', () => {
     const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map(r => r.name);
-    ['runs', 'pages', 'hosts', 'sitemaps', 'exports', 'ocr_pages', 'assets', 'asset_refs', 'llm_calls', 'site_meta'].forEach(t => {
+    ['runs', 'pages', 'hosts', 'sitemaps', 'exports', 'assets', 'asset_refs', 'llm_calls', 'site_meta'].forEach(t => {
       expect(tables).toContain(t);
     });
   });
@@ -257,34 +257,6 @@ describe('db — upsertExport', () => {
     expect(row).toBeTruthy();
     expect(row.status).toBe('ok');
     expect(row.source_hash).toBe('sha256:abc');
-  });
-});
-
-describe('db — saveOcrPage / getOcrPage', () => {
-  let db;
-  beforeEach(() => { db = openDb(TEST_DOMAIN); });
-  afterEach(() => { db.close(); rmSync(testRoot, { recursive: true, force: true }); });
-
-  it('saves and retrieves an OCR page by url, pageNo, engine', () => {
-    saveOcrPage(db, {
-      docUrl: 'https://example.com/a.pdf', pageNo: 1, engine: 'tesseract',
-      text_md: 'Hello world', confidence: 0.85, bboxes_json: '[]', bytes: 1024,
-    });
-    const row = getOcrPage(db, 'https://example.com/a.pdf', 1, 'tesseract');
-    expect(row).not.toBeNull();
-    expect(row.text_md).toBe('Hello world');
-    expect(row.confidence).toBeCloseTo(0.85, 2);
-  });
-
-  it('returns undefined for unknown url/page/engine', () => {
-    expect(getOcrPage(db, 'https://example.com/missing.pdf', 1, 'tesseract')).toBeUndefined();
-  });
-
-  it('replaces existing row on re-save (same url/page/engine)', () => {
-    saveOcrPage(db, { docUrl: 'https://example.com/b.pdf', pageNo: 1, engine: 'boss', text_md: 'v1', confidence: 0.5, bboxes_json: '[]', bytes: 100 });
-    saveOcrPage(db, { docUrl: 'https://example.com/b.pdf', pageNo: 1, engine: 'boss', text_md: 'v2', confidence: 0.9, bboxes_json: '[]', bytes: 200 });
-    const row = getOcrPage(db, 'https://example.com/b.pdf', 1, 'boss');
-    expect(row.text_md).toBe('v2');
   });
 });
 

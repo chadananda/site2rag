@@ -4,22 +4,28 @@ Web crawler → RAG export pipeline. Mirrors websites, classifies pages, exports
 
 ## Architecture
 
+site2rag owns OCR nothing — all OCR/upgrade work lives in the separate SLP
+service. site2rag only submits jobs and polls results via slp-client.js.
+
 ```
-src/index.js (PM2 daemon)
+src/index.js  (PM2: site2rag)
   └─ per site: sitemap → mirror → classify → export → score-pdfs → archive → retain
                                                              ↓
-                                                    SLP service (port 49900)
+                                                    SLP service (port 49900, separate project)
                                                     submitted via slp-client.js
-bin/report-server.js (port 7840, Cloudflare Tunnel)
+bin/report-server.js  (PM2: site2rag-report, port 7840, Cloudflare Tunnel)
   └─ /api/* routes + static public/ serving
   └─ polls SLP for job progress, saves receipt to pdf_upgrade_queue
 public/ (Cloudflare Pages CDN)
   └─ Alpine.js dashboard → calls report-server API
-bin/lnker-server.js (port 7841)
+bin/lnker-server.js  (PM2: site2rag-lnker, port 7841)
   └─ {domain}.lnker.com → websites_mirror/{domain}/ (archive viewer)
-bin/worker-agent.js/py (port 49910)
-  └─ OCR tool runner — self-registers with SLP as a GPU/CPU worker
+bin/updater.js  (PM2: site2rag-updater)
+  └─ polls GitHub, fast-forwards, pm2 reloads on update
 ```
+
+All PM2 processes site2rag owns are prefixed `site2rag-` (or `site2rag`) so
+ownership is unambiguous alongside the separate SLP service.
 
 ## Deploy
 

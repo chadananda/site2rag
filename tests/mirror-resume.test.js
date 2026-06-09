@@ -8,7 +8,7 @@ const testRoot = join(tmpdir(), `site2rag-mirror-resume-${Date.now()}`);
 process.env.SITE2RAG_ROOT = testRoot;
 
 vi.mock('undici', () => ({ fetch: vi.fn() }));
-vi.mock('../src/pdf-upgrade/score.js', () => ({
+vi.mock('../src/score.js', () => ({
   scorePdf: vi.fn(),
   saveQualityScore: vi.fn(),
   maybeQueue: vi.fn()

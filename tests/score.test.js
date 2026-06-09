@@ -8,7 +8,7 @@ const testRoot = join(tmpdir(), `site2rag-score-test-${Date.now()}`);
 process.env.SITE2RAG_ROOT = testRoot;
 
 import { openDb } from '../src/db.js';
-import { scorePdf, saveQualityScore, maybeQueue, extractBadSample, wordQuality, extractExcerpt, scriptConsistency, ocrNoiseRatio } from '../src/pdf-upgrade/score.js';
+import { scorePdf, saveQualityScore, maybeQueue, extractBadSample, wordQuality, extractExcerpt, scriptConsistency, ocrNoiseRatio } from '../src/score.js';
 
 const DOMAIN = 'score.example.com';
 
