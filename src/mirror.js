@@ -26,7 +26,10 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   const seedUrl = siteConfig.url;
   const ua = siteConfig.user_agent || 'site2rag/1.0';
   const maxDepth = siteConfig.max_depth ?? 8;
-  const requestDelay = siteConfig.request_delay_ms ?? 0;
+  // Polite by default — spaces out request starts so we don't hammer remote hosts
+  // (and keeps local CPU modest). Override per-site in websites.yaml with request_delay_ms.
+  // May be raised below to honor a robots.txt Crawl-delay.
+  let requestDelay = siteConfig.request_delay_ms ?? 250;
   const compiled = compileRules(siteConfig.rules);
   const seedHost = new URL(seedUrl).hostname;
 
@@ -40,7 +43,18 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   if (siteConfig.respect_robots_txt) {
     try {
       const robotsRes = await fetch(`${new URL(seedUrl).origin}/robots.txt`, { headers: { 'User-Agent': ua }, signal: AbortSignal.timeout(5000) });
-      if (robotsRes.ok) disallowed = parseRobots(await robotsRes.text(), ua);
+      if (robotsRes.ok) {
+        const txt = await robotsRes.text();
+        disallowed = parseRobots(txt, ua);
+        // Honor robots.txt Crawl-delay for our UA group (or *) — be a polite guest.
+        let active = false, cd = 0;
+        for (const line of txt.split('\n')) {
+          const l = line.trim();
+          if (/^user-agent:/i.test(l)) { const a = (l.split(':')[1] || '').trim().toLowerCase(); active = a === '*' || a.includes('site2rag'); }
+          else if (active && /^crawl-delay:/i.test(l)) { const n = parseFloat((l.split(':')[1] || '').trim()); if (n > 0) cd = Math.max(cd, n * 1000); }
+        }
+        if (cd > requestDelay) { requestDelay = cd; console.log(`[mirror] ${domain}: honoring robots Crawl-delay ${cd}ms`); }
+      }
     } catch {}
   }
   const isRobotsAllowed = (url) => {
@@ -74,7 +88,9 @@ export const runMirror = async (db, siteConfig, priorityQueue = []) => {
   const stats = { checked: 0, new_pages: 0, changed: 0, gone: 0 };
   let totalDiscovered = discoverQueue.length + recheckQueue.length;
   const upsertMeta = db.prepare('INSERT OR REPLACE INTO site_meta (key, value) VALUES (?, ?)');
-  const concurrency = siteConfig.crawl_concurrency ?? 20;
+  // Polite default: few parallel fetches — gentle on remote hosts and on our own CPU.
+  // Override per-site in websites.yaml with crawl_concurrency.
+  const concurrency = siteConfig.crawl_concurrency ?? 4;
   const inFlight = new Set();
 
   const adapter = await getAdapter(siteConfig);

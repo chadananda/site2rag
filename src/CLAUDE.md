@@ -8,7 +8,7 @@ PDF upgrades are submitted to the external SLP service via `slp-client.js`; no l
 | **index.js** | — | PM2 entry. 15-min tick loop; runs each due site through full pipeline. 4-hour hard timeout per site. |
 | **db.js** | `openDb` `startRun` `finishRun` `upsertPage` `upsertSitemap` `markSitemapRemoved` `getMeta` `setMeta` `logLlmCall` | better-sqlite3 wrapper. Opens/migrates `_meta/site.sqlite`. Schema: pages, hosts, sitemaps, pdf_quality, pdf_upgrade_queue, exports, llm_calls, runs, site_meta, assets. |
 | **config.js** | `loadConfig` `mergeSiteConfig` `getMirrorRoot` `mirrorDir` `mdDir` `metaDir` `assetsDir` | Reads `websites.yaml`. Deep-merges defaults + per-site config. Path helpers lazy (env read at call time). Auto-loads `.env`. |
-| **mirror.js** | `runMirror` + re-exports from mirror-crawl | Crawl loop. Sitemap + recheck queue. Concurrent fetch (20). Conditional GET, robots. Pluggable adapter. |
+| **mirror.js** | `runMirror` + re-exports from mirror-crawl | Crawl loop. Sitemap + recheck queue. Polite fetch (default 4 concurrent, 250ms delay, honors robots Crawl-delay; override per-site via crawl_concurrency/request_delay_ms). Conditional GET, robots. Pluggable adapter. |
 | **mirror-crawl.js** | `urlToMirrorPath` `urlPathToSlug` `inScope` `parseRobots` `extractLinks` | Pure crawl utils. URL→path (query hashing, 200-byte filename limit). No side effects. |
 | **fetch-adapters.js** | `getAdapter` `createHttpAdapter` `createMediaWikiAdapter` `createWordPressRssAdapter` | Pluggable fetch backends. Each: `fetch(url, existingPage) → {status,buf,mimeType,etag,lastModified}\|null`. |
 | **playwright-fetch.js** | `createPlaywrightPool` `isHtmlShell` `isWorthRendering` | Playwright pool for JS-rendered SPAs. Requires `npx playwright install chromium`. |
