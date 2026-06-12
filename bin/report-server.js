@@ -42,7 +42,9 @@ const clearFocusDomain = () => {
   try { unlinkSync(FOCUS_FILE); } catch {}
 };
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://site2rag.lnker.com';
-// SLP auth — sent as Bearer by the pipeline client. .env (auto-loaded via config) sets SLP_API_KEY.
+// SLP service — public API base URL + Bearer key, both from SITE2RAG_ROOT/.env via ecosystem.
+// No localhost fallback: empty SLP_API_URL disables upgrade/polling rather than hitting a local orchestrator.
+const SLP_API_URL = process.env.SLP_API_URL || process.env.PIPELINE_URL || '';
 const SLP_API_KEY = process.env.SLP_API_KEY || process.env.PIPELINE_API_KEY || null;
 
 let _sitesCache = null;
@@ -225,7 +227,7 @@ createServer(async (req, res) => {
   if (path === '/api/sites/activity') {
     const domain = url.searchParams.get('site');
     if (!domain) return err(res, 400, 'site param required');
-    const pipelineUrl = process.env.PIPELINE_URL;
+    const pipelineUrl = SLP_API_URL;
     if (!pipelineUrl) return json(res, []);
     try {
       const db = safeOpenDb(domain);
@@ -499,7 +501,7 @@ createServer(async (req, res) => {
       }
 
       // Immediately submit to pipeline
-      const pipelineUrl = process.env.PIPELINE_URL;
+      const pipelineUrl = SLP_API_URL;
       if (pipelineUrl) {
         const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: SLP_API_KEY });
         const firstSubmitScore = quality?.composite_score ?? null;
@@ -782,8 +784,8 @@ createServer(async (req, res) => {
 });
 
 // Poll pipeline jobs submitted via the reprocess button (upgrade worker is stopped)
-if (process.env.PIPELINE_URL) {
-  const pipelinePoller = new PipelineClient({ baseUrl: process.env.PIPELINE_URL, apiKey: SLP_API_KEY });
+if (SLP_API_URL) {
+  const pipelinePoller = new PipelineClient({ baseUrl: SLP_API_URL, apiKey: SLP_API_KEY });
   const sha256 = (s) => createHash('sha256').update(s).digest('hex');
   const pollPipelineJobs = async () => {
     let sites;
