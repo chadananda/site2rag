@@ -102,10 +102,9 @@ export const siteSummary = (domain, siteUrl, description = null) => {
   } finally { db.close(); }
 };
 
-// CTE factored out so hosts GROUP BY runs once per query (not as a correlated derived table per row).
-// upgrade_history correlated subquery removed — it ran 50× per page; u.before_score covers the fallback need.
-const HOST_CTE = `WITH h AS (SELECT hosted_url, MIN(host_url) AS host_url, MIN(hosted_title) AS hosted_title FROM hosts GROUP BY hosted_url)`;
-
+// Host info (source_url) is resolved with a TARGETED lookup for only the page's
+// rows (see below) — never a full hosts GROUP BY. A whole-table CTE is catastrophic
+// on sites with millions of host rows (e.g. oceanoflights: 13M rows → ~2min/query).
 const DOC_COLS = `
   SELECT p.url, p.path_slug, p.last_seen_at,
          q.composite_score, q.pages, q.word_quality_estimate, q.readable_pages_pct,
@@ -113,7 +112,6 @@ const DOC_COLS = `
          COALESCE(q.ai_title, q.pdf_title) as title, q.ai_title, q.pdf_title,
          q.excerpt, q.ai_summary, q.ai_author, q.ai_summarized_at,
          q.thumbnail_path, q.summary_tier, q.ai_language, q.title_en,
-         h.host_url as source_url,
          u.status, u.before_score, u.after_score, u.score_improvement,
          u.upgraded_pdf_path, u.pages_processed, u.method, u.finished_at, u.started_at, u.queued_at, u.error, u.importance,
          u.receipt_json`; // kept for narrative/costs — fetched only for 50 rows per page
@@ -121,10 +119,7 @@ const DOC_COLS = `
 const DOC_JOINS = `
   FROM pages p
   LEFT JOIN pdf_quality q ON p.url=q.url
-  LEFT JOIN pdf_upgrade_queue u ON p.url=u.url
-  LEFT JOIN h ON p.url=h.hosted_url`;
-
-const DOC_SELECT = `${HOST_CTE} ${DOC_COLS} ${DOC_JOINS}`;
+  LEFT JOIN pdf_upgrade_queue u ON p.url=u.url`;
 
 /** Server-side filtered + paginated doc list. */
 export const siteDocs = (domain, params) => {
@@ -148,7 +143,9 @@ export const siteDocs = (domain, params) => {
     }
     // 'original' (default/fallback): all PDFs, no quality filter
 
-    if (q) { wheres.push("(p.url LIKE ? OR COALESCE(h.hosted_title,q.pdf_title) LIKE ? OR q.excerpt LIKE ?)"); vals.push(`%${q}%`, `%${q}%`, `%${q}%`); }
+    // Search over local columns only (url/title/excerpt) — host-title search dropped so the
+    // query stays index-friendly on huge sites.
+    if (q) { wheres.push("(p.url LIKE ? OR q.ai_title LIKE ? OR q.pdf_title LIKE ? OR q.excerpt LIKE ?)"); vals.push(`%${q}%`, `%${q}%`, `%${q}%`, `%${q}%`); }
     if (status === 'unscored') wheres.push("q.composite_score IS NULL");
     else if (status === 'skipped') wheres.push("q.skip=1");
     else if (status) { wheres.push("u.status=?"); vals.push(status); }
@@ -158,7 +155,7 @@ export const siteDocs = (domain, params) => {
       score_asc: 'COALESCE(q.composite_score, 1) ASC',
       score_desc: 'COALESCE(q.composite_score, 0) DESC',
       pages_desc: 'COALESCE(q.pages, 0) DESC',
-      title_asc: 'COALESCE(h.hosted_title, p.url) ASC',
+      title_asc: 'COALESCE(q.ai_title, q.pdf_title, p.url) ASC',
       improved_desc: 'COALESCE(u.score_improvement, 0) DESC'
     };
     // Upgraded default: submitted/pending first (in flight), then done by newest first
@@ -170,12 +167,17 @@ export const siteDocs = (domain, params) => {
         : `COALESCE(u.priority, COALESCE(q.composite_score,0.5)*100) DESC`;
     const where = wheres.join(' AND ');
 
-    // COUNT uses the CTE only when search query references h.hosted_title; skip it otherwise
-    const countSql = q
-      ? `${HOST_CTE} SELECT COUNT(*) as n ${DOC_JOINS} WHERE ${where}`
-      : `SELECT COUNT(*) as n FROM pages p LEFT JOIN pdf_quality q ON p.url=q.url LEFT JOIN pdf_upgrade_queue u ON p.url=u.url WHERE ${where}`;
-    const total = db.prepare(countSql).get(...vals).n;
-    const rows = db.prepare(`${DOC_SELECT} WHERE ${where} ORDER BY ${orderBy} LIMIT ${PER_PAGE} OFFSET ${offset}`).all(...vals);
+    const total = db.prepare(`SELECT COUNT(*) as n ${DOC_JOINS} WHERE ${where}`).get(...vals).n;
+    const rows = db.prepare(`${DOC_COLS} ${DOC_JOINS} WHERE ${where} ORDER BY ${orderBy} LIMIT ${PER_PAGE} OFFSET ${offset}`).all(...vals);
+
+    // Targeted host lookup for just this page's rows — uses idx_hosts_hosted_url, so it stays
+    // fast even when the hosts table has millions of rows.
+    if (rows.length) {
+      const ph = rows.map(() => '?').join(',');
+      const hostRows = db.prepare(`SELECT hosted_url, MIN(host_url) AS host_url FROM hosts WHERE hosted_url IN (${ph}) GROUP BY hosted_url`).all(...rows.map(r => r.url));
+      const hostMap = new Map(hostRows.map(h => [h.hosted_url, h.host_url]));
+      for (const r of rows) r.source_url = hostMap.get(r.url) || null;
+    }
     return { docs: rows.map(d => mapDoc(d, domain)), total, page, pages: Math.ceil(total / PER_PAGE), per_page: PER_PAGE };
   } finally { db.close(); }
 };
