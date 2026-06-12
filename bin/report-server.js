@@ -42,6 +42,8 @@ const clearFocusDomain = () => {
   try { unlinkSync(FOCUS_FILE); } catch {}
 };
 const CORS_ORIGIN = process.env.CORS_ORIGIN || 'https://site2rag.lnker.com';
+// SLP auth — sent as Bearer by the pipeline client. .env (auto-loaded via config) sets SLP_API_KEY.
+const SLP_API_KEY = process.env.SLP_API_KEY || process.env.PIPELINE_API_KEY || null;
 
 let _sitesCache = null;
 let _sitesCacheAt = 0;
@@ -235,7 +237,7 @@ createServer(async (req, res) => {
       db.close();
       if (!jobs.length) return json(res, []);
       // Query SLP API for each active job's progress
-      const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: process.env.PIPELINE_API_KEY });
+      const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: SLP_API_KEY });
       const activity = (await Promise.all(jobs.map(async ({ url: docUrl, pipeline_job_id: jobId }) => {
         try {
           const job = await pClient.getJob(jobId);
@@ -489,7 +491,7 @@ createServer(async (req, res) => {
       // Immediately submit to pipeline
       const pipelineUrl = process.env.PIPELINE_URL;
       if (pipelineUrl) {
-        const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: process.env.PIPELINE_API_KEY });
+        const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: SLP_API_KEY });
         const firstSubmitScore = quality?.composite_score ?? null;
         pClient.submitJob({ pdfPath: page.local_path, sourceUrl: docUrl, importance: imp, meta: {} })
           .then(jobId => {
@@ -771,7 +773,7 @@ createServer(async (req, res) => {
 
 // Poll pipeline jobs submitted via the reprocess button (upgrade worker is stopped)
 if (process.env.PIPELINE_URL) {
-  const pipelinePoller = new PipelineClient({ baseUrl: process.env.PIPELINE_URL });
+  const pipelinePoller = new PipelineClient({ baseUrl: process.env.PIPELINE_URL, apiKey: SLP_API_KEY });
   const sha256 = (s) => createHash('sha256').update(s).digest('hex');
   const pollPipelineJobs = async () => {
     let sites;
