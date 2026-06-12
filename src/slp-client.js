@@ -2,7 +2,7 @@
 // Exports: PipelineClient. Usage: new PipelineClient({baseUrl, apiKey}) → submitJob({pdfPath,sourceUrl,importance}) → jobId
 //
 // Usage:
-//   const client = new PipelineClient({ baseUrl: process.env.PIPELINE_URL ?? 'http://localhost:4000' });
+//   const client = new PipelineClient({ baseUrl: process.env.PIPELINE_URL, apiKey: process.env.SLP_API_KEY });
 //   const jobId = await client.submitJob({ sourceUrl, meta, importance });
 //   const job   = await client.waitForJob(jobId);   // polls until done
 //   const md    = await client.getMarkdown(jobId);

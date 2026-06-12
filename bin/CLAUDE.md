@@ -25,6 +25,6 @@
 
 ## Key env vars (report-server)
 
-`PIPELINE_URL` — SLP service URL (http://127.0.0.1:49900). Without it, upgrade/polling is disabled.
+`PIPELINE_URL` — public SLP API base URL (set in SITE2RAG_ROOT/.env; no localhost default). Without it, upgrade/polling is disabled.
 `REPORT_ADMIN_PASSWORD` — enables admin endpoints (upgrade, reset, focus).
 `SITE_SESSIONS_FILE` — path to sessions JSON for multi-site UI.
