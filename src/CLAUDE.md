@@ -19,7 +19,7 @@ PDF upgrades are submitted to the external SLP service via `slp-client.js`; no l
 | **score.js** | `scorePdf` `saveQualityScore` `maybeQueue` `wordQuality` `extractBadSample` `ocrNoiseRatio` `detectLanguage` `LANG_COST` `LANG_PRIORITY` | PDF quality scoring (heuristics, no AI). Saves to pdf_quality. `maybeQueue` inserts low-scorers into pdf_upgrade_queue for SLP submission. |
 | **score-pdfs.js** | `runScorePdfs` | Scores unscored PDFs in parallel via score-worker threads. 5-min budget, max 4 threads. |
 | **score-worker.js** | Worker thread | Scores a single PDF via score.js, returns metrics via postMessage. |
-| **slp-client.js** | `PipelineClient` | SLP service HTTP client. `submitJob({pdfPath,sourceUrl,importance}) → jobId`. Used by report-server to submit upgrades. |
+| **slp-client.js** | `PipelineClient` | Public SLP API client (upload flow). `submitJob({pdfPath\|pdfBuffer,filename,meta}) → jobId` (POST /jobs → PUT upload_url → POST process_url). Also `getJob` `getResult` `waitForJob`. Used by report-server. |
 | **sitemap.js** | `runSitemap` `parseSitemapXml` | Fetches sitemap.xml, diffs added/changed/removed. |
 | **rules.js** | `compileRules` `applyFollowOverride` `applyClassifyOverride` `stripQueryParams` | Compiles site rules block to pre-built RegExps. Pure/deterministic. |
 | **metadata.js** | `extractMetadata` | JSON-LD, OpenGraph, meta tags, byline heuristics → title/authors/date. |
