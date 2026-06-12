@@ -12,6 +12,7 @@ if (fs.existsSync(envFile)) {
 }
 const ANTHROPIC_API_KEY = envVars.ANTHROPIC_API_KEY || process.env.ANTHROPIC_API_KEY || '';
 const DEEPSEEK_API_KEY  = envVars.DEEPSEEK_API_KEY  || process.env.DEEPSEEK_API_KEY  || '';
+const SLP_API_KEY       = envVars.SLP_API_KEY       || process.env.SLP_API_KEY       || '';
 const SITE_ADMIN_EMAIL  = envVars.SITE_ADMIN_EMAIL  || process.env.SITE_ADMIN_EMAIL  || '';
 const SITE_ADMIN_PASS   = envVars.SITE_ADMIN_PASS   || process.env.SITE_ADMIN_PASS   || '';
 const TMPDIR = path.join(SITE2RAG_ROOT, 'tmp'); // all processes write temp files to the data drive, never the OS drive
@@ -63,7 +64,8 @@ module.exports = {
         SITE_ADMIN_EMAIL,
         SITE_ADMIN_PASS,
         UPGRADE_REPORT_PATH: path.join(SITE2RAG_ROOT, 'report'),
-        PIPELINE_URL: 'http://localhost:49900'
+        PIPELINE_URL: 'http://localhost:49900',
+        SLP_API_KEY
       },
       autorestart: true,
       watch: false,
