@@ -279,15 +279,25 @@ createServer(async (req, res) => {
   if (path === '/api/thumbnail') {
     const docUrl = url.searchParams.get('url');
     if (!docUrl) return err(res, 400, 'url param required');
-    const domain = url.searchParams.get('site') ||
-      sites.find(s => docUrl.startsWith(`https://${s.domain}`) || docUrl.startsWith(`http://${s.domain}`))?.domain;
-    if (!domain) return err(res, 404, 'unknown domain');
-    const db = safeOpenDb(domain);
-    if (!db) return err(res, 404, 'db unavailable');
-    let row;
-    try { row = db.prepare('SELECT local_path, path_slug FROM pages WHERE url=?').get(docUrl); }
-    finally { db.close(); }
-    if (!row?.local_path || !existsSync(row.local_path)) return err(res, 404, 'pdf not found');
+    // Resolve the site that actually holds the file: prefer the doc URL's own domain
+    // (where its mirror lives), then the caller-supplied site. This is robust to the
+    // dashboard sending a stale `site` during a site switch.
+    const urlHost = (() => { try { return new URL(docUrl).hostname; } catch { return null; } })();
+    const candidates = [...new Set([
+      sites.find(s => s.domain === urlHost)?.domain,
+      url.searchParams.get('site'),
+    ].filter(Boolean))];
+    if (!candidates.length) return err(res, 404, 'unknown domain');
+    let domain = null, row = null;
+    for (const c of candidates) {
+      const cdb = safeOpenDb(c);
+      if (!cdb) continue;
+      try {
+        const r = cdb.prepare('SELECT local_path, path_slug FROM pages WHERE url=?').get(docUrl);
+        if (r?.local_path && existsSync(r.local_path)) { domain = c; row = r; break; }
+      } finally { cdb.close(); }
+    }
+    if (!row) return err(res, 404, 'pdf not found');
 
     const w = Math.min(1200, Math.max(50, parseInt(url.searchParams.get('w') || '300', 10)));
     const h = url.searchParams.get('h') ? Math.min(2400, Math.max(50, parseInt(url.searchParams.get('h'), 10))) : null;
