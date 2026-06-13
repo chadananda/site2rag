@@ -828,22 +828,24 @@ if (SLP_API_URL) {
               writeFileSync(mdPath, mdText);
               let savedPdf = null;
               if (pdfBuf && pdfBuf.length) { const p = join(upgradedDir, `x${hash}.pdf`); writeFileSync(p, pdfBuf); savedPdf = p; }
-              // Derive metadata from the markdown body: title = first non-empty line (de-headed); author = trailing "by X"; lang = detected.
-              const firstLine = (mdBody.split('\n').find(l => l.trim()) || '').replace(/^#+\s*/, '').trim();
-              let aiTitle = firstLine || null, aiAuthor = null;
-              const byMatch = firstLine.match(/\s+by\s+(.+?)\s*$/i);
-              if (byMatch) { aiAuthor = byMatch[1].trim(); aiTitle = (firstLine.slice(0, byMatch.index).replace(/[—–-]\s*$/, '').trim()) || firstLine; }
-              const aiLang = detectLanguage(mdBody.slice(0, 4000)) || null;
-              const receiptJson = JSON.stringify({ job, mdBytes: mdText.length, pdfBytes: pdfBuf?.length ?? 0 });
+              // Metadata: SLP may emit YAML frontmatter (---). Parse it and use those fields when present.
+              // Do NOT guess title/author from the OCR body — the first line is usually a running header —
+              // and never clobber existing metadata. Language detection is reliable, so always refresh it.
+              const fm = {};
+              const fmMatch = mdText.match(/^﻿?---\r?\n([\s\S]*?)\r?\n---/);
+              if (fmMatch) for (const ln of fmMatch[1].split(/\r?\n/)) { const mm = ln.match(/^([A-Za-z_]+):\s*(.+?)\s*$/); if (mm) fm[mm[1].toLowerCase()] = mm[2].replace(/^["']|["']$/g, ''); }
+              const aiLang = fm.language || fm.lang || (detectLanguage(mdBody.slice(0, 4000)) || null);
+              const receiptJson = JSON.stringify({ job, mdBytes: mdText.length, pdfBytes: pdfBuf?.length ?? 0, frontmatter: Object.keys(fm) });
               db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=COALESCE(?,upgraded_pdf_path), marker_md_path=?, before_score=COALESCE(before_score,?), after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?`)
                 .run(new Date().toISOString(), savedPdf, mdPath, beforeScore, afterScore, gain, job.pages_processed ?? null, 'slp-v1', receiptJson, url);
               // Never overwrite pdf_quality.composite_score (original pre-upgrade score).
               const cols = [], vals = [];
-              if (aiTitle)  { cols.push('ai_title=?');    vals.push(aiTitle.slice(0, 500)); }
-              if (aiAuthor) { cols.push('ai_author=?');   vals.push(aiAuthor.slice(0, 300)); }
+              if (fm.title)               { cols.push('ai_title=?');    vals.push(String(fm.title).slice(0, 500)); }
+              if (fm.author)              { cols.push('ai_author=?');   vals.push(String(fm.author).slice(0, 300)); }
+              if (fm.summary || fm.subject){ cols.push('ai_summary=?'); vals.push(String(fm.summary || fm.subject).slice(0, 2000)); }
               if (aiLang && aiLang !== 'unknown') { cols.push('ai_language=?'); vals.push(aiLang); }
               if (cols.length){ vals.push(url); db.prepare(`UPDATE pdf_quality SET ${cols.join(', ')} WHERE url=?`).run(...vals); }
-              console.log(`[poll] done: ${url.split('/').pop()} pages=${job.pages_processed} mdKB=${(mdText.length/1024).toFixed(1)} lang=${aiLang} title="${(aiTitle||'').slice(0,60)}"`);
+              console.log(`[poll] done: ${url.split('/').pop()} pages=${job.pages_processed} mdKB=${(mdText.length/1024).toFixed(1)} lang=${aiLang} fm=[${Object.keys(fm).join(',') || 'none'}]`);
             } else if (PipelineClient.isFailed(job.status)) {
               const errCode = job.failure_code || job.status;
               if (isTransientErr(errCode)) db.prepare("DELETE FROM pdf_upgrade_queue WHERE url=? AND status NOT IN ('done','submitted')").run(url);
