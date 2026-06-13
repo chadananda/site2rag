@@ -4,9 +4,11 @@
 //     1) POST /jobs {filename, meta}        → { job_id, upload_url, upload_method, process_url }
 //     2) PUT  upload_url  (raw PDF bytes)   → { uploaded: true }
 //     3) POST process_url {}                → { status: 'processing', orch_job_id }
-//   getJob(jobId)    → status record { status, current_stage, score_before, score_after,
-//                                      pages_processed, page_count, cost_cents, failure_code, ... }
-//   getResult(jobId) → completed output (409 until done)
+//   getJob(jobId)      → status record { status, current_stage, score_before, score_after,
+//                                        pages_processed, page_count, cost_cents, failure_code, ... }
+//   getMarkdown(jobId) → structured RAG markdown (Accept: text/markdown), with <!-- pdf:N --> page anchors
+//   getPdf(jobId)      → upgraded searchable PDF bytes (Accept: application/pdf)
+//   getResult(jobId)   → JSON envelope (Accept: application/json) → { download_url, score_before, score_after }
 // Auth: Bearer SLP_API_KEY on every request.
 
 import { readFile } from 'fs/promises';
@@ -60,8 +62,22 @@ export class PipelineClient {
   /** Current job status record. */
   getJob(jobId) { return this._json('GET', `/jobs/${jobId}`); }
 
-  /** Completed-job result payload. Returns 409 (thrown) until the job is done. */
+  /** Completed-job result envelope (Accept: application/json) → { download_url, expires_at, score_before, score_after }. */
   getResult(jobId) { return this._json('GET', `/jobs/${jobId}/result`); }
+
+  /** Structured RAG markdown for a completed job (Accept: text/markdown). Returns the markdown text directly. */
+  async getMarkdown(jobId) {
+    const res = await fetch(this._url(`/jobs/${jobId}/result`), { headers: this._headers({ Accept: 'text/markdown' }) });
+    if (!res.ok) throw new Error(`SLP markdown ${jobId}: HTTP ${res.status} ${(await res.text()).slice(0, 200)}`);
+    return await res.text();
+  }
+
+  /** Upgraded searchable PDF for a completed job (Accept: application/pdf). Returns a Buffer. */
+  async getPdf(jobId) {
+    const res = await fetch(this._url(`/jobs/${jobId}/result`), { headers: this._headers({ Accept: 'application/pdf' }) });
+    if (!res.ok) throw new Error(`SLP pdf ${jobId}: HTTP ${res.status}`);
+    return Buffer.from(await res.arrayBuffer());
+  }
 
   /** Raw bytes/text of an absolute or relative sub-resource. */
   async getRaw(pathOrUrl, returnType = 'text') {

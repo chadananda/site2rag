@@ -786,9 +786,8 @@ createServer(async (req, res) => {
 if (SLP_API_URL) {
   const pipelinePoller = new PipelineClient({ baseUrl: SLP_API_URL, apiKey: SLP_API_KEY });
   const sha256 = (s) => createHash('sha256').update(s).digest('hex');
-  const LANG_NAMES = new Set(['arabic','persian','hebrew','french','spanish','german','italian','portuguese','dutch','polish','turkish','russian','japanese','chinese','korean','english','unknown']);
-  const stripQuotes = s => s ? s.replace(/^["«»「」『』"']+|["«»「」『』"']+$/g, '').trim() : s;
-  let _loggedResultShape = false; // log /result keys once so the real contract is visible in logs
+  // SLP page anchors: <!-- pdf:N -->, <!-- pdf:N, pg:LABEL -->, or legacy <!-- page:N -->. Strip for body/title/length checks (kept intact in the saved file).
+  const stripAnchors = (s) => (s || '').replace(/<!--\s*(?:pdf|page):[^>]*-->/g, '').replace(/\n{3,}/g, '\n\n').trim();
   const pollPipelineJobs = async () => {
     let sites;
     try { ({ sites } = loadConfig()); } catch { return; }
@@ -803,61 +802,48 @@ if (SLP_API_URL) {
           try {
             const job = await pipelinePoller.getJob(jobId);
             if (PipelineClient.isDone(job.status)) {
-              let result = {};
-              try { result = await pipelinePoller.getResult(jobId) || {}; }
-              catch (e) { console.warn(`[poll] result fetch failed ${jobId}: ${e.message}`); }
-              // Log the real /result contract once so field mappings can be verified/tightened.
-              if (!_loggedResultShape) { _loggedResultShape = true; console.log('[poll] /result keys:', Object.keys(result).join(',') || '(none)'); }
-              const m = result.metadata ?? result ?? {};
+              // Public SLP contract: GET /result returns the upgraded PDF (Accept: application/pdf) or the
+              // structured RAG markdown (Accept: text/markdown). No inline metadata — title/author/lang are
+              // derived from the markdown body here. Scores are null at the economy tier (not a failure).
+              let mdText = null, pdfBuf = null;
+              try { mdText = await pipelinePoller.getMarkdown(jobId); } catch (e) { console.warn(`[poll] markdown fetch failed ${jobId}: ${e.message}`); }
+              try { pdfBuf = await pipelinePoller.getPdf(jobId); }      catch (e) { console.warn(`[poll] pdf fetch failed ${jobId}: ${e.message}`); }
+              const mdBody = stripAnchors(mdText);
+              // Completeness: markdown is the deliverable. Require real body text.
+              if (!mdText || mdBody.length < 50) {
+                const errMsg = `incomplete: ${mdText ? 'empty_markdown' : 'no_markdown'}`;
+                console.warn(`[poll] ${errMsg}: ${url.split('/').pop()}`);
+                db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=?, pipeline_job_id=NULL WHERE url=?")
+                  .run(new Date().toISOString(), errMsg, url);
+                continue;
+              }
               const beforeScore = job.score_before ?? before_score ?? null;
               const afterScore  = job.score_after ?? null;
               const gain        = (afterScore != null && beforeScore != null) ? afterScore - beforeScore : null;
               const upgradedDir = join(getMirrorRoot(), '..', 'websites_mirror', domain, '.upgraded');
               mkdirSync(upgradedDir, { recursive: true });
               const hash = sha256(url).slice(0, 16);
-              // Markdown — inline field or a download URL (handle several plausible shapes).
-              let savedMd = null;
-              let mdText = result.markdown ?? result.md ?? result.text ?? result.content ?? null;
-              const mdUrl = result.markdown_url ?? result.md_url ?? result.downloads?.md ?? null;
-              if (!mdText && mdUrl) { try { mdText = await pipelinePoller.getRaw(mdUrl, 'text'); } catch {} }
-              if (mdText && mdText.trim()) { const p = join(upgradedDir, `x${hash}.md`); writeFileSync(p, mdText); savedMd = p; }
-              // Upgraded PDF — download URL if provided.
+              // Save markdown (anchors kept intact for RAG citation) + the upgraded PDF.
+              const mdPath = join(upgradedDir, `x${hash}.md`);
+              writeFileSync(mdPath, mdText);
               let savedPdf = null;
-              const pdfUrl = result.pdf_url ?? result.pdf ?? result.downloads?.pdf ?? null;
-              if (pdfUrl) { try { const buf = await pipelinePoller.getRaw(pdfUrl, 'buffer'); const p = join(upgradedDir, `x${hash}.pdf`); writeFileSync(p, buf); savedPdf = p; } catch (e) { console.warn(`[poll] pdf fetch failed: ${e.message}`); } }
-              // Completeness check.
-              const title   = m.title ?? m.title_en ?? null;
-              const subject = m.subject ?? m.summary ?? m.subject_en ?? null;
-              const mdBody  = mdText ? mdText.replace(/^---[\s\S]*?---\n?/, '').replace(/\{pdf=\d+\}/g, '').trim() : '';
-              const pageCount = job.page_count ?? 1;
-              const receiptJson = JSON.stringify({ job, result });
-              const missing = [];
-              if (!savedMd)                                    missing.push('no_markdown');
-              else if (mdBody.length < 300 && pageCount > 2)  missing.push('empty_markdown');
-              if (!title)                                      missing.push('no_title');
-              if (!subject)                                    missing.push('no_summary');
-              if (missing.length) {
-                const errMsg = `incomplete: ${missing.join(', ')}`;
-                console.warn(`[poll] ${errMsg}: ${url.split('/').pop()}`);
-                db.prepare("UPDATE pdf_upgrade_queue SET status='failed', finished_at=?, error=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?")
-                  .run(new Date().toISOString(), errMsg, receiptJson, url);
-                continue;
-              }
-              db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=COALESCE(?,upgraded_pdf_path), marker_md_path=COALESCE(?,marker_md_path), before_score=COALESCE(before_score,?), after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?`)
-                .run(new Date().toISOString(), savedPdf, savedMd, beforeScore, afterScore, gain, job.pages_processed ?? null, 'slp-v1', receiptJson, url);
+              if (pdfBuf && pdfBuf.length) { const p = join(upgradedDir, `x${hash}.pdf`); writeFileSync(p, pdfBuf); savedPdf = p; }
+              // Derive metadata from the markdown body: title = first non-empty line (de-headed); author = trailing "by X"; lang = detected.
+              const firstLine = (mdBody.split('\n').find(l => l.trim()) || '').replace(/^#+\s*/, '').trim();
+              let aiTitle = firstLine || null, aiAuthor = null;
+              const byMatch = firstLine.match(/\s+by\s+(.+?)\s*$/i);
+              if (byMatch) { aiAuthor = byMatch[1].trim(); aiTitle = (firstLine.slice(0, byMatch.index).replace(/[—–-]\s*$/, '').trim()) || firstLine; }
+              const aiLang = detectLanguage(mdBody.slice(0, 4000)) || null;
+              const receiptJson = JSON.stringify({ job, mdBytes: mdText.length, pdfBytes: pdfBuf?.length ?? 0 });
+              db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=COALESCE(?,upgraded_pdf_path), marker_md_path=?, before_score=COALESCE(before_score,?), after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?`)
+                .run(new Date().toISOString(), savedPdf, mdPath, beforeScore, afterScore, gain, job.pages_processed ?? null, 'slp-v1', receiptJson, url);
               // Never overwrite pdf_quality.composite_score (original pre-upgrade score).
-              const lang = m.language ?? m.lang ?? null;
-              const descEn = m.subject_en ?? m.desc_en ?? null;
               const cols = [], vals = [];
-              if (m.title)    { cols.push('ai_title=?');   vals.push(stripQuotes(m.title)); }
-              if (m.title_en) { cols.push('title_en=?');   vals.push(stripQuotes(m.title_en)); }
-              if (descEn)     { cols.push('desc_en=?');    vals.push(stripQuotes(descEn)); }
-              const authorVal = m.author && !LANG_NAMES.has(String(m.author).toLowerCase().trim()) && String(m.author).toLowerCase() !== 'unknown' ? m.author : null;
-              if (authorVal)  { cols.push('ai_author=?');  vals.push(authorVal); }
-              if (subject)    { cols.push('ai_summary=?'); vals.push(stripQuotes(subject)); }
-              if (lang)       { cols.push('ai_language=?'); vals.push(lang); }
+              if (aiTitle)  { cols.push('ai_title=?');    vals.push(aiTitle.slice(0, 500)); }
+              if (aiAuthor) { cols.push('ai_author=?');   vals.push(aiAuthor.slice(0, 300)); }
+              if (aiLang && aiLang !== 'unknown') { cols.push('ai_language=?'); vals.push(aiLang); }
               if (cols.length){ vals.push(url); db.prepare(`UPDATE pdf_quality SET ${cols.join(', ')} WHERE url=?`).run(...vals); }
-              console.log(`[poll] done: ${url.split('/').pop()} after=${afterScore} pages=${job.pages_processed}`);
+              console.log(`[poll] done: ${url.split('/').pop()} pages=${job.pages_processed} mdKB=${(mdText.length/1024).toFixed(1)} lang=${aiLang} title="${(aiTitle||'').slice(0,60)}"`);
             } else if (PipelineClient.isFailed(job.status)) {
               const errCode = job.failure_code || job.status;
               if (isTransientErr(errCode)) db.prepare("DELETE FROM pdf_upgrade_queue WHERE url=? AND status NOT IN ('done','submitted')").run(url);
