@@ -4,6 +4,7 @@
 import Database from 'better-sqlite3';
 import { statSync } from 'fs';
 import { PipelineClient } from '../src/slp-client.js';
+import { buildJobContext } from '../src/slp-context.js';
 
 const DOMAIN   = process.argv[2] || 'bahai-library.com';
 const N        = parseInt(process.argv[3] || '5', 10);
@@ -34,9 +35,12 @@ for (const d of batch) {
   if (ex) db.prepare("UPDATE pdf_upgrade_queue SET status='pending',priority=999,started_at=NULL,finished_at=NULL,error=NULL,requested_method='ocr',importance=999,queued_at=?,pipeline_job_id=NULL WHERE url=?").run(now, d.url);
   else    db.prepare("INSERT INTO pdf_upgrade_queue (url,priority,status,requested_method,importance,queued_at) VALUES (?,999,'pending','ocr',999,?)").run(d.url, now);
   try {
-    const jobId = await c.submitJob({ pdfPath: d.local_path, filename: d.url.split('/').pop(), meta: { source_url: d.url } });
+    let context = null;
+    try { context = (await buildJobContext({ db, url: d.url, apiKey: process.env.DEEPSEEK_API_KEY }))?.context || null; }
+    catch (e) { console.log(`  ctx fail ${d.url.split('/').pop()}: ${e.message}`); }
+    const jobId = await c.submitJob({ pdfPath: d.local_path, filename: d.url.split('/').pop(), context, meta: { source_url: d.url } });
     db.prepare("UPDATE pdf_upgrade_queue SET status='submitted',started_at=?,pipeline_job_id=?,before_score=COALESCE(before_score,?) WHERE url=?").run(new Date().toISOString(), jobId, d.composite_score, d.url);
-    console.log(`  submitted ${(d.sz/1024).toFixed(0).padStart(4)}KB  ${d.url.split('/').pop().slice(0,55).padEnd(55)} -> ${jobId}`);
+    console.log(`  submitted ${(d.sz/1024).toFixed(0).padStart(4)}KB  ${d.url.split('/').pop().slice(0,50).padEnd(50)} -> ${jobId}  ctx:${context ? context.length + 'c' : 'none'}`);
   } catch (e) {
     db.prepare("DELETE FROM pdf_upgrade_queue WHERE url=? AND status NOT IN ('done')").run(d.url);
     console.log(`  FAILED ${d.url.split('/').pop()}: ${e.message}`);

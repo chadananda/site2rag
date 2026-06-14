@@ -33,18 +33,28 @@ export class PipelineClient {
 
   /**
    * Create → upload → process. Returns the SLP job_id.
-   * @param {object} o
-   * @param {string} [o.pdfPath]    local PDF to upload
-   * @param {Buffer} [o.pdfBuffer]  PDF bytes (takes precedence over pdfPath)
-   * @param {string} [o.filename]   original filename hint
-   * @param {object} [o.meta]       extra metadata passed to SLP
+   * @param {object}  o
+   * @param {string} [o.pdfPath]      local PDF to upload
+   * @param {Buffer} [o.pdfBuffer]    PDF bytes (takes precedence over pdfPath)
+   * @param {string} [o.filename]     original filename hint
+   * @param {string} [o.context]      free-text context (provenance/title/author/language) — feeds OCR + metadata
+   * @param {string} [o.quality]      'economy' | 'quality'
+   * @param {string} [o.privacy]      'open' | 'private'
+   * @param {boolean}[o.preserveMeta] keep source PDF metadata instead of regenerating
+   * @param {object} [o.meta]         legacy extra metadata (ignored by the public API; kept for provenance)
    */
-  async submitJob({ pdfPath, pdfBuffer, filename, meta = {} } = {}) {
+  async submitJob({ pdfPath, pdfBuffer, filename, context, quality, privacy, preserveMeta, meta = {} } = {}) {
     const bytes = pdfBuffer ?? (pdfPath ? await readFile(pdfPath) : null);
     if (!bytes) throw new Error('submitJob requires pdfPath or pdfBuffer');
     const name = filename || (pdfPath ? pdfPath.split('/').pop() : 'document.pdf');
 
-    const job = await this._json('POST', '/jobs', { filename: name, meta });
+    const body = { filename: name };
+    if (context != null && context !== '') body.context = String(context).slice(0, 4000);
+    if (quality)            body.quality = quality;
+    if (privacy)            body.privacy = privacy;
+    if (preserveMeta != null) body.preserveMeta = preserveMeta;
+    if (meta && Object.keys(meta).length) body.meta = meta;
+    const job = await this._json('POST', '/jobs', body);
     const jobId = job.job_id;
     if (!jobId) throw new Error(`SLP create returned no job_id: ${JSON.stringify(job).slice(0, 200)}`);
 

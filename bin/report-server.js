@@ -18,6 +18,7 @@ import { generateThumb } from './thumb-worker-pool.js';                       //
 import { runScorePdfs } from '../src/score-pdfs.js';                          // re-score PDFs on demand
 import { maybeQueue } from '../src/score.js';                                 // check score → insert upgrade queue
 import { PipelineClient } from '../src/slp-client.js';                       // SLP HTTP client for job submission
+import { buildJobContext } from '../src/slp-context.js';                      // hosting-page → DeepSeek → SLP `context` block
 
 // Prevent crashes from unhandled DB errors — log and keep serving
 process.on('unhandledRejection', (err) => console.error('[server] unhandled rejection:', err?.message ?? err));
@@ -504,13 +505,20 @@ createServer(async (req, res) => {
       if (pipelineUrl) {
         const pClient = new PipelineClient({ baseUrl: pipelineUrl, apiKey: SLP_API_KEY });
         const firstSubmitScore = quality?.composite_score ?? null;
-        pClient.submitJob({ pdfPath: page.local_path, filename: docUrl.split('/').pop(), meta: { source_url: docUrl } })
-          .then(jobId => {
+        const localPath = page.local_path;
+        (async () => {
+          // Build the SLP context block from the hosting page(s) so OCR + metadata extraction get provenance.
+          let context = null;
+          try {
+            const dbc = safeOpenDb(domain);
+            if (dbc) { try { context = (await buildJobContext({ db: dbc, url: docUrl, apiKey: process.env.DEEPSEEK_API_KEY }))?.context || null; } finally { dbc.close(); } }
+          } catch (e) { console.warn(`[upgrade] context build failed for ${docUrl.split('/').pop()}: ${e.message}`); }
+          try {
+            const jobId = await pClient.submitJob({ pdfPath: localPath, filename: docUrl.split('/').pop(), context, meta: { source_url: docUrl } });
             const db3 = safeOpenDb(domain);
             if (db3) { try { db3.prepare("UPDATE pdf_upgrade_queue SET status='submitted', started_at=?, pipeline_job_id=?, before_score=COALESCE(before_score,?) WHERE url=?").run(new Date().toISOString(), jobId, firstSubmitScore, docUrl); } finally { db3.close(); } }
-            console.log(`[upgrade] submitted ${docUrl.split('/').pop()} → pipeline job ${jobId}`);
-          })
-          .catch(e => {
+            console.log(`[upgrade] submitted ${docUrl.split('/').pop()} → ${jobId} (ctx ${context ? context.length + 'c' : 'none'})`);
+          } catch (e) {
             const msg = e.message || 'submit failed';
             console.error(`[upgrade] pipeline submit failed for ${docUrl.split('/').pop()}: ${msg}`);
             // Transient SLP/network errors aren't real failures — drop the queue row so the
@@ -522,7 +530,8 @@ createServer(async (req, res) => {
                 else db4.prepare("UPDATE pdf_upgrade_queue SET status='failed', error=? WHERE url=?").run(msg.slice(0, 300), docUrl);
               } finally { db4.close(); }
             }
-          });
+          }
+        })();
       }
 
       return json(res, { ok: true, status: 'pending', queued: !existing, method: upgradeMethod, importance: imp, message: existing ? 'Restarted from scratch' : 'Added to front of queue' });
