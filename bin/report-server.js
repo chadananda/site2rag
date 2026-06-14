@@ -797,6 +797,9 @@ if (SLP_API_URL) {
   const sha256 = (s) => createHash('sha256').update(s).digest('hex');
   // SLP page anchors: <!-- pdf:N -->, <!-- pdf:N, pg:LABEL -->, or legacy <!-- page:N -->. Strip for body/title/length checks (kept intact in the saved file).
   const stripAnchors = (s) => (s || '').replace(/<!--\s*(?:pdf|page):[^>]*-->/g, '').replace(/\n{3,}/g, '\n\n').trim();
+  // SLP frontmatter reports language as an ISO code; normalize to the word form used by detectLanguage + existing data.
+  const ISO2LANG = { en:'english', fr:'french', fa:'persian', ar:'arabic', he:'hebrew', es:'spanish', de:'german', it:'italian', pt:'portuguese', nl:'dutch', ru:'russian', tr:'turkish', ja:'japanese', zh:'chinese', ko:'korean' };
+  const normLang = (l) => l ? (ISO2LANG[String(l).toLowerCase()] || l) : l;
   const pollPipelineJobs = async () => {
     let sites;
     try { ({ sites } = loadConfig()); } catch { return; }
@@ -843,15 +846,17 @@ if (SLP_API_URL) {
               const fm = {};
               const fmMatch = mdText.match(/^﻿?---\r?\n([\s\S]*?)\r?\n---/);
               if (fmMatch) for (const ln of fmMatch[1].split(/\r?\n/)) { const mm = ln.match(/^([A-Za-z_]+):\s*(.+?)\s*$/); if (mm) fm[mm[1].toLowerCase()] = mm[2].replace(/^["']|["']$/g, ''); }
-              const aiLang = fm.language || fm.lang || (detectLanguage(mdBody.slice(0, 4000)) || null);
+              const aiLang = normLang(fm.language || fm.lang || (detectLanguage(mdBody.slice(0, 4000)) || null));
               const receiptJson = JSON.stringify({ job, mdBytes: mdText.length, pdfBytes: pdfBuf?.length ?? 0, frontmatter: Object.keys(fm) });
               db.prepare(`UPDATE pdf_upgrade_queue SET status='done', finished_at=?, upgraded_pdf_path=COALESCE(?,upgraded_pdf_path), marker_md_path=?, before_score=COALESCE(before_score,?), after_score=?, score_improvement=?, pages_processed=?, method=?, receipt_json=?, pipeline_job_id=NULL WHERE url=?`)
                 .run(new Date().toISOString(), savedPdf, mdPath, beforeScore, afterScore, gain, job.pages_processed ?? null, 'slp-v1', receiptJson, url);
               // Never overwrite pdf_quality.composite_score (original pre-upgrade score).
               const cols = [], vals = [];
-              if (fm.title)               { cols.push('ai_title=?');    vals.push(String(fm.title).slice(0, 500)); }
-              if (fm.author)              { cols.push('ai_author=?');   vals.push(String(fm.author).slice(0, 300)); }
-              if (fm.summary || fm.subject){ cols.push('ai_summary=?'); vals.push(String(fm.summary || fm.subject).slice(0, 2000)); }
+              if (fm.title)     { cols.push('ai_title=?');  vals.push(String(fm.title).slice(0, 500)); }
+              if (fm.title_en)  { cols.push('title_en=?');  vals.push(String(fm.title_en).slice(0, 500)); }
+              if (fm.author)    { cols.push('ai_author=?'); vals.push(String(fm.author).slice(0, 300)); }
+              const fmDesc = fm.description || fm.summary || fm.subject;
+              if (fmDesc)       { cols.push('ai_summary=?'); vals.push(String(fmDesc).slice(0, 2000)); cols.push('desc_en=?'); vals.push(String(fmDesc).slice(0, 2000)); }
               if (aiLang && aiLang !== 'unknown') { cols.push('ai_language=?'); vals.push(aiLang); }
               if (cols.length){ vals.push(url); db.prepare(`UPDATE pdf_quality SET ${cols.join(', ')} WHERE url=?`).run(...vals); }
               console.log(`[poll] done: ${url.split('/').pop()} pages=${job.pages_processed} mdKB=${(mdText.length/1024).toFixed(1)} lang=${aiLang} fm=[${Object.keys(fm).join(',') || 'none'}]`);
