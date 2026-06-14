@@ -74,7 +74,9 @@ export async function buildJobContext({ db, url, apiKey, model = 'deepseek-v4-fl
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      model, temperature: 0, max_tokens: 320,
+      // deepseek-v4-flash is a reasoning model; disable thinking so the token budget goes to output
+      // (otherwise reasoning_tokens consume max_tokens and content comes back empty/truncated).
+      model, temperature: 0, max_tokens: 400, thinking: { type: 'disabled' },
       messages: [{ role: 'system', content: SYS }, { role: 'user', content: signals.slice(0, 8000) }],
     }),
   });
