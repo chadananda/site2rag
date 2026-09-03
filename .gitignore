@@ -4,3 +4,10 @@ logs/
 websites_mirror/
 websites_md/
 *.sqlite
+
+# --- standard hygiene ---
+tmp/
+.DS_Store
+**/.DS_Store
+Thumbs.db
+*conflicted copy*
