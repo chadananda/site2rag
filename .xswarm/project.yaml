@@ -1,0 +1,25 @@
+# Entry point for orchestrator agents. Points at what this project
+# already has; project-init moved nothing to create this.
+recipe: node-lib
+mode: active          # review | active | reactive | periodic | parked
+program: bahai-history-funnel   # ~/.xswarm/programs/
+
+docs:
+  prd:
+    - docs/boss-capabilities-prd.md
+    - docs/universal_ocr_pipeline_prd.md
+    - prd.md
+  router: CLAUDE.md
+  deploy:
+    - wrangler.toml
+
+audit:
+  targets: {}          # not a website
+  ratchet: false
+
+authority:
+  may: [continue_plan, run_tests, run_audits, fix_from_audit]
+  escalate: [commit, deploy_production, deploy_staging, migrate_data, outward_facing]
+
+gate:
+  visual_paths: []
